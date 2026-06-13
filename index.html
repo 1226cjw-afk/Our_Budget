@@ -130,6 +130,20 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .seg button{flex:1;min-width:80px;padding:13px;border:1.5px solid var(--bd);border-radius:12px;font-weight:700;background:var(--bg2);color:var(--t2)}
 .seg button.on{background:var(--acg);border-color:var(--ac);color:var(--ac)}
 .submit{width:100%;padding:17px;background:linear-gradient(135deg,var(--ac2),var(--ac));color:#fff;border-radius:14px;font-size:1.05rem;font-weight:900;margin-top:8px}
+
+/* 마스터 데이터 관리 */
+.m-section{background:var(--card);border:1px solid var(--bd);border-radius:14px;padding:14px;margin-bottom:12px}
+.m-title{font-size:.95rem;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.m-list{margin-bottom:12px}
+.m-item{display:flex;justify-content:space-between;align-items:center;padding:9px 4px;border-bottom:1px solid var(--bd)}
+.m-item:last-child{border:none}
+.m-nm{font-size:.92rem;display:flex;align-items:center;gap:8px}
+.m-del{color:var(--r);font-size:.8rem;font-weight:700;padding:4px 10px;background:var(--rb);border-radius:6px;border:1px solid rgba(248,113,113,.3)}
+.m-empty{font-size:.84rem;color:var(--t3);padding:8px 0}
+.m-add{display:flex;gap:8px}
+.m-add input{flex:1;padding:10px 12px;border:1.5px solid var(--bd);border-radius:10px;background:var(--bg2);color:var(--t1);font-family:inherit;font-size:.9rem;outline:none}
+.m-add input:focus{border-color:var(--ac)}
+.m-add button{padding:10px 16px;border-radius:10px;background:var(--acg);color:var(--ac);font-weight:700;font-size:.9rem;border:1px solid var(--ac);white-space:nowrap}
 </style>
 </head>
 <body>
@@ -157,8 +171,8 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
       <div class="frow"><label class="flb">날짜</label><input class="inp" type="date" id="fDate"></div>
       <div class="frow"><label class="flb">금액</label><input class="inp" id="fAmount" inputmode="numeric" placeholder="0"></div>
       <div class="frow"><label class="flb">카테고리</label><input class="inp" id="fCategory" list="catList" placeholder="식비, 생활비 등"><datalist id="catList"></datalist></div>
-      <div class="frow"><label class="flb">결제수단</label><input class="inp" id="fMethod" placeholder="신한카드 등"></div>
-      <div class="frow"><label class="flb">계좌</label><input class="inp" id="fAccount" placeholder="우리은행 등"></div>
+      <div class="frow"><label class="flb">결제수단</label><input class="inp" id="fMethod" list="methodList" placeholder="신한카드 등"><datalist id="methodList"></datalist></div>
+      <div class="frow"><label class="flb">계좌</label><input class="inp" id="fAccount" list="accountList" placeholder="우리은행 등"><datalist id="accountList"></datalist></div>
       <div class="frow"><label class="flb">세부내역</label><input class="inp" id="fMemo" placeholder="메모 (선택)"></div>
       <button class="submit" id="saveBtn" onclick="saveEntry()">저장하기</button>
     </div>
@@ -227,7 +241,7 @@ async function saveLimit(cat){
 }
 
 /* ============================================================ 네비/필터 ============================================================ */
-const TABS = [["list","📋","내역"],["cat","📊","분류"],["limit","🎯","한도"],["analysis","📈","분석"],["acct","🏦","계좌"]];
+const TABS = [["list","📋","내역"],["cat","📊","분류"],["limit","🎯","한도"],["analysis","📈","분석"],["acct","🏦","계좌"],["master","⚙️","설정"]];
 function buildNav(){ document.getElementById("nav").innerHTML = TABS.map(([k,ic,lb])=>
   `<button class="tab${k===tab?' on':''}" onclick="goTab('${k}')"><span class="tab-ic">${ic}</span>${lb}</button>`).join(""); }
 function goTab(k){ tab=k; buildNav(); render(); }
@@ -245,6 +259,7 @@ function render(){
   else if(tab==="limit") m.innerHTML = viewLimit();
   else if(tab==="analysis"){ m.innerHTML = viewAnalysis(); drawChart(); }
   else if(tab==="acct") m.innerHTML = viewAccount();
+  else if(tab==="master") m.innerHTML = viewMaster();
 }
 function filterBar(){
   const scopes = [["current",`이번 주기 (${billingPeriod().label})`],["all","전체"]];
@@ -367,7 +382,39 @@ function viewAccount(){
 function renderMemberSeg(){ document.getElementById("memberSeg").innerHTML = MEMBERS.map(m=>`<button class="${m===memberVal?'on':''}" onclick="setMember('${m}')">${m}</button>`).join(""); }
 function setMember(m){ memberVal=m; renderMemberSeg(); }
 function setType(t){ typeVal=t; document.getElementById("tgExp").className="tg"+(t==="지출"?" tg-e":""); document.getElementById("tgInc").className="tg"+(t==="입금"?" tg-i":""); }
-function refreshCatList(){ const cats=Array.from(new Set([...Object.keys(LIMITS),...ROWS.map(r=>r.category),"월급","이자","기타"])); document.getElementById("catList").innerHTML=cats.map(c=>`<option value="${c}">`).join(""); }
+/* ============================================================ 마스터 데이터 ============================================================ */
+const MASTER_KEYS = {categories:"카테고리", accounts:"계좌", methods:"결제수단"};
+const DEFAULT_CATS = ["식비","생활비","교통","의료","쇼핑","문화","교육","통신","보험","고정비","데이트","월급","이자","기타"];
+function getMaster(key){ return JSON.parse(localStorage.getItem("master_"+key)||"null") || (key==="categories"?[...DEFAULT_CATS]:[]); }
+function setMaster(key,arr){ localStorage.setItem("master_"+key,JSON.stringify(arr)); }
+function addMaster(key){
+  const el=document.getElementById("m_input_"+key), val=el.value.trim(); if(!val) return;
+  const arr=getMaster(key); if(!arr.includes(val)) arr.push(val);
+  setMaster(key,arr); el.value=""; render();
+}
+function delMaster(key,val){
+  setMaster(key, getMaster(key).filter(v=>v!==val)); render();
+}
+function viewMaster(){
+  let h=`<div class="sec" style="padding-top:14px">`;
+  Object.entries(MASTER_KEYS).forEach(([key,label])=>{
+    const items=getMaster(key);
+    const icons={categories:"🏷️",accounts:"🏦",methods:"💳"};
+    h+=`<div class="m-section"><div class="m-title">${icons[key]} ${label} 관리</div><div class="m-list">`;
+    if(items.length) items.forEach(v=>h+=`<div class="m-item"><span class="m-nm">${v}</span><button class="m-del" onclick="delMaster('${key}','${v}')">삭제</button></div>`);
+    else h+=`<div class="m-empty">항목이 없어요. 아래에서 추가해주세요.</div>`;
+    h+=`</div><div class="m-add"><input id="m_input_${key}" placeholder="${label} 추가" onkeydown="if(event.key==='Enter')addMaster('${key}')"><button onclick="addMaster('${key}')">추가</button></div></div>`;
+  });
+  return h+`</div>`;
+}
+function refreshCatList(){
+  const cats=Array.from(new Set([...getMaster("categories"),...Object.keys(LIMITS),...ROWS.map(r=>r.category)]));
+  document.getElementById("catList").innerHTML=cats.map(c=>`<option value="${c}">`).join("");
+  const methods=Array.from(new Set([...getMaster("methods"),...ROWS.map(r=>r.method).filter(Boolean)]));
+  document.getElementById("methodList").innerHTML=methods.map(m=>`<option value="${m}">`).join("");
+  const accounts=Array.from(new Set([...getMaster("accounts"),...ROWS.map(r=>r.account).filter(Boolean)]));
+  document.getElementById("accountList").innerHTML=accounts.map(a=>`<option value="${a}">`).join("");
+}
 function openSheet(){ editId=null; document.getElementById("sheetTitle").textContent="내역 추가"; document.getElementById("saveBtn").textContent="저장하기";
   ["fAmount","fCategory","fMethod","fAccount","fMemo"].forEach(id=>document.getElementById(id).value="");
   const t=new Date(); document.getElementById("fDate").value=`${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,"0")}-${String(t.getDate()).padStart(2,"0")}`;
