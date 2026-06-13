@@ -27,17 +27,6 @@ body{font-family:'Noto Sans KR',-apple-system,sans-serif;background:var(--bg);co
 .app{max-width:480px;margin:0 auto;min-height:100vh;position:relative;padding-bottom:100px}
 button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
 
-/* 로그인 */
-.login{max-width:380px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;justify-content:center;padding:24px}
-.login .logo{width:64px;height:64px;background:linear-gradient(135deg,var(--ac2),var(--ac));border-radius:18px;display:flex;align-items:center;justify-content:center;font-size:32px;margin-bottom:20px}
-.login h1{font-size:1.5rem;font-weight:900;margin-bottom:8px}
-.login p{color:var(--t2);font-size:.92rem;margin-bottom:24px}
-.login input{width:100%;padding:16px;border:1.5px solid var(--bd);border-radius:14px;font-size:1rem;color:var(--t1);background:var(--bg2);outline:none;font-family:inherit;margin-bottom:12px}
-.login input:focus{border-color:var(--ac)}
-.login button{width:100%;padding:16px;background:linear-gradient(135deg,var(--ac2),var(--ac));color:#fff;border-radius:14px;font-size:1.05rem;font-weight:900}
-.login .msg{margin-top:16px;font-size:.9rem;color:var(--g);text-align:center;line-height:1.7}
-.login .warn{color:var(--amber)}
-
 /* 헤더/네비 */
 .hd{display:flex;align-items:center;justify-content:space-between;padding:16px 18px 12px;background:var(--bg2);border-bottom:1px solid var(--bd);position:sticky;top:0;z-index:20}
 .hd-l{display:flex;align-items:center;gap:10px}
@@ -145,21 +134,10 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 </head>
 <body>
 
-<!-- 로그인 화면 -->
-<div class="login" id="loginView" style="display:none">
-  <div class="logo">💰</div>
-  <h1>우리집 가계부</h1>
-  <p>두 분이 함께 쓰는 공유 가계부예요.<br>같은 이메일로 로그인하면 같은 가계부가 열립니다.</p>
-  <input type="email" id="loginEmail" placeholder="이메일 주소" autocomplete="email">
-  <button onclick="sendMagicLink()">로그인 링크 받기</button>
-  <div class="msg" id="loginMsg"></div>
-</div>
-
 <!-- 메인 앱 -->
-<div class="app" id="appView" style="display:none">
+<div class="app" id="appView">
   <header class="hd">
     <div class="hd-l"><div class="logo-s">💰</div><div class="hd-t">우리집 가계부</div></div>
-    <button class="logout" onclick="logout()">로그아웃</button>
   </header>
   <nav class="nav" id="nav"></nav>
   <main id="main"><div class="spin"></div></main>
@@ -203,33 +181,13 @@ function billingPeriod(ref){ ref=ref||new Date(); const d=ref.getDate(),m=ref.ge
 function recentPeriods(n){ const cur=billingPeriod(); return Array.from({length:n},(_,i)=>billingPeriod(new Date(cur.start.getFullYear(),cur.start.getMonth()-(n-1-i),25))); }
 const inPeriod = (s,p)=>{ const d=new Date(s); return d>=p.start&&d<=p.end; };
 
-/* ============================================================ 인증 ============================================================ */
+/* ============================================================ 초기화 ============================================================ */
 window.onload = async () => {
-  if(!SUPABASE_URL.startsWith("https://") || SUPABASE_URL.includes("여기에")){
-    document.getElementById("loginView").style.display="flex";
-    document.getElementById("loginMsg").innerHTML="<span class='warn'>설정이 필요해요. index.html 상단의 SUPABASE_URL / SUPABASE_ANON 값을 본인 것으로 바꿔주세요.</span>";
-    return;
-  }
   sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
-  const { data:{ session } } = await sb.auth.getSession();
-  session ? startApp() : (document.getElementById("loginView").style.display="flex");
-};
-async function sendMagicLink(){
-  const email = document.getElementById("loginEmail").value.trim();
-  if(!email) return;
-  const { error } = await sb.auth.signInWithOtp({ email, options:{ emailRedirectTo: location.href } });
-  document.getElementById("loginMsg").innerHTML = error ? "<span class='warn'>"+error.message+"</span>"
-    : "메일함을 확인하세요. 로그인 링크를 보냈어요.<br>링크를 누르면 이 화면으로 돌아옵니다.";
-}
-async function logout(){ await sb.auth.signOut(); location.reload(); }
-
-async function startApp(){
-  document.getElementById("loginView").style.display="none";
-  document.getElementById("appView").style.display="block";
   buildNav(); renderMemberSeg();
   await loadAll();
   render();
-}
+};
 
 /* ============================================================ 데이터 로드/저장 ============================================================ */
 async function loadAll(){
