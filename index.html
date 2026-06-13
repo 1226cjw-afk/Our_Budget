@@ -491,7 +491,7 @@ async function delEntry(id){
 }
 async function saveLimit(cat){
   const v = Number(document.getElementById("lim_"+cat).value.replace(/,/g,""));
-  await sb.from("category_limits").upsert({category:cat, monthly_limit:v},{onConflict:"user_id,category"});
+  await sb.from("category_limits").upsert({category:cat, monthly_limit:v},{onConflict:"category"});
   await loadAll(); render(); toast("한도 저장");
 }
 
