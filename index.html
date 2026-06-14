@@ -557,7 +557,7 @@ let MEMBERS       = [];     // DB에서 동적 로드
 let ROWS          = [];
 let LIMITS        = {};     // {멤버: {카테고리: 금액}}
 let MASTER        = {};     // {멤버: {categories, methods, accounts}}
-let BILLING_START = 25;     // 결제 주기 시작일 (app_settings에서 로드)
+let BILLING_STARTS = {};    // {멤버: 시작일} — app_settings에서 로드
 
 let tab          = "list";
 let scope        = "current";
@@ -577,17 +577,20 @@ const toast    = m => { const t=document.getElementById("toast"); t.textContent=
 const empty    = (ic,msg) => `<div class="empty"><div class="e-ic">${ic}</div><p>${msg.replace(/\n/g,"<br>")}</p></div>`;
 
 /* ── 결제 주기 ── */
-function billingPeriod(ref){
+function billingPeriod(member, ref){
+  const sd=(member&&BILLING_STARTS[member])||25;
   ref=ref||new Date(); const d=ref.getDate(),m=ref.getMonth(),y=ref.getFullYear();
-  const sd=BILLING_START, ed=sd>1?sd-1:new Date(y,m+1,0).getDate();
+  const ed=sd>1?sd-1:new Date(y,m+1,0).getDate();
   let sy,sm,ey,em;
   if(d>=sd){sy=y;sm=m;ey=m===11?y+1:y;em=m===11?0:m+1;}
   else{sy=m===0?y-1:y;sm=m===0?11:m-1;ey=y;em=m;}
   return {start:new Date(sy,sm,sd),end:new Date(ey,em,ed,23,59,59),label:`${sm+1}/${sd} ~ ${em+1}/${ed}`,key:`${sy}-${String(sm+1).padStart(2,"0")}`};
 }
-function recentPeriods(n){
-  const cur=billingPeriod();
-  return Array.from({length:n},(_,i)=>billingPeriod(new Date(cur.start.getFullYear(),cur.start.getMonth()-(n-1-i),BILLING_START)));
+function recentPeriods(n, member){
+  member=member||MEMBERS[0];
+  const sd=(member&&BILLING_STARTS[member])||25;
+  const cur=billingPeriod(member);
+  return Array.from({length:n},(_,i)=>billingPeriod(member,new Date(cur.start.getFullYear(),cur.start.getMonth()-(n-1-i),sd)));
 }
 const inPeriod = (s,p) => { const d=new Date(s.length===10?s+"T12:00:00":s); return d>=p.start&&d<=p.end; };
 
@@ -640,12 +643,17 @@ async function loadAll(){
   });
   MEMBERS.forEach(m => { if(!MASTER[m].categories.length) MASTER[m].categories=[...DEFAULT_CATS]; });
 
-  // app_settings
-  if(!cfg.error)(cfg.data||[]).forEach(row => {
-    if(row.key==='billing_start_day'){
-      const v=Number(row.value); if(v>=1&&v<=28) BILLING_START=v;
+  // app_settings: 전역 fallback → 멤버별 override
+  BILLING_STARTS={};
+  let _globalBS=25;
+  if(!cfg.error)(cfg.data||[]).forEach(row=>{
+    if(row.key==='billing_start_day'){const v=Number(row.value);if(v>=1&&v<=28)_globalBS=v;}
+    if(row.key.startsWith('billing_start_')){
+      const mem=row.key.slice('billing_start_'.length);
+      if(MEMBERS.includes(mem)){const v=Number(row.value);if(v>=1&&v<=28)BILLING_STARTS[mem]=v;}
     }
   });
+  MEMBERS.forEach(m=>{if(!(m in BILLING_STARTS))BILLING_STARTS[m]=_globalBS;});
 }
 
 /* ── 거래 저장/삭제 ── */
@@ -707,16 +715,16 @@ async function delMember(name){
   await loadAll(); render();
 }
 
-/* ── 결제 주기 저장 ── */
-async function saveBillingStart(){
-  const raw=Number(document.getElementById("m_billing_start").value);
+/* ── 결제 주기 저장 (멤버별) ── */
+async function saveBillingStart(member){
+  const raw=Number(document.getElementById(`m_billing_start_${member}`).value);
   const v=Math.max(1,Math.min(28,raw||25));
-  const res=await sb.from("app_settings").upsert({key:"billing_start_day",value:String(v)},{onConflict:"key"});
+  const res=await sb.from("app_settings").upsert({key:`billing_start_${member}`,value:String(v)},{onConflict:"key"});
   if(res.error){ toast("오류: "+res.error.message); return; }
-  BILLING_START=v;
-  await loadAll(); render();
+  BILLING_STARTS[member]=v;
+  render();
   const ed=v>1?v-1:31;
-  toast(`결제 주기: 매월 ${v}일 ~ 다음달 ${ed}일`);
+  toast(`${member}의 주기: 매월 ${v}일 ~ 다음달 ${ed}일`);
 }
 
 /* ── 마스터 데이터 추가/삭제 ── */
@@ -748,7 +756,11 @@ function setLimitMember(m){ limitMember=m; render(); }
 function setMasterMember(m){ masterMember=m; render(); }
 
 function myRows(){ return memberFilter==="전체" ? ROWS : ROWS.filter(r=>r.member===memberFilter); }
-function scoped(){ const cur=billingPeriod(); return scope==="current" ? myRows().filter(r=>inPeriod(r.date,cur)) : myRows(); }
+function scoped(){
+  if(scope!=="current") return myRows();
+  if(memberFilter!=="전체") return myRows().filter(r=>inPeriod(r.date,billingPeriod(memberFilter)));
+  return myRows().filter(r=>inPeriod(r.date,billingPeriod(r.member)));
+}
 
 /* ── 렌더 ── */
 function render(){
@@ -783,7 +795,8 @@ async function retryLoad(){
 
 /* ── 필터 바 (내역·분류·분석 공통: 주기 + 멤버) ── */
 function filterBar(){
-  const scopes=[["current",`이번 주기 (${billingPeriod().label})`],["all","전체"]];
+  const _pLabel=memberFilter!=="전체"?billingPeriod(memberFilter).label:"각자 기준";
+  const scopes=[["current",`이번 주기 (${_pLabel})`],["all","전체"]];
   const mems=["전체",...MEMBERS];
   return `<div class="filter">${scopes.map(([k,lb])=>`<span class="pill${scope===k?' on':''}" onclick="setScope('${k}')">${lb}</span>`).join("")}</div>
     <div class="filter">${mems.map(mm=>`<span class="pill${memberFilter===mm?' on':''}" onclick="setMemberFilter('${mm}')">${mm}</span>`).join("")}</div>`;
@@ -844,7 +857,8 @@ function viewCategory(){
   let h=`<div class="sec">`;
   Object.entries(sum).sort((a,b)=>b[1].exp-a[1].exp).forEach(([c,v])=>h+=catCard(c,v,totExp?Math.round(v.exp/totExp*100):0));
   if(scope==="all"){
-    [...recentPeriods(3)].reverse().forEach(p=>{
+    const _catMem=memberFilter!=="전체"?memberFilter:MEMBERS[0];
+    [...recentPeriods(3,_catMem)].reverse().forEach(p=>{
       const ma=aggCat(myRows().filter(r=>inPeriod(r.date,p)));
       if(!Object.keys(ma).length) return;
       h+=`<div class="sec-t">📅 ${p.label}</div>`;
@@ -857,7 +871,7 @@ function viewCategory(){
 /* ── 한도 탭 (멤버별) ── */
 function viewLimit(){
   if(!limitMember) return `<div class="sec">${empty("👥","설정에서 멤버를 추가해주세요.")}</div>`;
-  const cur=billingPeriod();
+  const cur=billingPeriod(limitMember);
   const memberLimits=LIMITS[limitMember]||{};
   const spent={};
   ROWS.filter(r=>r.member===limitMember&&r.type==="지출"&&inPeriod(r.date,cur))
@@ -899,7 +913,8 @@ function viewLimit(){
 /* ── 분석 탭 ── */
 let chartData=[];
 function viewAnalysis(){
-  const periods=recentPeriods(3);
+  const _anMem=memberFilter!=="전체"?memberFilter:MEMBERS[0];
+  const periods=recentPeriods(3,_anMem);
   chartData=periods.map(p=>{
     const pr=myRows().filter(r=>inPeriod(r.date,p));
     return {name:p.label.split(" ")[0], inc:pr.filter(r=>r.type==="입금").reduce((s,r)=>s+r.amount,0), exp:pr.filter(r=>r.type!=="입금").reduce((s,r)=>s+r.amount,0)};
@@ -999,17 +1014,18 @@ function viewMaster(){
     <span style="font-size:.87rem;color:var(--t2)"><b style="color:var(--ac)">${masterMember}</b>의 항목을 관리합니다</span>
   </div>`;
 
-  // 결제 주기 설정
-  const ed=BILLING_START>1?BILLING_START-1:31;
+  // 결제 주기 설정 (멤버별)
+  const _bs=BILLING_STARTS[masterMember]||25;
+  const _ed=_bs>1?_bs-1:31;
   h+=`<div class="m-section">
     <div class="m-title">📅 결제 주기 설정</div>
     <div style="font-size:.82rem;color:var(--t2);margin-bottom:14px;line-height:1.8">
-      현재: 매월 <b style="color:var(--ac)">${BILLING_START}일</b> ~ 다음달 <b style="color:var(--ac)">${ed}일</b>
+      <b style="color:var(--ac)">${masterMember}</b> 현재: 매월 <b style="color:var(--ac)">${_bs}일</b> ~ 다음달 <b style="color:var(--ac)">${_ed}일</b>
     </div>
     <div class="m-add">
-      <input id="m_billing_start" type="number" min="1" max="28" inputmode="numeric"
-        value="${BILLING_START}" placeholder="1~28" style="max-width:90px;text-align:center">
-      <button onclick="saveBillingStart()">일로 변경</button>
+      <input id="m_billing_start_${masterMember}" type="number" min="1" max="28" inputmode="numeric"
+        value="${_bs}" placeholder="1~28" style="max-width:90px;text-align:center">
+      <button onclick="saveBillingStart('${masterMember}')">일로 변경</button>
     </div>
     <div style="font-size:.72rem;color:var(--t3);margin-top:10px">※ 1~28일 입력 (2월 최소일수 기준)</div>
   </div>`;
