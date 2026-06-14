@@ -11,7 +11,6 @@
 <script>
 const SUPABASE_URL  = "https://hqyvkyflakhuvethrstw.supabase.co";
 const SUPABASE_ANON = "sb_publishable_phZGH7odPTBoB4z8FQF_4A_mO2ltQ6J";
-const MEMBERS       = ["정우", "지현"];
 </script>
 <style>
 @import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css');
@@ -481,148 +480,245 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 </div>
 
 <script>
+/* ── 상수 ── */
+const DEFAULT_CATS = ["식비","생활비","교통","의료","쇼핑","문화","교육","통신","보험","고정비","데이트","월급","이자","기타"];
+const MASTER_KEYS  = {categories:"카테고리", methods:"결제수단", accounts:"계좌"};
+const CAT_ICON     = {생활비:"🛒",고정비:"🏠",월급:"💵",이자:"📈",데이트:"❤️",식비:"🍽️",교통:"🚌",의료:"💊",쇼핑:"👜",문화:"🎬",교육:"📚",통신:"📱",보험:"🛡️",기타:"📌"};
+const TABS         = [["list","📋","내역"],["cat","📊","분류"],["limit","🎯","한도"],["analysis","📈","분석"],["acct","🏦","계좌"],["master","⚙️","설정"]];
+
 /* ── 상태 ── */
-let sb, ROWS = [], LIMITS = {}, MASTER = {}, masterMember = MEMBERS[0], tab = "list", scope = "current", memberFilter = "전체", typeVal = "지출", memberVal = MEMBERS[0], editId = null, loadError = null;
-const won = n => Number(n||0).toLocaleString("ko-KR")+"원";
+let sb;
+let MEMBERS = [];           // DB에서 동적 로드
+let ROWS    = [];
+let LIMITS  = {};           // {멤버: {카테고리: 금액}}
+let MASTER  = {};           // {멤버: {categories, methods, accounts}}
+
+let tab          = "list";
+let scope        = "current";
+let memberFilter = "전체";  // 내역·분류·계좌 탭 공통 필터
+let limitMember  = null;    // 한도 탭 전용
+let masterMember = null;    // 설정 탭 전용
+let typeVal      = "지출";
+let memberVal    = null;    // 입력 시트
+let editId       = null;
+let loadError    = null;
+
+/* ── 유틸 ── */
+const won      = n => Number(n||0).toLocaleString("ko-KR")+"원";
 const wonShort = n => n>=10000 ? (n/10000).toFixed(n%10000?1:0)+"만" : Number(n).toLocaleString("ko-KR");
-const CAT_ICON = {생활비:"🛒",고정비:"🏠",월급:"💵",이자:"📈",데이트:"❤️",식비:"🍽️",교통:"🚌",의료:"💊",쇼핑:"👜",문화:"🎬",교육:"📚",통신:"📱",보험:"🛡️",기타:"📌"};
-const icon = c => CAT_ICON[c] || "💳";
-const toast = m => { const t=document.getElementById("toast"); t.textContent=m; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),1800); };
+const icon     = c => CAT_ICON[c] || "💳";
+const toast    = m => { const t=document.getElementById("toast"); t.textContent=m; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),1800); };
+const empty    = (ic,msg) => `<div class="empty"><div class="e-ic">${ic}</div><p>${msg.replace(/\n/g,"<br>")}</p></div>`;
 
 /* ── 결제 주기 ── */
-function billingPeriod(ref){ ref=ref||new Date(); const d=ref.getDate(),m=ref.getMonth(),y=ref.getFullYear(); let sy,sm,ey,em;
-  if(d>=25){sy=y;sm=m;ey=m===11?y+1:y;em=m===11?0:m+1;}else{sy=m===0?y-1:y;sm=m===0?11:m-1;ey=y;em=m;}
-  return {start:new Date(sy,sm,25),end:new Date(ey,em,24,23,59,59),label:`${sm+1}/25 ~ ${em+1}/24`,key:`${sy}-${String(sm+1).padStart(2,"0")}`}; }
-function recentPeriods(n){ const cur=billingPeriod(); return Array.from({length:n},(_,i)=>billingPeriod(new Date(cur.start.getFullYear(),cur.start.getMonth()-(n-1-i),25))); }
-const inPeriod = (s,p)=>{ const d=new Date(s.length===10?s+"T12:00:00":s); return d>=p.start&&d<=p.end; };
+function billingPeriod(ref){
+  ref=ref||new Date(); const d=ref.getDate(),m=ref.getMonth(),y=ref.getFullYear(); let sy,sm,ey,em;
+  if(d>=25){sy=y;sm=m;ey=m===11?y+1:y;em=m===11?0:m+1;}
+  else{sy=m===0?y-1:y;sm=m===0?11:m-1;ey=y;em=m;}
+  return {start:new Date(sy,sm,25),end:new Date(ey,em,24,23,59,59),label:`${sm+1}/25 ~ ${em+1}/24`,key:`${sy}-${String(sm+1).padStart(2,"0")}`};
+}
+function recentPeriods(n){
+  const cur=billingPeriod();
+  return Array.from({length:n},(_,i)=>billingPeriod(new Date(cur.start.getFullYear(),cur.start.getMonth()-(n-1-i),25)));
+}
+const inPeriod = (s,p) => { const d=new Date(s.length===10?s+"T12:00:00":s); return d>=p.start&&d<=p.end; };
 
 /* ── 초기화 ── */
 window.onload = async () => {
   sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
-  buildNav(); renderMemberSeg();
-  try { await loadAll(); } catch(e) { loadError = e.message; console.error("초기화 오류:", e); }
+  buildNav();
+  try { await loadAll(); } catch(e) { loadError=e.message; console.error("초기화 오류:",e); }
+  renderMemberSeg();
   render();
 };
 
-/* ── 데이터 로드/저장 ── */
+/* ── 데이터 로드 ── */
 async function loadAll(){
   loadError = null;
-  const [tx, lim, mst] = await Promise.all([
+  const [mem, tx, lim, mst] = await Promise.all([
+    sb.from("members").select("name").order("id"),
     sb.from("transactions").select("*").order("date",{ascending:false}),
     sb.from("category_limits").select("*"),
     sb.from("master_data").select("*")
   ]);
-  if(tx.error){ console.error("거래내역 로드 오류:", tx.error); throw new Error(tx.error.message || "거래내역을 불러오지 못했습니다"); }
-  ROWS = tx.data || [];
+
+  if(mem.error) throw new Error("멤버 로드 오류: "+mem.error.message);
+  MEMBERS = (mem.data||[]).map(m=>m.name);
+
+  // 탭별 선택 멤버를 MEMBERS 목록에 맞게 보정
+  if(!MEMBERS.includes(limitMember))  limitMember  = MEMBERS[0]||null;
+  if(!MEMBERS.includes(masterMember)) masterMember = MEMBERS[0]||null;
+  if(!MEMBERS.includes(memberVal))    memberVal    = MEMBERS[0]||null;
+
+  if(tx.error) throw new Error(tx.error.message||"거래내역 로드 오류");
+  ROWS = tx.data||[];
+
+  // LIMITS: {멤버: {카테고리: 금액}}
   LIMITS = {};
-  if(!lim.error) (lim.data||[]).forEach(l => LIMITS[l.category] = Number(l.monthly_limit));
+  MEMBERS.forEach(m => LIMITS[m] = {});
+  if(!lim.error)(lim.data||[]).forEach(l => {
+    if(!LIMITS[l.member]) LIMITS[l.member] = {};
+    LIMITS[l.member][l.category] = Number(l.monthly_limit);
+  });
+
+  // MASTER: {멤버: {categories, methods, accounts}}
   MASTER = {};
-  MEMBERS.forEach(m => MASTER[m] = {categories:[], methods:[], accounts:[]});
-  if(!mst.error){
-    (mst.data||[]).forEach(row => {
-      if(!MASTER[row.member]) MASTER[row.member] = {categories:[], methods:[], accounts:[]};
-      const key = row.type==='category'?'categories': row.type==='method'?'methods':'accounts';
-      MASTER[row.member][key].push(row.value);
-    });
-  }
-  MEMBERS.forEach(m => { if(!MASTER[m].categories.length) MASTER[m].categories = [...DEFAULT_CATS]; });
+  MEMBERS.forEach(m => MASTER[m] = {categories:[],methods:[],accounts:[]});
+  if(!mst.error)(mst.data||[]).forEach(row => {
+    if(!MASTER[row.member]) MASTER[row.member] = {categories:[],methods:[],accounts:[]};
+    const key = row.type==='category'?'categories':row.type==='method'?'methods':'accounts';
+    MASTER[row.member][key].push(row.value);
+  });
+  MEMBERS.forEach(m => { if(!MASTER[m].categories.length) MASTER[m].categories=[...DEFAULT_CATS]; });
 }
 
+/* ── 거래 저장/삭제 ── */
 async function saveEntry(){
   const amount = Number(document.getElementById("fAmount").value.replace(/,/g,""));
   const row = {
-    date: document.getElementById("fDate").value, amount, type: typeVal, member: memberVal,
-    category: document.getElementById("fCategory").value.trim(),
-    method: document.getElementById("fMethod").value.trim(),
-    account: document.getElementById("fAccount").value.trim(),
-    memo: document.getElementById("fMemo").value.trim()
+    date:     document.getElementById("fDate").value,
+    amount,
+    type:     typeVal,
+    member:   memberVal,
+    category: document.getElementById("fCategory").value,
+    method:   document.getElementById("fMethod").value,
+    account:  document.getElementById("fAccount").value,
+    memo:     document.getElementById("fMemo").value.trim()
   };
-  if(!row.amount || !row.category || !row.account){ toast("금액·카테고리·계좌는 필수예요"); return; }
-  const btn = document.getElementById("saveBtn");
-  btn.textContent = "저장 중..."; btn.disabled = true;
+  if(!row.amount||!row.category||!row.account){ toast("금액·카테고리·계좌는 필수예요"); return; }
+  const btn=document.getElementById("saveBtn");
+  btn.textContent="저장 중..."; btn.disabled=true;
   try {
-    const res = editId ? await sb.from("transactions").update(row).eq("id",editId)
-                       : await sb.from("transactions").insert(row);
-    if(res.error){ console.error("저장 오류:", res.error); toast("저장 오류: " + res.error.message); return; }
+    const res = editId
+      ? await sb.from("transactions").update(row).eq("id",editId)
+      : await sb.from("transactions").insert(row);
+    if(res.error){ toast("저장 오류: "+res.error.message); return; }
     closeSheet(); await loadAll(); render();
-    toast(editId ? "수정 완료" : "저장 완료");
-  } catch(e) { console.error("저장 예외:", e); toast("오류: " + e.message); }
-  finally { btn.textContent = editId ? "수정하기" : "저장하기"; btn.disabled = false; }
+    toast(editId?"수정 완료":"저장 완료");
+  } catch(e){ toast("오류: "+e.message); }
+  finally{ btn.textContent=editId?"수정하기":"저장하기"; btn.disabled=false; }
 }
 
 async function delEntry(id){
   if(!confirm("삭제하시겠습니까?")) return;
-  const res = await sb.from("transactions").delete().eq("id",id);
-  if(res.error){ toast("삭제 오류: " + res.error.message); return; }
+  const res=await sb.from("transactions").delete().eq("id",id);
+  if(res.error){ toast("삭제 오류: "+res.error.message); return; }
   await loadAll(); render(); toast("삭제 완료");
 }
 
-async function saveLimit(cat){
-  const v = Number(document.getElementById("lim_"+cat).value.replace(/,/g,""));
-  const res = await sb.from("category_limits").upsert({category:cat, monthly_limit:v},{onConflict:"category"});
-  if(res.error){ toast("한도 저장 오류: " + res.error.message); return; }
+/* ── 한도 저장 (멤버별) ── */
+async function saveLimit(member, cat){
+  const v = Number(document.getElementById(`lim_${member}_${cat}`).value.replace(/,/g,""));
+  const res = await sb.from("category_limits").upsert(
+    {member, category:cat, monthly_limit:v},
+    {onConflict:"member,category"}
+  );
+  if(res.error){ toast("한도 저장 오류: "+res.error.message); return; }
   await loadAll(); render(); toast("한도 저장");
 }
 
-/* ── 네비/필터 ── */
-const TABS = [["list","📋","내역"],["cat","📊","분류"],["limit","🎯","한도"],["analysis","📈","분석"],["acct","🏦","계좌"],["master","⚙️","설정"]];
-function buildNav(){ document.getElementById("nav").innerHTML = TABS.map(([k,ic,lb])=>
-  `<button class="tab${k===tab?' on':''}" onclick="goTab('${k}')"><span class="tab-ic">${ic}</span>${lb}</button>`).join(""); }
+/* ── 멤버 추가/삭제 (설정 탭) ── */
+async function addMember(){
+  const el=document.getElementById("m_input_member"), val=el.value.trim(); if(!val) return;
+  const res=await sb.from("members").insert({name:val});
+  if(res.error){ toast("오류: "+res.error.message); return; }
+  el.value=""; await loadAll(); render();
+}
+async function delMember(name){
+  if(!confirm(`'${name}' 멤버를 삭제하시겠습니까?\n해당 멤버의 마스터 데이터와 한도 설정이 함께 삭제됩니다.`)) return;
+  const res=await sb.from("members").delete().eq("name",name);
+  if(res.error){ toast("오류: "+res.error.message); return; }
+  await loadAll(); render();
+}
+
+/* ── 마스터 데이터 추가/삭제 ── */
+async function addMaster(key){
+  const el=document.getElementById("m_input_"+key), val=el.value.trim(); if(!val||!masterMember) return;
+  const type=key==='categories'?'category':key==='methods'?'method':'account';
+  const res=await sb.from("master_data").upsert({member:masterMember,type,value:val},{onConflict:'member,type,value'});
+  if(res.error){ toast("오류: "+res.error.message); return; }
+  el.value=""; await loadAll(); render();
+}
+async function delMaster(key,val){
+  if(!masterMember) return;
+  const type=key==='categories'?'category':key==='methods'?'method':'account';
+  const res=await sb.from("master_data").delete().eq("member",masterMember).eq("type",type).eq("value",val);
+  if(res.error){ toast("오류: "+res.error.message); return; }
+  await loadAll(); render();
+}
+
+/* ── 네비 / 필터 ── */
+function buildNav(){
+  document.getElementById("nav").innerHTML = TABS.map(([k,ic,lb])=>
+    `<button class="tab${k===tab?' on':''}" onclick="goTab('${k}')"><span class="tab-ic">${ic}</span>${lb}</button>`
+  ).join("");
+}
 function goTab(k){ tab=k; buildNav(); render(); }
 function setScope(s){ scope=s; render(); }
 function setMemberFilter(m){ memberFilter=m; render(); }
+function setLimitMember(m){ limitMember=m; render(); }
+function setMasterMember(m){ masterMember=m; render(); }
+
 function myRows(){ return memberFilter==="전체" ? ROWS : ROWS.filter(r=>r.member===memberFilter); }
 function scoped(){ const cur=billingPeriod(); return scope==="current" ? myRows().filter(r=>inPeriod(r.date,cur)) : myRows(); }
 
 /* ── 렌더 ── */
 function render(){
-  const m = document.getElementById("main");
+  const m=document.getElementById("main");
   if(loadError){
-    m.innerHTML = `<div class="sec"><div class="err-card">
+    m.innerHTML=`<div class="sec"><div class="err-card">
       <div style="font-size:1.05rem;font-weight:900;color:var(--r);margin-bottom:8px">⚠️ 데이터 연결 오류</div>
       <div style="font-size:.82rem;color:var(--t2);margin-bottom:14px;line-height:1.75">${loadError}</div>
       <div style="font-size:.76rem;color:var(--t3);line-height:1.9">
         <b style="color:var(--t2)">해결 방법 (Supabase 대시보드)</b><br>
-        1. Table Editor → transactions → RLS Policies<br>
+        1. Table Editor → members / transactions / category_limits / master_data → RLS Policies<br>
         2. "New Policy" → "For full customization"<br>
-        3. Policy: <code style="background:var(--bg3);padding:2px 6px;border-radius:4px">FOR ALL USING (true) WITH CHECK (true)</code><br>
-        4. category_limits 테이블도 동일하게 적용
+        3. Policy: <code style="background:var(--bg3);padding:2px 6px;border-radius:4px">FOR ALL USING (true) WITH CHECK (true)</code>
       </div>
       <button onclick="retryLoad()" style="margin-top:14px;padding:10px 20px;background:var(--acg);color:var(--ac);border:1px solid rgba(201,147,58,.25);border-radius:11px;font-weight:700;font-size:.84rem">다시 시도</button>
     </div></div>`;
     return;
   }
-  if(tab==="list") m.innerHTML = filterBar() + viewList();
+  if(tab==="list")     m.innerHTML = filterBar() + viewList();
   else if(tab==="cat") m.innerHTML = filterBar() + viewCategory();
-  else if(tab==="limit") m.innerHTML = viewLimit();
-  else if(tab==="analysis"){ m.innerHTML = viewAnalysis(); drawChart(); }
-  else if(tab==="acct") m.innerHTML = viewAccount();
-  else if(tab==="master") m.innerHTML = viewMaster();
+  else if(tab==="limit")    m.innerHTML = viewLimit();
+  else if(tab==="analysis"){ m.innerHTML = filterBar() + viewAnalysis(); drawChart(); }
+  else if(tab==="acct")     m.innerHTML = viewAccount();
+  else if(tab==="master")   m.innerHTML = viewMaster();
 }
 
 async function retryLoad(){
-  document.getElementById("main").innerHTML = '<div class="spin"></div>';
-  try { await loadAll(); } catch(e) { loadError = e.message; }
+  document.getElementById("main").innerHTML='<div class="spin"></div>';
+  try{ await loadAll(); }catch(e){ loadError=e.message; }
   render();
 }
 
+/* ── 필터 바 (내역·분류·분석 공통: 주기 + 멤버) ── */
 function filterBar(){
-  const scopes = [["current",`이번 주기 (${billingPeriod().label})`],["all","전체"]];
-  const mems = ["전체",...MEMBERS];
+  const scopes=[["current",`이번 주기 (${billingPeriod().label})`],["all","전체"]];
+  const mems=["전체",...MEMBERS];
   return `<div class="filter">${scopes.map(([k,lb])=>`<span class="pill${scope===k?' on':''}" onclick="setScope('${k}')">${lb}</span>`).join("")}</div>
     <div class="filter">${mems.map(mm=>`<span class="pill${memberFilter===mm?' on':''}" onclick="setMemberFilter('${mm}')">${mm}</span>`).join("")}</div>`;
 }
-const empty = (ic,msg)=>`<div class="empty"><div class="e-ic">${ic}</div><p>${msg.replace(/\n/g,"<br>")}</p></div>`;
 
-/* 내역 */
+/* ── 멤버 전용 바 (한도·계좌 탭: '전체' 없음) ── */
+function memberBar(current, fn){
+  return `<div class="filter">${MEMBERS.map(m=>`<span class="pill${current===m?' on':''}" onclick="${fn}('${m}')">${m}</span>`).join("")}</div>`;
+}
+
+/* ── 내역 탭 ── */
 function viewList(){
-  const rows = scoped(); if(!rows.length) return `<div class="sec">${empty("📭","내역이 없어요.\n＋ 버튼으로 추가해보세요.")}</div>`;
-  const inc=rows.filter(r=>r.type==="입금").reduce((s,r)=>s+r.amount,0), exp=rows.filter(r=>r.type!=="입금").reduce((s,r)=>s+r.amount,0);
+  const rows=scoped(); if(!rows.length) return `<div class="sec">${empty("📭","내역이 없어요.\n＋ 버튼으로 추가해보세요.")}</div>`;
+  const inc=rows.filter(r=>r.type==="입금").reduce((s,r)=>s+r.amount,0);
+  const exp=rows.filter(r=>r.type!=="입금").reduce((s,r)=>s+r.amount,0);
   const groups={}; rows.forEach(r=>{(groups[r.date]=groups[r.date]||[]).push(r);});
   const days=["일","월","화","수","목","금","토"];
   const dl=s=>{const d=new Date(s);return `${d.getMonth()+1}월 ${d.getDate()}일 (${days[d.getDay()]})`;};
   let h=`<div class="sec">`;
-  if(scope==="current") h+=`<div class="cards"><div class="card inc"><div class="c-lb">수입</div><div class="c-v g">+${won(inc)}</div></div><div class="card exp"><div class="c-lb">지출</div><div class="c-v r">-${won(exp)}</div></div></div>`;
+  if(scope==="current") h+=`<div class="cards">
+    <div class="card inc"><div class="c-lb">수입</div><div class="c-v g">+${won(inc)}</div></div>
+    <div class="card exp"><div class="c-lb">지출</div><div class="c-v r">-${won(exp)}</div></div>
+  </div>`;
   Object.keys(groups).sort((a,b)=>b.localeCompare(a)).forEach(date=>{
     const dr=groups[date], de=dr.filter(r=>r.type!=="입금").reduce((s,r)=>s+r.amount,0);
     h+=`<div class="dgroup"><div class="dhead"><span>${dl(date)}</span><span class="dtot">${de>0?'-'+won(de):''}</span></div>`;
@@ -640,70 +736,112 @@ function viewList(){
   return h+`</div>`;
 }
 
-/* 분류 */
+/* ── 분류 탭 ── */
 function aggCat(rs){ const o={}; rs.forEach(r=>{(o[r.category]=o[r.category]||{inc:0,exp:0}); r.type==="입금"?o[r.category].inc+=r.amount:o[r.category].exp+=r.amount;}); return o; }
-function catCard(cat,v,pct){ const net=v.inc-v.exp;
-  let st=""; if(v.inc>0||v.exp>0){ st=`<div class="c-st">`; if(v.inc>0)st+=`<div class="st"><div class="st-l">수입</div><div class="st-v g">+${won(v.inc)}</div></div>`; if(v.exp>0)st+=`<div class="st"><div class="st-l">지출</div><div class="st-v r">-${won(v.exp)}</div></div>`; st+=`</div>`; }
+function catCard(cat,v,pct){
+  const net=v.inc-v.exp;
+  let st="";
+  if(v.inc>0||v.exp>0){
+    st=`<div class="c-st">`;
+    if(v.inc>0) st+=`<div class="st"><div class="st-l">수입</div><div class="st-v g">+${won(v.inc)}</div></div>`;
+    if(v.exp>0) st+=`<div class="st"><div class="st-l">지출</div><div class="st-v r">-${won(v.exp)}</div></div>`;
+    st+=`</div>`;
+  }
   return `<div class="ccard"><div class="c-h"><div class="c-l"><div class="c-ic">${icon(cat)}</div><div class="c-nm">${cat}</div></div><span class="c-bd ${net>=0?'bg':'br'}">${net>=0?'+':''}${won(net)}</span></div>${st}${pct>0?`<div class="barw"><div class="bar" style="width:${pct}%"></div></div>`:""}</div>`;
 }
 function viewCategory(){
-  const rows=scoped(), sum=aggCat(rows); if(!Object.keys(sum).length) return `<div class="sec">${empty("📭","데이터가 없습니다")}</div>`;
+  const rows=scoped(), sum=aggCat(rows);
+  if(!Object.keys(sum).length) return `<div class="sec">${empty("📭","데이터가 없습니다")}</div>`;
   const totExp=Object.values(sum).reduce((s,v)=>s+v.exp,0);
   let h=`<div class="sec">`;
   Object.entries(sum).sort((a,b)=>b[1].exp-a[1].exp).forEach(([c,v])=>h+=catCard(c,v,totExp?Math.round(v.exp/totExp*100):0));
-  if(scope==="all"){ [...recentPeriods(3)].reverse().forEach(p=>{ const ma=aggCat(myRows().filter(r=>inPeriod(r.date,p))); if(!Object.keys(ma).length)return;
-    h+=`<div class="sec-t">📅 ${p.label}</div>`; Object.entries(ma).sort((a,b)=>b[1].exp-a[1].exp).forEach(([c,v])=>h+=catCard(c,v,0)); }); }
+  if(scope==="all"){
+    [...recentPeriods(3)].reverse().forEach(p=>{
+      const ma=aggCat(myRows().filter(r=>inPeriod(r.date,p)));
+      if(!Object.keys(ma).length) return;
+      h+=`<div class="sec-t">📅 ${p.label}</div>`;
+      Object.entries(ma).sort((a,b)=>b[1].exp-a[1].exp).forEach(([c,v])=>h+=catCard(c,v,0));
+    });
+  }
   return h+`</div>`;
 }
 
-/* 한도 */
+/* ── 한도 탭 (멤버별) ── */
 function viewLimit(){
-  const cur=billingPeriod(), spent={};
-  ROWS.filter(r=>r.type==="지출"&&inPeriod(r.date,cur)).forEach(r=>spent[r.category]=(spent[r.category]||0)+r.amount);
-  const cats = Array.from(new Set([...Object.keys(LIMITS), ...Object.keys(spent)]));
-  const items = cats.map(cat=>{ const limit=LIMITS[cat]||0, used=spent[cat]||0; return {cat,limit,used,pct:limit?Math.round(used/limit*100):0}; }).sort((a,b)=>b.pct-a.pct);
-  const over = items.filter(i=>i.limit&&i.pct>=100);
-  let h=`<div class="sec"><div class="sec-t" style="padding-top:4px">이번 주기 한도 · ${cur.label}</div>`;
+  if(!limitMember) return `<div class="sec">${empty("👥","설정에서 멤버를 추가해주세요.")}</div>`;
+  const cur=billingPeriod();
+  const memberLimits=LIMITS[limitMember]||{};
+  const spent={};
+  ROWS.filter(r=>r.member===limitMember&&r.type==="지출"&&inPeriod(r.date,cur))
+      .forEach(r=>spent[r.category]=(spent[r.category]||0)+r.amount);
+
+  const cats=Array.from(new Set([...Object.keys(memberLimits),...Object.keys(spent)]));
+  const items=cats.map(cat=>{
+    const limit=memberLimits[cat]||0, used=spent[cat]||0;
+    return {cat,limit,used,pct:limit?Math.round(used/limit*100):0};
+  }).sort((a,b)=>b.pct-a.pct);
+  const over=items.filter(i=>i.limit&&i.pct>=100);
+
+  let h=memberBar(limitMember,"setLimitMember")+`<div class="sec">`;
+  h+=`<div class="sec-t" style="padding-top:4px">${limitMember}의 이번 주기 한도 · ${cur.label}</div>`;
   if(over.length) h+=`<div class="alert">⚠️ <b>${over.map(o=>o.cat).join(", ")}</b> 한도 초과!</div>`;
-  items.forEach(it=>{
-    const state = !it.limit ? "ok" : it.pct>=100?"over":it.pct>=80?"warn":"ok";
-    h+=`<div class="lcard ${state}"><div class="l-h"><div class="c-l"><div class="c-ic">${icon(it.cat)}</div><div class="c-nm">${it.cat}</div></div><div class="l-pct ${state}">${it.limit?it.pct+'%':'한도없음'}</div></div>`;
-    if(it.limit){ h+=`<div class="l-bar-w"><div class="l-bar ${state}" style="width:${Math.min(it.pct,100)}%"></div></div>
-      <div class="l-meta"><span>${won(it.used)}</span><span class="l-lim">/ ${won(it.limit)}</span></div>`;
-      if(state==="over") h+=`<div class="l-msg">${won(it.used-it.limit)} 초과</div>`;
-      else if(state==="warn") h+=`<div class="l-msg warn">한도까지 ${won(it.limit-it.used)}</div>`;
-    } else h+=`<div class="l-meta"><span>이번 주기 ${won(it.used)} 사용</span></div>`;
-    h+=`<div class="l-edit"><input id="lim_${it.cat}" inputmode="numeric" placeholder="월 한도" value="${it.limit||''}"><button onclick="saveLimit('${it.cat}')">저장</button></div></div>`;
-  });
+
+  if(!items.length){
+    h+=empty("🎯","지출 내역이나 설정된 한도가 없어요.\n아래에서 한도를 직접 추가할 수 있어요.");
+  } else {
+    items.forEach(it=>{
+      const state=!it.limit?"ok":it.pct>=100?"over":it.pct>=80?"warn":"ok";
+      h+=`<div class="lcard ${state}">
+        <div class="l-h"><div class="c-l"><div class="c-ic">${icon(it.cat)}</div><div class="c-nm">${it.cat}</div></div><div class="l-pct ${state}">${it.limit?it.pct+'%':'한도없음'}</div></div>`;
+      if(it.limit){
+        h+=`<div class="l-bar-w"><div class="l-bar ${state}" style="width:${Math.min(it.pct,100)}%"></div></div>
+          <div class="l-meta"><span>${won(it.used)}</span><span class="l-lim">/ ${won(it.limit)}</span></div>`;
+        if(state==="over") h+=`<div class="l-msg">${won(it.used-it.limit)} 초과</div>`;
+        else if(state==="warn") h+=`<div class="l-msg warn">한도까지 ${won(it.limit-it.used)}</div>`;
+      } else {
+        h+=`<div class="l-meta"><span>이번 주기 ${won(it.used)} 사용</span></div>`;
+      }
+      h+=`<div class="l-edit"><input id="lim_${limitMember}_${it.cat}" inputmode="numeric" placeholder="월 한도" value="${it.limit||''}"><button onclick="saveLimit('${limitMember}','${it.cat}')">저장</button></div>
+      </div>`;
+    });
+  }
   return h+`</div>`;
 }
 
-/* 분석 */
+/* ── 분석 탭 ── */
 let chartData=[];
 function viewAnalysis(){
   const periods=recentPeriods(3);
-  chartData = periods.map(p=>{ const pr=myRows().filter(r=>inPeriod(r.date,p));
-    return {name:p.label.split(" ")[0], inc:pr.filter(r=>r.type==="입금").reduce((s,r)=>s+r.amount,0), exp:pr.filter(r=>r.type!=="입금").reduce((s,r)=>s+r.amount,0)}; });
+  chartData=periods.map(p=>{
+    const pr=myRows().filter(r=>inPeriod(r.date,p));
+    return {name:p.label.split(" ")[0], inc:pr.filter(r=>r.type==="입금").reduce((s,r)=>s+r.amount,0), exp:pr.filter(r=>r.type!=="입금").reduce((s,r)=>s+r.amount,0)};
+  });
   const byMemo={};
-  myRows().filter(r=>r.type==="지출"&&r.memo).forEach(r=>{ const pi=periods.findIndex(p=>inPeriod(r.date,p)); if(pi<0)return;
-    const k=r.category+"::"+r.memo.replace(/\(.*\)/,"").trim(); (byMemo[k]=byMemo[k]||{cat:r.category,memo:r.memo,total:0,ps:new Set()}); byMemo[k].total+=r.amount; byMemo[k].ps.add(pi); });
+  myRows().filter(r=>r.type==="지출"&&r.memo).forEach(r=>{
+    const pi=periods.findIndex(p=>inPeriod(r.date,p)); if(pi<0) return;
+    const k=r.category+"::"+r.memo.replace(/\(.*\)/,"").trim();
+    (byMemo[k]=byMemo[k]||{cat:r.category,memo:r.memo,total:0,ps:new Set()});
+    byMemo[k].total+=r.amount; byMemo[k].ps.add(pi);
+  });
   const list=Object.values(byMemo).map(x=>({...x,span:x.ps.size}));
-  const rec=list.filter(x=>x.span>=2).sort((a,b)=>b.total-a.total), one=list.filter(x=>x.span===1&&x.total>=100000).sort((a,b)=>b.total-a.total);
+  const rec=list.filter(x=>x.span>=2).sort((a,b)=>b.total-a.total);
+  const one=list.filter(x=>x.span===1&&x.total>=100000).sort((a,b)=>b.total-a.total);
   const avg=Math.round(chartData.reduce((s,d)=>s+d.exp,0)/(chartData.length||1));
-  const last=chartData[chartData.length-1]?.exp||0, prev=chartData[chartData.length-2]?.exp||0, tr=prev?Math.round((last-prev)/prev*100):0;
+  const last=chartData[chartData.length-1]?.exp||0, prev=chartData[chartData.length-2]?.exp||0;
+  const tr=prev?Math.round((last-prev)/prev*100):0;
   return `<div class="sec">
     <div class="panel"><div class="p-t">📈 주기별 수입·지출</div><canvas id="chart" height="180"></canvas></div>
     <div class="panel"><div class="p-t">🧾 분석 요약</div><div class="p-body">최근 ${chartData.length}개 주기 평균 지출은 ${won(avg)}입니다.
 이번 주기 지출은 전 주기 대비 ${tr>=0?'+':''}${tr}% (${won(last)}).
 ${rec.length?`반복 지출 ${rec.length}건이 매 주기 빠져나가고 있어요.`:"뚜렷한 반복 지출은 아직 없습니다."}</div></div>
-    <div class="panel"><div class="p-t">🔁 반복 지출</div>${rec.length?rec.map(x=>`<div class="arow"><span class="a-mo">${icon(x.cat)} ${x.memo}</span><span class="a-tag rec">${x.span}주기</span><span class="a-v">${won(x.total)}</span></div>`).join(""):'<div class="p-body">없음</div>'}</div>
-    <div class="panel"><div class="p-t">💥 일회성 큰 지출</div>${one.length?one.map(x=>`<div class="arow"><span class="a-mo">${icon(x.cat)} ${x.memo}</span><span class="a-tag one">1회</span><span class="a-v">${won(x.total)}</span></div>`).join(""):'<div class="p-body">없음</div>'}</div>
+    <div class="panel"><div class="p-t">🔁 반복 지출</div>${rec.length?rec.map(x=>`<div class="arow"><span class="a-mo">${icon(x.cat)} ${x.memo}</span><span class="a-tag rec">${x.span}주기</span><span class="a-v">${won(x.total)}</span></div>`).join(''):'<div class="p-body">없음</div>'}</div>
+    <div class="panel"><div class="p-t">💥 일회성 큰 지출</div>${one.length?one.map(x=>`<div class="arow"><span class="a-mo">${icon(x.cat)} ${x.memo}</span><span class="a-tag one">1회</span><span class="a-v">${won(x.total)}</span></div>`).join(''):'<div class="p-body">없음</div>'}</div>
   </div>`;
 }
 let chartInst=null;
 function drawChart(){
-  const ctx=document.getElementById("chart"); if(!ctx)return;
-  if(chartInst)chartInst.destroy();
+  const ctx=document.getElementById("chart"); if(!ctx) return;
+  if(chartInst) chartInst.destroy();
   chartInst=new Chart(ctx,{type:"bar",data:{labels:chartData.map(d=>d.name),datasets:[
     {label:"수입",data:chartData.map(d=>d.inc),backgroundColor:"rgba(46,200,144,.75)",borderRadius:6},
     {label:"지출",data:chartData.map(d=>d.exp),backgroundColor:"rgba(240,84,112,.75)",borderRadius:6}]},
@@ -711,47 +849,69 @@ function drawChart(){
       scales:{x:{ticks:{color:"#6E6C8A",font:{size:11}},grid:{display:false}},y:{ticks:{color:"#32304E",font:{size:10},callback:v=>wonShort(v)},grid:{color:"#12141F"}}}}});
 }
 
-/* 계좌 */
+/* ── 계좌 탭 (멤버 필터 적용) ── */
 function viewAccount(){
-  let inc=0,exp=0,acct={};
-  ROWS.forEach(r=>{ const a=r.account||"미분류"; if(r.type==="입금"){inc+=r.amount;acct[a]=(acct[a]||0)+r.amount;}else{exp+=r.amount;acct[a]=(acct[a]||0)-r.amount;} });
-  let h=`<div class="sec"><div class="acct-tot"><div class="at-l">현재 총 잔액</div><div class="at-v">${won(inc-exp)}</div></div>
-    <div class="acct-grid"><div class="am"><div class="am-l">총 수입</div><div class="am-v g">+${won(inc)}</div></div><div class="am"><div class="am-l">총 지출</div><div class="am-v r">-${won(exp)}</div></div></div>
+  const rows = memberFilter==="전체" ? ROWS : ROWS.filter(r=>r.member===memberFilter);
+  let inc=0, exp=0, acct={};
+  rows.forEach(r=>{
+    const a=r.account||"미분류";
+    if(r.type==="입금"){ inc+=r.amount; acct[a]=(acct[a]||0)+r.amount; }
+    else{ exp+=r.amount; acct[a]=(acct[a]||0)-r.amount; }
+  });
+  const mems=["전체",...MEMBERS];
+  const bar=`<div class="filter">${mems.map(m=>`<span class="pill${memberFilter===m?' on':''}" onclick="setMemberFilter('${m}')">${m}</span>`).join("")}</div>`;
+  let h=`${bar}<div class="sec">
+    <div class="acct-tot"><div class="at-l">${memberFilter==="전체"?"전체 합산 잔액":memberFilter+"의 잔액"}</div><div class="at-v">${won(inc-exp)}</div></div>
+    <div class="acct-grid">
+      <div class="am"><div class="am-l">총 수입</div><div class="am-v g">+${won(inc)}</div></div>
+      <div class="am"><div class="am-l">총 지출</div><div class="am-v r">-${won(exp)}</div></div>
+    </div>
     <div class="sec-t">계좌별 잔액</div>`;
-  Object.entries(acct).forEach(([nm,b])=>h+=`<div class="acard"><div><div class="a-nm">🏦 ${nm}</div><div class="a-sub">잔액</div></div><div class="a-bal ${b>=0?'g':'r'}">${b>=0?'+':''}${won(b)}</div></div>`);
+  if(Object.keys(acct).length){
+    Object.entries(acct).forEach(([nm,b])=>h+=`<div class="acard"><div><div class="a-nm">🏦 ${nm}</div><div class="a-sub">잔액</div></div><div class="a-bal ${b>=0?'g':'r'}">${b>=0?'+':''}${won(b)}</div></div>`);
+  } else {
+    h+=empty("🏦","계좌 데이터가 없어요.");
+  }
   return h+`</div>`;
 }
 
-/* ── 마스터 데이터 ── */
-const MASTER_KEYS = {categories:"카테고리", methods:"결제수단", accounts:"계좌"};
-const DEFAULT_CATS = ["식비","생활비","교통","의료","쇼핑","문화","교육","통신","보험","고정비","데이트","월급","이자","기타"];
-
-async function addMaster(key){
-  const el=document.getElementById("m_input_"+key), val=el.value.trim(); if(!val) return;
-  const type=key==='categories'?'category':key==='methods'?'method':'account';
-  const res=await sb.from("master_data").upsert({member:masterMember,type,value:val},{onConflict:'member,type,value'});
-  if(res.error){ toast("오류: "+res.error.message); return; }
-  el.value=""; await loadAll(); render();
-}
-async function delMaster(key,val){
-  const type=key==='categories'?'category':key==='methods'?'method':'account';
-  const res=await sb.from("master_data").delete().eq("member",masterMember).eq("type",type).eq("value",val);
-  if(res.error){ toast("오류: "+res.error.message); return; }
-  await loadAll(); render();
-}
-function setMasterMember(m){ masterMember=m; render(); }
+/* ── 설정 탭 ── */
 function viewMaster(){
   const icons={categories:"🏷️",methods:"💳",accounts:"🏦"};
   const mdata=MASTER[masterMember]||{categories:[],methods:[],accounts:[]};
-  let h=`<div class="sec" style="padding-top:14px">
-    <div style="margin-bottom:16px">
-      <div style="font-size:.65rem;font-weight:700;color:var(--t3);letter-spacing:.8px;text-transform:uppercase;margin-bottom:10px">멤버 선택</div>
-      <div class="seg">${MEMBERS.map(m=>`<button class="${m===masterMember?'on':''}" onclick="setMasterMember('${m}')">${m}</button>`).join("")}</div>
+  let h=`<div class="sec" style="padding-top:14px">`;
+
+  // 멤버 관리 섹션
+  h+=`<div class="m-section">
+    <div class="m-title">👥 멤버 관리</div>
+    <div class="m-list">`;
+  if(MEMBERS.length){
+    MEMBERS.forEach(m=>h+=`<div class="m-item"><span class="m-nm">👤 ${m}</span><button class="m-del" onclick="delMember('${m}')">삭제</button></div>`);
+  } else {
+    h+=`<div class="m-empty">멤버가 없어요. 아래에서 추가해주세요.</div>`;
+  }
+  h+=`</div>
+    <div class="m-add">
+      <input id="m_input_member" placeholder="새 멤버 이름" onkeydown="if(event.key==='Enter')addMember()">
+      <button onclick="addMember()">추가</button>
     </div>
-    <div style="display:flex;align-items:center;gap:10px;padding:12px 15px;background:var(--acg2);border:1px solid rgba(201,147,58,.18);border-radius:14px;margin-bottom:18px">
-      <span style="font-size:1.05rem">👤</span>
-      <span style="font-size:.87rem;color:var(--t2)"><b style="color:var(--ac)">${masterMember}</b>의 항목을 관리합니다</span>
-    </div>`;
+  </div>`;
+
+  if(!masterMember){
+    return h+`</div>`;
+  }
+
+  // 멤버 선택 바
+  h+=`<div style="margin-bottom:16px">
+    <div style="font-size:.65rem;font-weight:700;color:var(--t3);letter-spacing:.8px;text-transform:uppercase;margin-bottom:10px">항목 관리할 멤버</div>
+    <div class="seg">${MEMBERS.map(m=>`<button class="${m===masterMember?'on':''}" onclick="setMasterMember('${m}')">${m}</button>`).join("")}</div>
+  </div>
+  <div style="display:flex;align-items:center;gap:10px;padding:12px 15px;background:var(--acg2);border:1px solid rgba(201,147,58,.18);border-radius:14px;margin-bottom:18px">
+    <span style="font-size:1.05rem">👤</span>
+    <span style="font-size:.87rem;color:var(--t2)"><b style="color:var(--ac)">${masterMember}</b>의 항목을 관리합니다</span>
+  </div>`;
+
+  // 카테고리 / 결제수단 / 계좌 관리
   Object.entries(MASTER_KEYS).forEach(([key,label])=>{
     const items=mdata[key]||[];
     h+=`<div class="m-section"><div class="m-title">${icons[key]} ${label} 관리</div><div class="m-list">`;
@@ -759,34 +919,64 @@ function viewMaster(){
     else h+=`<div class="m-empty">아래에서 항목을 추가해주세요.</div>`;
     h+=`</div><div class="m-add"><input id="m_input_${key}" placeholder="${label} 추가" onkeydown="if(event.key==='Enter')addMaster('${key}')"><button onclick="addMaster('${key}')">추가</button></div></div>`;
   });
+
   return h+`</div>`;
 }
 
 /* ── 입력 시트 ── */
 function refreshCatList(){
   const mdata=MASTER[memberVal]||{categories:[...DEFAULT_CATS],methods:[],accounts:[]};
-  const cats=Array.from(new Set([...mdata.categories,...Object.keys(LIMITS)]));
+  const memberLimits=LIMITS[memberVal]||{};
+  const cats=Array.from(new Set([...mdata.categories,...Object.keys(memberLimits)]));
   document.getElementById("fCategory").innerHTML=cats.map(c=>`<option value="${c}">${c}</option>`).join("");
   document.getElementById("fMethod").innerHTML=`<option value="">선택 안함</option>`+mdata.methods.map(m=>`<option value="${m}">${m}</option>`).join("");
   document.getElementById("fAccount").innerHTML=`<option value="">계좌 선택</option>`+mdata.accounts.map(a=>`<option value="${a}">${a}</option>`).join("");
 }
-function renderMemberSeg(){ document.getElementById("memberSeg").innerHTML = MEMBERS.map(m=>`<button class="${m===memberVal?'on':''}" onclick="setMember('${m}')">${m}</button>`).join(""); }
+function renderMemberSeg(){
+  document.getElementById("memberSeg").innerHTML=MEMBERS.map(m=>`<button class="${m===memberVal?'on':''}" onclick="setMember('${m}')">${m}</button>`).join("");
+}
 function setMember(m){ memberVal=m; renderMemberSeg(); refreshCatList(); }
-function setType(t){ typeVal=t; document.getElementById("tgExp").className="tg"+(t==="지출"?" tg-e":""); document.getElementById("tgInc").className="tg"+(t==="입금"?" tg-i":""); }
-function openSheet(){ editId=null; document.getElementById("sheetTitle").textContent="내역 추가"; document.getElementById("saveBtn").textContent="저장하기";
-  ["fAmount","fCategory","fMethod","fAccount","fMemo"].forEach(id=>document.getElementById(id).value="");
-  const t=new Date(); document.getElementById("fDate").value=`${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,"0")}-${String(t.getDate()).padStart(2,"0")}`;
-  setType("지출"); memberVal=MEMBERS[0]; renderMemberSeg(); refreshCatList();
+function setType(t){
+  typeVal=t;
+  document.getElementById("tgExp").className="tg"+(t==="지출"?" tg-e":"");
+  document.getElementById("tgInc").className="tg"+(t==="입금"?" tg-i":"");
+}
+function openSheet(){
+  if(!MEMBERS.length){ toast("설정에서 멤버를 먼저 추가해주세요"); return; }
+  editId=null;
+  document.getElementById("sheetTitle").textContent="내역 추가";
+  document.getElementById("saveBtn").textContent="저장하기";
+  document.getElementById("fMemo").value="";
+  const t=new Date();
+  document.getElementById("fDate").value=`${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,"0")}-${String(t.getDate()).padStart(2,"0")}`;
+  document.getElementById("fAmount").value="";
+  setType("지출");
+  memberVal=memberVal||MEMBERS[0];
+  renderMemberSeg();
+  refreshCatList();
   document.getElementById("overlay").classList.add("open");
 }
-function editEntry(r){ editId=r.id; document.getElementById("sheetTitle").textContent="내역 수정"; document.getElementById("saveBtn").textContent="수정하기";
-  setType(r.type); memberVal=r.member||MEMBERS[0]; renderMemberSeg(); refreshCatList();
-  document.getElementById("fDate").value=r.date; document.getElementById("fAmount").value=Number(r.amount).toLocaleString("ko-KR");
-  document.getElementById("fCategory").value=r.category; document.getElementById("fMethod").value=r.method||""; document.getElementById("fAccount").value=r.account||""; document.getElementById("fMemo").value=r.memo||"";
+function editEntry(r){
+  editId=r.id;
+  document.getElementById("sheetTitle").textContent="내역 수정";
+  document.getElementById("saveBtn").textContent="수정하기";
+  setType(r.type);
+  memberVal=r.member||MEMBERS[0];
+  renderMemberSeg();
+  refreshCatList();
+  document.getElementById("fDate").value=r.date;
+  document.getElementById("fAmount").value=Number(r.amount).toLocaleString("ko-KR");
+  document.getElementById("fCategory").value=r.category;
+  document.getElementById("fMethod").value=r.method||"";
+  document.getElementById("fAccount").value=r.account||"";
+  document.getElementById("fMemo").value=r.memo||"";
   document.getElementById("overlay").classList.add("open");
 }
 function closeSheet(){ document.getElementById("overlay").classList.remove("open"); editId=null; }
-document.getElementById("fAmount").addEventListener("input",e=>{ const r=e.target.value.replace(/[^0-9]/g,""); e.target.value=r?Number(r).toLocaleString("ko-KR"):""; });
+document.getElementById("fAmount").addEventListener("input",e=>{
+  const r=e.target.value.replace(/[^0-9]/g,"");
+  e.target.value=r?Number(r).toLocaleString("ko-KR"):"";
+});
 </script>
 </body>
 </html>
