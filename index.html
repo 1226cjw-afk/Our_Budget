@@ -435,6 +435,46 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
   background:rgba(240,84,112,.06);border:1px solid rgba(240,84,112,.22);
   border-radius:18px;padding:20px 18px;margin-top:16px;
 }
+
+/* ── 커스텀 셀렉트 ── */
+.sel-btn{
+  width:100%;padding:13px 15px;
+  border:1px solid var(--bd2);border-radius:13px;
+  font-size:.92rem;font-family:inherit;color:var(--t1);
+  background:var(--bg2);text-align:left;
+  display:flex;justify-content:space-between;align-items:center;
+  transition:border-color .18s,box-shadow .18s;
+}
+.sel-btn:active{border-color:var(--ac);box-shadow:0 0 0 3px rgba(201,147,58,.1)}
+.sel-arr{color:var(--t3);font-size:.85rem;flex-shrink:0;margin-left:8px}
+.picker-ov{
+  display:none;position:fixed;inset:0;z-index:60;
+  background:rgba(0,0,0,.55);
+}
+.picker-ov.open{display:flex;align-items:flex-end;justify-content:center}
+.picker-sht{
+  width:100%;max-width:480px;
+  background:var(--bg2);border-radius:24px 24px 0 0;
+  border:1px solid var(--bd2);border-bottom:none;
+  max-height:65vh;display:flex;flex-direction:column;overflow:hidden;
+}
+.picker-hd{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:16px 20px;border-bottom:1px solid var(--bd);flex-shrink:0;
+}
+.picker-t{font-size:.95rem;font-weight:900}
+.picker-cl{
+  background:var(--bg3);border:1px solid var(--bd);border-radius:20px;
+  color:var(--t2);font-size:.79rem;font-weight:700;padding:7px 15px;
+}
+.picker-opts{overflow-y:auto;-webkit-overflow-scrolling:touch;padding:4px 0}
+.picker-opt{
+  padding:15px 22px;font-size:.93rem;font-weight:600;color:var(--t1);
+  border-bottom:1px solid var(--bd);transition:background .12s;
+}
+.picker-opt:last-child{border:none;padding-bottom:max(15px,env(safe-area-inset-bottom,15px))}
+.picker-opt.on{color:var(--ac);background:var(--acg2)}
+.picker-opt:active{background:var(--bg3)}
 </style>
 </head>
 <body>
@@ -453,6 +493,16 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 
 <div class="toast" id="toast"></div>
 
+<div class="picker-ov" id="pickerOv" onclick="closePicker()">
+  <div class="picker-sht" onclick="event.stopPropagation()">
+    <div class="picker-hd">
+      <span class="picker-t" id="pickerTitle">선택</span>
+      <button class="picker-cl" onclick="closePicker()">닫기</button>
+    </div>
+    <div class="picker-opts" id="pickerOpts"></div>
+  </div>
+</div>
+
 <div class="overlay" id="overlay">
   <div class="sheet">
     <div class="s-top">
@@ -470,9 +520,24 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
       <div class="frow"><label class="flb">누가</label><div class="seg" id="memberSeg"></div></div>
       <div class="frow"><label class="flb">날짜</label><input class="inp" type="date" id="fDate"></div>
       <div class="frow"><label class="flb">금액</label><input class="inp" id="fAmount" inputmode="numeric" placeholder="0"></div>
-      <div class="frow"><label class="flb">카테고리</label><select class="inp" id="fCategory"></select></div>
-      <div class="frow"><label class="flb">결제수단</label><select class="inp" id="fMethod"></select></div>
-      <div class="frow"><label class="flb">계좌</label><select class="inp" id="fAccount"></select></div>
+      <div class="frow"><label class="flb">카테고리</label>
+        <button type="button" class="sel-btn" onclick="openPicker('fCategory','카테고리')">
+          <span id="fCategoryDisp">선택</span><span class="sel-arr">▾</span>
+        </button>
+        <select id="fCategory" style="display:none"></select>
+      </div>
+      <div class="frow"><label class="flb">결제수단</label>
+        <button type="button" class="sel-btn" onclick="openPicker('fMethod','결제수단')">
+          <span id="fMethodDisp">선택 안함</span><span class="sel-arr">▾</span>
+        </button>
+        <select id="fMethod" style="display:none"></select>
+      </div>
+      <div class="frow"><label class="flb">계좌</label>
+        <button type="button" class="sel-btn" onclick="openPicker('fAccount','계좌')">
+          <span id="fAccountDisp">계좌 선택</span><span class="sel-arr">▾</span>
+        </button>
+        <select id="fAccount" style="display:none"></select>
+      </div>
       <div class="frow"><label class="flb">세부내역</label><input class="inp" id="fMemo" placeholder="메모 (선택)"></div>
       <button class="submit" id="saveBtn" onclick="saveEntry()">저장하기</button>
     </div>
@@ -931,6 +996,7 @@ function refreshCatList(){
   document.getElementById("fCategory").innerHTML=cats.map(c=>`<option value="${c}">${c}</option>`).join("");
   document.getElementById("fMethod").innerHTML=`<option value="">선택 안함</option>`+mdata.methods.map(m=>`<option value="${m}">${m}</option>`).join("");
   document.getElementById("fAccount").innerHTML=`<option value="">계좌 선택</option>`+mdata.accounts.map(a=>`<option value="${a}">${a}</option>`).join("");
+  updateSelBtn("fCategory"); updateSelBtn("fMethod"); updateSelBtn("fAccount");
 }
 function renderMemberSeg(){
   document.getElementById("memberSeg").innerHTML=MEMBERS.map(m=>`<button class="${m===memberVal?'on':''}" onclick="setMember('${m}')">${m}</button>`).join("");
@@ -969,6 +1035,7 @@ function editEntry(r){
   document.getElementById("fCategory").value=r.category;
   document.getElementById("fMethod").value=r.method||"";
   document.getElementById("fAccount").value=r.account||"";
+  updateSelBtn("fCategory"); updateSelBtn("fMethod"); updateSelBtn("fAccount");
   document.getElementById("fMemo").value=r.memo||"";
   document.getElementById("overlay").classList.add("open");
 }
@@ -977,6 +1044,41 @@ document.getElementById("fAmount").addEventListener("input",e=>{
   const r=e.target.value.replace(/[^0-9]/g,"");
   e.target.value=r?Number(r).toLocaleString("ko-KR"):"";
 });
+
+/* ── 커스텀 피커 ── */
+let pickerSel = null;
+function openPicker(selId, title){
+  pickerSel = selId;
+  const sel = document.getElementById(selId);
+  const opts = Array.from(sel.options);
+  document.getElementById("pickerTitle").textContent = title;
+  if(!opts.length){
+    document.getElementById("pickerOpts").innerHTML = '<div style="padding:24px 20px;text-align:center;color:var(--t3);font-size:.85rem">항목이 없어요. 설정에서 추가해주세요.</div>';
+  } else {
+    document.getElementById("pickerOpts").innerHTML = opts.map((o,i)=>
+      `<div class="picker-opt${sel.value===o.value?' on':''}" onclick="pickOptIdx(${i})">${o.text}</div>`
+    ).join("");
+  }
+  document.getElementById("pickerOv").classList.add("open");
+}
+function pickOptIdx(idx){
+  if(!pickerSel) return;
+  const sel = document.getElementById(pickerSel);
+  sel.selectedIndex = idx;
+  updateSelBtn(pickerSel);
+  closePicker();
+}
+function closePicker(){
+  document.getElementById("pickerOv").classList.remove("open");
+  pickerSel = null;
+}
+function updateSelBtn(selId){
+  const sel = document.getElementById(selId);
+  const disp = document.getElementById(selId+"Disp");
+  if(!sel||!disp) return;
+  const opt = sel.options[sel.selectedIndex];
+  disp.textContent = opt ? opt.text : "선택";
+}
 </script>
 </body>
 </html>
