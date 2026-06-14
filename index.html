@@ -436,7 +436,7 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 
 <script>
 /* ── 상태 ── */
-let sb, ROWS = [], LIMITS = {}, tab = "list", scope = "current", memberFilter = "전체", typeVal = "지출", memberVal = MEMBERS[0], editId = null;
+let sb, ROWS = [], LIMITS = {}, tab = "list", scope = "current", memberFilter = "전체", typeVal = "지출", memberVal = MEMBERS[0], editId = null, loadError = null;
 const won = n => Number(n||0).toLocaleString("ko-KR")+"원";
 const wonShort = n => n>=10000 ? (n/10000).toFixed(n%10000?1:0)+"만" : Number(n).toLocaleString("ko-KR");
 const CAT_ICON = {생활비:"🛒",고정비:"🏠",월급:"💵",이자:"📈",데이트:"❤️",식비:"🍽️",교통:"🚌",의료:"💊",쇼핑:"👜",문화:"🎬",교육:"📚",통신:"📱",보험:"🛡️",기타:"📌"};
@@ -448,24 +448,39 @@ function billingPeriod(ref){ ref=ref||new Date(); const d=ref.getDate(),m=ref.ge
   if(d>=25){sy=y;sm=m;ey=m===11?y+1:y;em=m===11?0:m+1;}else{sy=m===0?y-1:y;sm=m===0?11:m-1;ey=y;em=m;}
   return {start:new Date(sy,sm,25),end:new Date(ey,em,24,23,59,59),label:`${sm+1}/25 ~ ${em+1}/24`,key:`${sy}-${String(sm+1).padStart(2,"0")}`}; }
 function recentPeriods(n){ const cur=billingPeriod(); return Array.from({length:n},(_,i)=>billingPeriod(new Date(cur.start.getFullYear(),cur.start.getMonth()-(n-1-i),25))); }
-const inPeriod = (s,p)=>{ const d=new Date(s); return d>=p.start&&d<=p.end; };
+const inPeriod = (s,p)=>{ const d=new Date(s.length===10?s+"T12:00:00":s); return d>=p.start&&d<=p.end; };
 
 /* ── 초기화 ── */
 window.onload = async () => {
   sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
   buildNav(); renderMemberSeg();
-  await loadAll();
+  try {
+    await loadAll();
+  } catch(e) {
+    loadError = e.message;
+    console.error("초기화 오류:", e);
+  }
   render();
 };
 
 /* ── 데이터 로드/저장 ── */
 async function loadAll(){
+  loadError = null;
   const [tx, lim] = await Promise.all([
     sb.from("transactions").select("*").order("date",{ascending:false}),
     sb.from("category_limits").select("*")
   ]);
+  if(tx.error){
+    console.error("거래내역 로드 오류:", tx.error);
+    throw new Error(tx.error.message || "거래내역을 불러오지 못했습니다");
+  }
   ROWS = tx.data || [];
-  LIMITS = {}; (lim.data||[]).forEach(l => LIMITS[l.category] = Number(l.monthly_limit));
+  LIMITS = {};
+  if(lim.error){
+    console.error("한도 로드 오류:", lim.error);
+  } else {
+    (lim.data||[]).forEach(l => LIMITS[l.category] = Number(l.monthly_limit));
+  }
 }
 async function saveEntry(){
   const amount = Number(document.getElementById("fAmount").value.replace(/,/g,""));
@@ -477,21 +492,38 @@ async function saveEntry(){
     memo: document.getElementById("fMemo").value.trim()
   };
   if(!row.amount || !row.category || !row.account){ toast("금액·카테고리·계좌는 필수예요"); return; }
-  document.getElementById("saveBtn").textContent = "저장 중...";
-  const res = editId ? await sb.from("transactions").update(row).eq("id",editId)
-                     : await sb.from("transactions").insert(row);
-  document.getElementById("saveBtn").textContent = "저장하기";
-  if(res.error){ toast("오류: "+res.error.message); return; }
-  closeSheet(); await loadAll(); render(); toast(editId?"수정 완료":"저장 완료");
+  const btn = document.getElementById("saveBtn");
+  btn.textContent = "저장 중..."; btn.disabled = true;
+  try {
+    const res = editId ? await sb.from("transactions").update(row).eq("id",editId)
+                       : await sb.from("transactions").insert(row);
+    if(res.error){
+      console.error("저장 오류:", res.error);
+      toast("저장 오류: " + res.error.message);
+      return;
+    }
+    closeSheet();
+    await loadAll();
+    render();
+    toast(editId ? "수정 완료" : "저장 완료");
+  } catch(e) {
+    console.error("저장 예외:", e);
+    toast("오류: " + e.message);
+  } finally {
+    btn.textContent = editId ? "수정하기" : "저장하기";
+    btn.disabled = false;
+  }
 }
 async function delEntry(id){
   if(!confirm("삭제하시겠습니까?")) return;
-  await sb.from("transactions").delete().eq("id",id);
+  const res = await sb.from("transactions").delete().eq("id",id);
+  if(res.error){ toast("삭제 오류: " + res.error.message); return; }
   await loadAll(); render(); toast("삭제 완료");
 }
 async function saveLimit(cat){
   const v = Number(document.getElementById("lim_"+cat).value.replace(/,/g,""));
-  await sb.from("category_limits").upsert({category:cat, monthly_limit:v},{onConflict:"category"});
+  const res = await sb.from("category_limits").upsert({category:cat, monthly_limit:v},{onConflict:"category"});
+  if(res.error){ toast("한도 저장 오류: " + res.error.message); return; }
   await loadAll(); render(); toast("한도 저장");
 }
 
@@ -508,12 +540,32 @@ function scoped(){ const cur=billingPeriod(); return scope==="current" ? myRows(
 /* ── 렌더 ── */
 function render(){
   const m = document.getElementById("main");
+  if(loadError){
+    m.innerHTML = `<div class="sec"><div style="background:rgba(255,107,138,.08);border:1px solid rgba(255,107,138,.35);border-radius:16px;padding:20px 18px;margin-top:16px">
+      <div style="font-size:1.1rem;font-weight:900;color:var(--r);margin-bottom:8px">⚠️ 데이터 연결 오류</div>
+      <div style="font-size:.83rem;color:var(--t2);margin-bottom:14px;line-height:1.7">${loadError}</div>
+      <div style="font-size:.78rem;color:var(--t3);line-height:1.8">
+        <b style="color:var(--t2)">해결 방법 (Supabase 대시보드)</b><br>
+        1. Table Editor → transactions → RLS Policies<br>
+        2. "New Policy" → "For full customization"<br>
+        3. Policy: <code style="background:var(--bg3);padding:2px 6px;border-radius:4px">FOR ALL USING (true) WITH CHECK (true)</code><br>
+        4. category_limits 테이블도 동일하게 적용
+      </div>
+      <button onclick="retryLoad()" style="margin-top:14px;padding:10px 20px;background:var(--acg);color:var(--ac);border:1px solid rgba(139,127,255,.28);border-radius:11px;font-weight:700;font-size:.86rem">다시 시도</button>
+    </div></div>`;
+    return;
+  }
   if(tab==="list") m.innerHTML = filterBar() + viewList();
   else if(tab==="cat") m.innerHTML = filterBar() + viewCategory();
   else if(tab==="limit") m.innerHTML = viewLimit();
   else if(tab==="analysis"){ m.innerHTML = viewAnalysis(); drawChart(); }
   else if(tab==="acct") m.innerHTML = viewAccount();
   else if(tab==="master") m.innerHTML = viewMaster();
+}
+async function retryLoad(){
+  document.getElementById("main").innerHTML = '<div class="spin"></div>';
+  try { await loadAll(); } catch(e) { loadError = e.message; }
+  render();
 }
 function filterBar(){
   const scopes = [["current",`이번 주기 (${billingPeriod().label})`],["all","전체"]];
