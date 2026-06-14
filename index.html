@@ -553,10 +553,11 @@ const TABS         = [["list","📋","내역"],["cat","📊","분류"],["limit",
 
 /* ── 상태 ── */
 let sb;
-let MEMBERS = [];           // DB에서 동적 로드
-let ROWS    = [];
-let LIMITS  = {};           // {멤버: {카테고리: 금액}}
-let MASTER  = {};           // {멤버: {categories, methods, accounts}}
+let MEMBERS       = [];     // DB에서 동적 로드
+let ROWS          = [];
+let LIMITS        = {};     // {멤버: {카테고리: 금액}}
+let MASTER        = {};     // {멤버: {categories, methods, accounts}}
+let BILLING_START = 25;     // 결제 주기 시작일 (app_settings에서 로드)
 
 let tab          = "list";
 let scope        = "current";
@@ -577,14 +578,16 @@ const empty    = (ic,msg) => `<div class="empty"><div class="e-ic">${ic}</div><p
 
 /* ── 결제 주기 ── */
 function billingPeriod(ref){
-  ref=ref||new Date(); const d=ref.getDate(),m=ref.getMonth(),y=ref.getFullYear(); let sy,sm,ey,em;
-  if(d>=25){sy=y;sm=m;ey=m===11?y+1:y;em=m===11?0:m+1;}
+  ref=ref||new Date(); const d=ref.getDate(),m=ref.getMonth(),y=ref.getFullYear();
+  const sd=BILLING_START, ed=sd>1?sd-1:new Date(y,m+1,0).getDate();
+  let sy,sm,ey,em;
+  if(d>=sd){sy=y;sm=m;ey=m===11?y+1:y;em=m===11?0:m+1;}
   else{sy=m===0?y-1:y;sm=m===0?11:m-1;ey=y;em=m;}
-  return {start:new Date(sy,sm,25),end:new Date(ey,em,24,23,59,59),label:`${sm+1}/25 ~ ${em+1}/24`,key:`${sy}-${String(sm+1).padStart(2,"0")}`};
+  return {start:new Date(sy,sm,sd),end:new Date(ey,em,ed,23,59,59),label:`${sm+1}/${sd} ~ ${em+1}/${ed}`,key:`${sy}-${String(sm+1).padStart(2,"0")}`};
 }
 function recentPeriods(n){
   const cur=billingPeriod();
-  return Array.from({length:n},(_,i)=>billingPeriod(new Date(cur.start.getFullYear(),cur.start.getMonth()-(n-1-i),25)));
+  return Array.from({length:n},(_,i)=>billingPeriod(new Date(cur.start.getFullYear(),cur.start.getMonth()-(n-1-i),BILLING_START)));
 }
 const inPeriod = (s,p) => { const d=new Date(s.length===10?s+"T12:00:00":s); return d>=p.start&&d<=p.end; };
 
@@ -600,11 +603,12 @@ window.onload = async () => {
 /* ── 데이터 로드 ── */
 async function loadAll(){
   loadError = null;
-  const [mem, tx, lim, mst] = await Promise.all([
+  const [mem, tx, lim, mst, cfg] = await Promise.all([
     sb.from("members").select("name").order("id"),
     sb.from("transactions").select("*").order("date",{ascending:false}),
     sb.from("category_limits").select("*"),
-    sb.from("master_data").select("*")
+    sb.from("master_data").select("*"),
+    sb.from("app_settings").select("*")
   ]);
 
   if(mem.error) throw new Error("멤버 로드 오류: "+mem.error.message);
@@ -635,6 +639,13 @@ async function loadAll(){
     MASTER[row.member][key].push(row.value);
   });
   MEMBERS.forEach(m => { if(!MASTER[m].categories.length) MASTER[m].categories=[...DEFAULT_CATS]; });
+
+  // app_settings
+  if(!cfg.error)(cfg.data||[]).forEach(row => {
+    if(row.key==='billing_start_day'){
+      const v=Number(row.value); if(v>=1&&v<=28) BILLING_START=v;
+    }
+  });
 }
 
 /* ── 거래 저장/삭제 ── */
@@ -694,6 +705,18 @@ async function delMember(name){
   const res=await sb.from("members").delete().eq("name",name);
   if(res.error){ toast("오류: "+res.error.message); return; }
   await loadAll(); render();
+}
+
+/* ── 결제 주기 저장 ── */
+async function saveBillingStart(){
+  const raw=Number(document.getElementById("m_billing_start").value);
+  const v=Math.max(1,Math.min(28,raw||25));
+  const res=await sb.from("app_settings").upsert({key:"billing_start_day",value:String(v)},{onConflict:"key"});
+  if(res.error){ toast("오류: "+res.error.message); return; }
+  BILLING_START=v;
+  await loadAll(); render();
+  const ed=v>1?v-1:31;
+  toast(`결제 주기: 매월 ${v}일 ~ 다음달 ${ed}일`);
 }
 
 /* ── 마스터 데이터 추가/삭제 ── */
@@ -974,6 +997,21 @@ function viewMaster(){
   <div style="display:flex;align-items:center;gap:10px;padding:12px 15px;background:var(--acg2);border:1px solid rgba(201,147,58,.18);border-radius:14px;margin-bottom:18px">
     <span style="font-size:1.05rem">👤</span>
     <span style="font-size:.87rem;color:var(--t2)"><b style="color:var(--ac)">${masterMember}</b>의 항목을 관리합니다</span>
+  </div>`;
+
+  // 결제 주기 설정
+  const ed=BILLING_START>1?BILLING_START-1:31;
+  h+=`<div class="m-section">
+    <div class="m-title">📅 결제 주기 설정</div>
+    <div style="font-size:.82rem;color:var(--t2);margin-bottom:14px;line-height:1.8">
+      현재: 매월 <b style="color:var(--ac)">${BILLING_START}일</b> ~ 다음달 <b style="color:var(--ac)">${ed}일</b>
+    </div>
+    <div class="m-add">
+      <input id="m_billing_start" type="number" min="1" max="28" inputmode="numeric"
+        value="${BILLING_START}" placeholder="1~28" style="max-width:90px;text-align:center">
+      <button onclick="saveBillingStart()">일로 변경</button>
+    </div>
+    <div style="font-size:.72rem;color:var(--t3);margin-top:10px">※ 1~28일 입력 (2월 최소일수 기준)</div>
   </div>`;
 
   // 카테고리 / 결제수단 / 계좌 관리
