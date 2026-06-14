@@ -503,6 +503,19 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
   </div>
 </div>
 
+<div class="picker-ov" id="duOv" onclick="closeDeviceUser()">
+  <div class="picker-sht" onclick="event.stopPropagation()">
+    <div class="picker-hd">
+      <span class="picker-t">이 기기는 누구의 폰인가요?</span>
+      <button class="picker-cl" onclick="closeDeviceUser()">나중에</button>
+    </div>
+    <div style="padding:12px 22px 4px;font-size:.78rem;color:var(--t2);line-height:1.7">
+      선택하면 이 기기에서 <b style="color:var(--ac)">입력·필터의 기본 사용자</b>가 그 사람으로 맞춰집니다. (설정 탭에서 언제든 변경)
+    </div>
+    <div class="picker-opts" id="duOpts"></div>
+  </div>
+</div>
+
 <div class="overlay" id="overlay">
   <div class="sheet">
     <div class="s-top">
@@ -548,6 +561,9 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 /* ── 상수 ── */
 const DEFAULT_CATS = ["식비","생활비","교통","의료","쇼핑","문화","교육","통신","보험","고정비","데이트","월급","이자","기타"];
 const MASTER_KEYS  = {categories:"카테고리", methods:"결제수단", accounts:"계좌"};
+const MASTER_TYPE  = {categories:"category", methods:"method", accounts:"account"};  // JS key → DB type
+const MASTER_KEY_OF= {category:"categories", method:"methods", account:"accounts"};   // DB type → JS key
+const DEVICE_USER_KEY = "ourbudget.deviceUser";  // localStorage: 이 기기의 기본 사용자
 const CAT_ICON     = {생활비:"🛒",고정비:"🏠",월급:"💵",이자:"📈",데이트:"❤️",식비:"🍽️",교통:"🚌",의료:"💊",쇼핑:"👜",문화:"🎬",교육:"📚",통신:"📱",보험:"🛡️",기타:"📌"};
 const TABS         = [["list","📋","내역"],["cat","📊","분류"],["limit","🎯","한도"],["analysis","📈","분석"],["acct","🏦","계좌"],["master","⚙️","설정"]];
 
@@ -558,6 +574,7 @@ let ROWS          = [];
 let LIMITS        = {};     // {멤버: {카테고리: 금액}}
 let MASTER        = {};     // {멤버: {categories, methods, accounts}}
 let BILLING_STARTS = {};    // {멤버: 시작일} — app_settings에서 로드
+let DEVICE_USER    = null;  // 이 기기의 기본 사용자 (localStorage)
 
 let tab          = "list";
 let scope        = "current";
@@ -575,6 +592,8 @@ const wonShort = n => n>=10000 ? (n/10000).toFixed(n%10000?1:0)+"만" : Number(n
 const icon     = c => CAT_ICON[c] || "💳";
 const toast    = m => { const t=document.getElementById("toast"); t.textContent=m; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),1800); };
 const empty    = (ic,msg) => `<div class="empty"><div class="e-ic">${ic}</div><p>${msg.replace(/\n/g,"<br>")}</p></div>`;
+// 기기 기본 사용자가 멤버 목록에 있으면 그 사람을, 없으면 첫 멤버를 기본값으로
+const defMember = () => (DEVICE_USER && MEMBERS.includes(DEVICE_USER)) ? DEVICE_USER : (MEMBERS[0]||null);
 
 /* ── 결제 주기 ── */
 function billingPeriod(member, ref){
@@ -597,10 +616,17 @@ const inPeriod = (s,p) => { const d=new Date(s.length===10?s+"T12:00:00":s); ret
 /* ── 초기화 ── */
 window.onload = async () => {
   sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+  try { DEVICE_USER = localStorage.getItem(DEVICE_USER_KEY) || null; } catch(e){ DEVICE_USER = null; }
   buildNav();
   try { await loadAll(); } catch(e) { loadError=e.message; console.error("초기화 오류:",e); }
+  // 기기 사용자가 멤버에 없으면(삭제·개명) 무효화
+  if(DEVICE_USER && !MEMBERS.includes(DEVICE_USER)){ DEVICE_USER=null; try{localStorage.removeItem(DEVICE_USER_KEY);}catch(e){} }
+  // 기기 사용자가 정해져 있으면 각 필터의 기본값을 그 사람으로
+  if(DEVICE_USER) memberFilter = DEVICE_USER;
   renderMemberSeg();
   render();
+  // 최초 1회: 이 기기의 사용자를 아직 안 정했으면 선택 모달
+  if(!DEVICE_USER && MEMBERS.length && !loadError) openDeviceUser();
 };
 
 /* ── 데이터 로드 ── */
@@ -617,10 +643,10 @@ async function loadAll(){
   if(mem.error) throw new Error("멤버 로드 오류: "+mem.error.message);
   MEMBERS = (mem.data||[]).map(m=>m.name);
 
-  // 탭별 선택 멤버를 MEMBERS 목록에 맞게 보정
-  if(!MEMBERS.includes(limitMember))  limitMember  = MEMBERS[0]||null;
-  if(!MEMBERS.includes(masterMember)) masterMember = MEMBERS[0]||null;
-  if(!MEMBERS.includes(memberVal))    memberVal    = MEMBERS[0]||null;
+  // 탭별 선택 멤버를 MEMBERS 목록에 맞게 보정 (기기 사용자 우선)
+  if(!MEMBERS.includes(limitMember))  limitMember  = defMember();
+  if(!MEMBERS.includes(masterMember)) masterMember = defMember();
+  if(!MEMBERS.includes(memberVal))    memberVal    = defMember();
 
   if(tx.error) throw new Error(tx.error.message||"거래내역 로드 오류");
   ROWS = tx.data||[];
@@ -638,7 +664,7 @@ async function loadAll(){
   MEMBERS.forEach(m => MASTER[m] = {categories:[],methods:[],accounts:[]});
   if(!mst.error)(mst.data||[]).forEach(row => {
     if(!MASTER[row.member]) MASTER[row.member] = {categories:[],methods:[],accounts:[]};
-    const key = row.type==='category'?'categories':row.type==='method'?'methods':'accounts';
+    const key = MASTER_KEY_OF[row.type] || 'accounts';
     MASTER[row.member][key].push(row.value);
   });
   MEMBERS.forEach(m => { if(!MASTER[m].categories.length) MASTER[m].categories=[...DEFAULT_CATS]; });
@@ -730,14 +756,14 @@ async function saveBillingStart(member){
 /* ── 마스터 데이터 추가/삭제 ── */
 async function addMaster(key){
   const el=document.getElementById("m_input_"+key), val=el.value.trim(); if(!val||!masterMember) return;
-  const type=key==='categories'?'category':key==='methods'?'method':'account';
+  const type=MASTER_TYPE[key];
   const res=await sb.from("master_data").upsert({member:masterMember,type,value:val},{onConflict:'member,type,value'});
   if(res.error){ toast("오류: "+res.error.message); return; }
   el.value=""; await loadAll(); render();
 }
 async function delMaster(key,val){
   if(!masterMember) return;
-  const type=key==='categories'?'category':key==='methods'?'method':'account';
+  const type=MASTER_TYPE[key];
   const res=await sb.from("master_data").delete().eq("member",masterMember).eq("type",type).eq("value",val);
   if(res.error){ toast("오류: "+res.error.message); return; }
   await loadAll(); render();
@@ -754,6 +780,22 @@ function setScope(s){ scope=s; render(); }
 function setMemberFilter(m){ memberFilter=m; render(); }
 function setLimitMember(m){ limitMember=m; render(); }
 function setMasterMember(m){ masterMember=m; render(); }
+
+/* ── 기기 기본 사용자 (localStorage) ── */
+function openDeviceUser(){
+  const opts=MEMBERS.map(m=>`<div class="picker-opt${DEVICE_USER===m?' on':''}" onclick="setDeviceUser('${m}')">👤 ${m}</div>`).join("");
+  document.getElementById("duOpts").innerHTML=opts+`<div class="picker-opt${!DEVICE_USER?' on':''}" onclick="setDeviceUser('')">공용 (정하지 않음)</div>`;
+  document.getElementById("duOv").classList.add("open");
+}
+function closeDeviceUser(){ document.getElementById("duOv").classList.remove("open"); }
+function setDeviceUser(name){
+  DEVICE_USER = name || null;
+  try{ name ? localStorage.setItem(DEVICE_USER_KEY,name) : localStorage.removeItem(DEVICE_USER_KEY); }catch(e){}
+  memberVal=defMember(); limitMember=defMember(); masterMember=defMember();
+  memberFilter=DEVICE_USER||"전체";
+  closeDeviceUser(); renderMemberSeg(); render();
+  toast(DEVICE_USER?`이 기기 사용자: ${DEVICE_USER}`:"공용 모드로 변경");
+}
 
 function myRows(){ return memberFilter==="전체" ? ROWS : ROWS.filter(r=>r.member===memberFilter); }
 function scoped(){
@@ -794,12 +836,15 @@ async function retryLoad(){
 }
 
 /* ── 필터 바 (내역·분류·분석 공통: 주기 + 멤버) ── */
+// 멤버 필터 필 바 ('전체' 포함) — 내역·분류·분석·계좌 공통
+function memberFilterPills(){
+  return `<div class="filter">${["전체",...MEMBERS].map(mm=>`<span class="pill${memberFilter===mm?' on':''}" onclick="setMemberFilter('${mm}')">${mm}</span>`).join("")}</div>`;
+}
 function filterBar(){
   const _pLabel=memberFilter!=="전체"?billingPeriod(memberFilter).label:"각자 기준";
   const scopes=[["current",`이번 주기 (${_pLabel})`],["all","전체"]];
-  const mems=["전체",...MEMBERS];
   return `<div class="filter">${scopes.map(([k,lb])=>`<span class="pill${scope===k?' on':''}" onclick="setScope('${k}')">${lb}</span>`).join("")}</div>
-    <div class="filter">${mems.map(mm=>`<span class="pill${memberFilter===mm?' on':''}" onclick="setMemberFilter('${mm}')">${mm}</span>`).join("")}</div>`;
+    ${memberFilterPills()}`;
 }
 
 /* ── 멤버 전용 바 (한도·계좌 탭: '전체' 없음) ── */
@@ -961,9 +1006,7 @@ function viewAccount(){
     if(r.type==="입금"){ inc+=r.amount; acct[a]=(acct[a]||0)+r.amount; }
     else{ exp+=r.amount; acct[a]=(acct[a]||0)-r.amount; }
   });
-  const mems=["전체",...MEMBERS];
-  const bar=`<div class="filter">${mems.map(m=>`<span class="pill${memberFilter===m?' on':''}" onclick="setMemberFilter('${m}')">${m}</span>`).join("")}</div>`;
-  let h=`${bar}<div class="sec">
+  let h=`${memberFilterPills()}<div class="sec">
     <div class="acct-tot"><div class="at-l">${memberFilter==="전체"?"전체 합산 잔액":memberFilter+"의 잔액"}</div><div class="at-v">${won(inc-exp)}</div></div>
     <div class="acct-grid">
       <div class="am"><div class="am-l">총 수입</div><div class="am-v g">+${won(inc)}</div></div>
@@ -997,6 +1040,18 @@ function viewMaster(){
     <div class="m-add">
       <input id="m_input_member" placeholder="새 멤버 이름" onkeydown="if(event.key==='Enter')addMember()">
       <button onclick="addMember()">추가</button>
+    </div>
+  </div>`;
+
+  // 이 기기 사용자 (localStorage 기반, 멤버별 기본값)
+  h+=`<div class="m-section">
+    <div class="m-title">📱 이 기기 사용자</div>
+    <div style="font-size:.8rem;color:var(--t2);margin-bottom:12px;line-height:1.7">
+      이 기기에서 입력·필터의 <b style="color:var(--ac)">기본 사용자</b>입니다. 정우·지현이 각자 폰에서 한 번만 선택하면 돼요.
+    </div>
+    <div class="seg">
+      ${MEMBERS.map(m=>`<button class="${DEVICE_USER===m?'on':''}" onclick="setDeviceUser('${m}')">${m}</button>`).join("")}
+      <button class="${!DEVICE_USER?'on':''}" onclick="setDeviceUser('')">공용</button>
     </div>
   </div>`;
 
