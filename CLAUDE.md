@@ -165,7 +165,9 @@ memberVal    // 입력 시트의 '누가' 선택값
 ## 구글 시트 백업 (단방향)
 
 거래 저장/수정/삭제 시 Supabase와 함께 구글 시트에도 기록하는 백업.
-- 코드: `backup_appscript.gs` (Apps Script 웹앱), 배포 방법 주석 참고
+- **기존 가계부 GAS 프로젝트**(구버전 앱을 `doGet`으로 서빙)에 `doPost` 백업 수신부만 추가하는 방식
+- 코드: `backup_appscript.gs` (그 프로젝트 Code.gs 맨 끝에 추가하는 블록), 배포 방법 주석 참고
+- 시트: `지출리스트` 탭 (1~7열 기존 형식 + 8열 user + 9열 id(uuid, 매칭용))
 - 클라이언트: `backupToSheet(action, payload)` — `saveEntry()`·`delEntry()`에서 호출
 - `GAS_BACKUP_URL` 비어있으면 자동 비활성 (앱 동작엔 영향 없음, fire-and-forget)
 - 시트 행은 Supabase `id`(uuid)로 매칭 → 수정/삭제가 같은 행에 반영
