@@ -564,6 +564,9 @@ const MASTER_KEYS  = {categories:"카테고리", methods:"결제수단", account
 const MASTER_TYPE  = {categories:"category", methods:"method", accounts:"account"};  // JS key → DB type
 const MASTER_KEY_OF= {category:"categories", method:"methods", account:"accounts"};   // DB type → JS key
 const DEVICE_USER_KEY = "ourbudget.deviceUser";  // localStorage: 이 기기의 기본 사용자
+// 구글 시트 백업 (Apps Script 웹앱). URL 비우면 백업 비활성.
+const GAS_BACKUP_URL    = "";  // ← 배포한 Apps Script 웹앱 URL 붙여넣기
+const GAS_BACKUP_SECRET = "ourbudget-backup-2026";  // GAS 코드의 SECRET과 동일하게
 const CAT_ICON     = {생활비:"🛒",고정비:"🏠",월급:"💵",이자:"📈",데이트:"❤️",식비:"🍽️",교통:"🚌",의료:"💊",쇼핑:"👜",문화:"🎬",교육:"📚",통신:"📱",보험:"🛡️",기타:"📌"};
 const TABS         = [["list","📋","내역"],["cat","📊","분류"],["limit","🎯","한도"],["analysis","📈","분석"],["acct","🏦","계좌"],["master","⚙️","설정"]];
 
@@ -682,6 +685,18 @@ async function loadAll(){
   MEMBERS.forEach(m=>{if(!(m in BILLING_STARTS))BILLING_STARTS[m]=_globalBS;});
 }
 
+/* ── 구글 시트 백업 (단방향, fire-and-forget) ── */
+function backupToSheet(action, payload){
+  if(!GAS_BACKUP_URL) return;  // URL 미설정 시 비활성
+  try{
+    fetch(GAS_BACKUP_URL, {
+      method:"POST", mode:"no-cors", keepalive:true,
+      headers:{"Content-Type":"text/plain;charset=utf-8"},  // preflight 회피
+      body: JSON.stringify({secret:GAS_BACKUP_SECRET, action, ...payload})
+    }).catch(()=>{});  // 백업 실패는 앱 동작에 영향 없음
+  }catch(e){}
+}
+
 /* ── 거래 저장/삭제 ── */
 async function saveEntry(){
   const amount = Number(document.getElementById("fAmount").value.replace(/,/g,""));
@@ -698,21 +713,29 @@ async function saveEntry(){
   if(!row.amount||!row.category||!row.account){ toast("금액·카테고리·계좌는 필수예요"); return; }
   const btn=document.getElementById("saveBtn");
   btn.textContent="저장 중..."; btn.disabled=true;
+  const wasEdit=!!editId;
   try {
-    const res = editId
-      ? await sb.from("transactions").update(row).eq("id",editId)
-      : await sb.from("transactions").insert(row);
-    if(res.error){ toast("저장 오류: "+res.error.message); return; }
+    let savedId=editId;
+    if(wasEdit){
+      const res=await sb.from("transactions").update(row).eq("id",editId);
+      if(res.error){ toast("저장 오류: "+res.error.message); return; }
+    } else {
+      const res=await sb.from("transactions").insert(row).select("id").single();
+      if(res.error){ toast("저장 오류: "+res.error.message); return; }
+      savedId=res.data&&res.data.id;
+    }
+    backupToSheet("upsert",{id:savedId,...row});  // 구글 시트 백업
     closeSheet(); await loadAll(); render();
-    toast(editId?"수정 완료":"저장 완료");
+    toast(wasEdit?"수정 완료":"저장 완료");
   } catch(e){ toast("오류: "+e.message); }
-  finally{ btn.textContent=editId?"수정하기":"저장하기"; btn.disabled=false; }
+  finally{ btn.textContent=wasEdit?"수정하기":"저장하기"; btn.disabled=false; }
 }
 
 async function delEntry(id){
   if(!confirm("삭제하시겠습니까?")) return;
   const res=await sb.from("transactions").delete().eq("id",id);
   if(res.error){ toast("삭제 오류: "+res.error.message); return; }
+  backupToSheet("delete",{id});  // 구글 시트 백업
   await loadAll(); render(); toast("삭제 완료");
 }
 

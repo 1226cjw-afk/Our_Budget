@@ -162,6 +162,18 @@ memberVal    // 입력 시트의 '누가' 선택값
 
 ---
 
+## 구글 시트 백업 (단방향)
+
+거래 저장/수정/삭제 시 Supabase와 함께 구글 시트에도 기록하는 백업.
+- 코드: `backup_appscript.gs` (Apps Script 웹앱), 배포 방법 주석 참고
+- 클라이언트: `backupToSheet(action, payload)` — `saveEntry()`·`delEntry()`에서 호출
+- `GAS_BACKUP_URL` 비어있으면 자동 비활성 (앱 동작엔 영향 없음, fire-and-forget)
+- 시트 행은 Supabase `id`(uuid)로 매칭 → 수정/삭제가 같은 행에 반영
+- CORS: `mode:'no-cors'` + `Content-Type:text/plain` 으로 preflight 회피 (응답은 읽지 않음)
+- ⚠️ Apps Script 코드 수정 후엔 "배포 관리 → 새 버전"으로 재배포해야 반영됨
+
+---
+
 ## 자주 하는 작업
 
 ### DB 스키마 변경이 필요할 때
