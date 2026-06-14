@@ -471,9 +471,9 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
       <div class="frow"><label class="flb">누가</label><div class="seg" id="memberSeg"></div></div>
       <div class="frow"><label class="flb">날짜</label><input class="inp" type="date" id="fDate"></div>
       <div class="frow"><label class="flb">금액</label><input class="inp" id="fAmount" inputmode="numeric" placeholder="0"></div>
-      <div class="frow"><label class="flb">카테고리</label><input class="inp" id="fCategory" list="catList" placeholder="카테고리 선택"><datalist id="catList"></datalist></div>
-      <div class="frow"><label class="flb">결제수단</label><input class="inp" id="fMethod" list="methodList" placeholder="결제수단 선택"><datalist id="methodList"></datalist></div>
-      <div class="frow"><label class="flb">계좌</label><input class="inp" id="fAccount" list="accountList" placeholder="계좌 선택"><datalist id="accountList"></datalist></div>
+      <div class="frow"><label class="flb">카테고리</label><select class="inp" id="fCategory"></select></div>
+      <div class="frow"><label class="flb">결제수단</label><select class="inp" id="fMethod"></select></div>
+      <div class="frow"><label class="flb">계좌</label><select class="inp" id="fAccount"></select></div>
       <div class="frow"><label class="flb">세부내역</label><input class="inp" id="fMemo" placeholder="메모 (선택)"></div>
       <button class="submit" id="saveBtn" onclick="saveEntry()">저장하기</button>
     </div>
@@ -766,9 +766,9 @@ function viewMaster(){
 function refreshCatList(){
   const mdata=MASTER[memberVal]||{categories:[...DEFAULT_CATS],methods:[],accounts:[]};
   const cats=Array.from(new Set([...mdata.categories,...Object.keys(LIMITS)]));
-  document.getElementById("catList").innerHTML=cats.map(c=>`<option value="${c}">`).join("");
-  document.getElementById("methodList").innerHTML=mdata.methods.map(m=>`<option value="${m}">`).join("");
-  document.getElementById("accountList").innerHTML=mdata.accounts.map(a=>`<option value="${a}">`).join("");
+  document.getElementById("fCategory").innerHTML=cats.map(c=>`<option value="${c}">${c}</option>`).join("");
+  document.getElementById("fMethod").innerHTML=`<option value="">선택 안함</option>`+mdata.methods.map(m=>`<option value="${m}">${m}</option>`).join("");
+  document.getElementById("fAccount").innerHTML=`<option value="">계좌 선택</option>`+mdata.accounts.map(a=>`<option value="${a}">${a}</option>`).join("");
 }
 function renderMemberSeg(){ document.getElementById("memberSeg").innerHTML = MEMBERS.map(m=>`<button class="${m===memberVal?'on':''}" onclick="setMember('${m}')">${m}</button>`).join(""); }
 function setMember(m){ memberVal=m; renderMemberSeg(); refreshCatList(); }
@@ -779,10 +779,10 @@ function openSheet(){ editId=null; document.getElementById("sheetTitle").textCon
   setType("지출"); memberVal=MEMBERS[0]; renderMemberSeg(); refreshCatList();
   document.getElementById("overlay").classList.add("open");
 }
-function editEntry(r){ editId=r.id; document.getElementById("sheetTitle").textContent="내역 수정"; document.getElementById("saveBtn").textContent="수정하기"; refreshCatList();
+function editEntry(r){ editId=r.id; document.getElementById("sheetTitle").textContent="내역 수정"; document.getElementById("saveBtn").textContent="수정하기";
+  setType(r.type); memberVal=r.member||MEMBERS[0]; renderMemberSeg(); refreshCatList();
   document.getElementById("fDate").value=r.date; document.getElementById("fAmount").value=Number(r.amount).toLocaleString("ko-KR");
   document.getElementById("fCategory").value=r.category; document.getElementById("fMethod").value=r.method||""; document.getElementById("fAccount").value=r.account||""; document.getElementById("fMemo").value=r.memo||"";
-  setType(r.type); memberVal=r.member||MEMBERS[0]; renderMemberSeg();
   document.getElementById("overlay").classList.add("open");
 }
 function closeSheet(){ document.getElementById("overlay").classList.remove("open"); editId=null; }
