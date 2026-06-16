@@ -20,8 +20,11 @@ branch: main
 작업 후 항상 `git add index.html && git commit && git push` — GitHub Pages가 자동 배포됨.
 
 ### Supabase MCP (SQL 직접 실행)
-`~/.claude/mcp.json`에 이미 설정됨. 세션 시작 시 자동 연결.
-- **연결 안 될 경우**: Claude Code 완전 재시작 필요
+프로젝트 폴더의 `Our_Budget/.mcp.json`에 설정됨 (project 범위).
+- ⚠️ **반드시 `Our_Budget` 폴더에서 claude를 열어야 연결됨.** 다른 폴더(예: 홈)에서 열면 MCP 안 붙음
+- 바탕화면 "가계부 Claude" 바로가기 또는 PowerShell `budget` 명령으로 열면 자동 연결
+- **연결 안 될 경우**: Claude Code 완전 재시작
+- ⚠️ `.mcp.json`에 Supabase access token이 평문 저장됨 → git에 커밋 금지 (`.gitignore` 확인)
 - 연결되면 `mcp__supabase__*` 도구로 SQL 직접 실행 가능 (Supabase 대시보드 불필요)
 
 ### Supabase 프로젝트
@@ -149,6 +152,9 @@ memberVal    // 입력 시트의 '누가' 선택값
 | `addMember() / delMember()` | 멤버 DB CRUD |
 | `addMaster(key) / delMaster(key, val)` | 카테고리·결제수단·계좌 CRUD |
 | `refreshCatList()` | 입력 시트 select 옵션 갱신 |
+| `viewAnalysis() / buildInsights()` | 분석 탭 렌더 + 카테고리 기반 스마트 진단·절약팁 생성 |
+| `drawAnalysisCharts() / destroyCharts()` | 도넛·막대·라인 차트 렌더 / 인스턴스 일괄 파괴 |
+| `expOf(rs) / incOf(rs) / catColor(c)` | 지출·수입 합계 헬퍼, 카테고리 고정색(이름 해시) |
 | `render()` | 현재 탭 전체 재렌더 |
 
 ### 탭 구성
@@ -194,6 +200,10 @@ git push
 # GitHub Pages 자동 배포 (1~2분 소요)
 ```
 > GAS 백업 코드를 고쳤다면 `backup_appscript.gs`도 함께 커밋. (단 실제 반영은 Apps Script "새 버전" 재배포 필요)
+
+### JS 검증 (테스트 프레임워크 없음)
+브라우저 없이 인라인 JS를 확인하는 법: 마지막 `<script>` 블록을 추출 → `new Function`/`Module._compile`에 stub(supabase·Chart·document·localStorage) 주입해 파싱/순수함수 단위테스트. `node`로 실행.
+⚠️ 차트 재렌더 시 이전 인스턴스 `destroyCharts()` 필수 (누수 방지). `viewX()`는 HTML만 반환, 캔버스는 `drawX()`에서.
 
 ### 모바일 대응 주의사항
 - `<input list="datalist">` 사용 금지 → iOS Safari 미지원. 반드시 `<select>` 사용
