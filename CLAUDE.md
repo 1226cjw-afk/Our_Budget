@@ -6,8 +6,7 @@
 
 - **배포 URL**: `https://1226cjw-afk.github.io/Our_Budget/`
 - **GitHub**: `https://github.com/1226cjw-afk/Our_Budget`
-- **로컬 경로 (주)**: `C:/Users/1226c/Our_Budget/` ← 여기서 작업
-- **로컬 경로 (부)**: `C:/budget/` (동일 remote, main 브랜치로 동기화됨)
+- **로컬 경로**: `C:/Users/1226c/Projects/Our_Budget/` ← 여기서 작업
 
 ---
 
@@ -38,8 +37,10 @@ Anon Key    : sb_publishable_phZGH7odPTBoB4z8FQF_4A_mO2ltQ6J
 
 ```
 Our_Budget/
-├── index.html        # 앱 전체 (HTML + CSS + JS 단일 파일)
-└── CLAUDE.md         # 이 파일
+├── index.html           # 앱 전체 (HTML + CSS + JS 단일 파일) — 유일한 배포 산출물
+├── backup_appscript.gs  # 구글 시트 백업용 GAS 코드 (참고용, 배포는 Apps Script에 수동 반영)
+└── CLAUDE.md            # 이 파일
+# (git 미추적 보조: PROGRESS.md, insert_master.ps1, .mcp.json — 커밋 대상 아님)
 ```
 
 CSS · JS 모두 `index.html` 안에 인라인. 외부 의존성:
@@ -192,10 +193,14 @@ git commit -m "..."
 git push
 # GitHub Pages 자동 배포 (1~2분 소요)
 ```
+> GAS 백업 코드를 고쳤다면 `backup_appscript.gs`도 함께 커밋. (단 실제 반영은 Apps Script "새 버전" 재배포 필요)
 
 ### 모바일 대응 주의사항
 - `<input list="datalist">` 사용 금지 → iOS Safari 미지원. 반드시 `<select>` 사용
 - `position: fixed` 오버레이는 `overflow-y: auto` 필수
+
+### 보안
+- `.mcp.json`엔 Supabase 연결정보 포함 → 커밋 금지 (현재 `.gitignore` 없음, 추가 권장)
 
 ---
 

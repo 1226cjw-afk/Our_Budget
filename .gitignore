@@ -1,0 +1,6 @@
+# Supabase 연결정보 등 로컬 설정 — 커밋 금지
+.mcp.json
+
+# 로컬 보조 스크립트 / 메모 (배포 산출물 아님)
+PROGRESS.md
+insert_master.ps1
