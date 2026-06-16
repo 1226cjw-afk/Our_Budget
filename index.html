@@ -263,6 +263,36 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .a-tag.one{background:var(--gb);color:var(--g);border:1px solid rgba(46,200,144,.18)}
 .a-v{font-size:.83rem;font-weight:700;white-space:nowrap}
 
+/* 분석 요약 스탯 줄 */
+.astat{display:flex;gap:8px;margin-bottom:12px}
+.astat .am{flex:1}
+.am-d{font-size:.62rem;font-weight:700;margin-top:3px}
+
+/* 도넛 차트 (중앙 총액 + 커스텀 범례) */
+.donut-wrap{position:relative;max-width:280px;margin:0 auto}
+.donut-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none}
+.dc-l{font-size:.6rem;color:var(--t3);font-weight:700;letter-spacing:.6px;text-transform:uppercase}
+.dc-v{font-size:1.18rem;font-weight:900;color:var(--t1);letter-spacing:-.5px}
+.dlegend{display:flex;flex-wrap:wrap;gap:7px 14px;margin-top:16px;justify-content:center}
+.dlg{display:flex;align-items:center;gap:6px;font-size:.76rem}
+.dlg-dot{width:9px;height:9px;border-radius:3px;flex-shrink:0}
+.dlg-nm{color:var(--t2);font-weight:600}
+.dlg-v{color:var(--t3);font-weight:700}
+
+/* 스마트 분석 인사이트 카드 */
+.ins{display:flex;gap:12px;padding:13px 0;border-bottom:1px solid var(--bd)}
+.ins:last-child{border:none;padding-bottom:0}
+.ins-ic{width:34px;height:34px;min-width:34px;border-radius:10px;background:var(--bg3);display:flex;align-items:center;justify-content:center;font-size:1.05rem;border:1px solid var(--bd)}
+.ins-bd{flex:1;min-width:0}
+.ins-t{font-size:.85rem;font-weight:700;margin-bottom:3px;line-height:1.45}
+.ins-b{font-size:.78rem;color:var(--t2);line-height:1.65}
+.ins.warn .ins-ic{background:var(--rb);border-color:rgba(240,84,112,.25)}
+.ins.warn .ins-t{color:var(--r)}
+.ins.tip .ins-ic{background:var(--acg);border-color:rgba(201,147,58,.25)}
+.ins.tip .ins-t{color:var(--ac)}
+.ins.good .ins-ic{background:var(--gb);border-color:rgba(46,200,144,.25)}
+.ins.good .ins-t{color:var(--g)}
+
 /* ── 계좌 ── */
 .acct-tot{
   border-radius:24px;padding:24px 22px 22px;margin-bottom:14px;
@@ -598,6 +628,15 @@ const empty    = (ic,msg) => `<div class="empty"><div class="e-ic">${ic}</div><p
 // 기기 기본 사용자가 멤버 목록에 있으면 그 사람을, 없으면 첫 멤버를 기본값으로
 const defMember = () => (DEVICE_USER && MEMBERS.includes(DEVICE_USER)) ? DEVICE_USER : (MEMBERS[0]||null);
 
+// 합계 헬퍼 (지출/수입) — 여러 뷰에서 반복되던 filter+reduce 통합
+const expOf = rs => rs.reduce((s,r)=>s+(r.type!=="입금"?r.amount:0),0);
+const incOf = rs => rs.reduce((s,r)=>s+(r.type==="입금"?r.amount:0),0);
+// 카테고리 색상 — 이름 기반 고정 해시(같은 카테고리는 항상 같은 색)
+const CAT_PALETTE = ["#C9933A","#2EC890","#F05470","#5B8DEF","#E8961E","#A06FE8","#41C7D6","#E85AA0","#8AC926","#FF8C42","#D4A030","#7C9CF0"];
+const catColor = c => { let h=0; const s=String(c); for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))>>>0; return CAT_PALETTE[h%CAT_PALETTE.length]; };
+// 고정성 지출 카테고리 (절약 팁/고정·변동 분석에서 '고정'으로 분류)
+const FIXED_CATS = new Set(["고정비","통신","보험","이자","월세","관리비","교육","구독","월급"]);
+
 /* ── 결제 주기 ── */
 function billingPeriod(member, ref){
   const sd=(member&&BILLING_STARTS[member])||25;
@@ -847,7 +886,7 @@ function render(){
   if(tab==="list")     m.innerHTML = filterBar() + viewList();
   else if(tab==="cat") m.innerHTML = filterBar() + viewCategory();
   else if(tab==="limit")    m.innerHTML = viewLimit();
-  else if(tab==="analysis"){ m.innerHTML = filterBar() + viewAnalysis(); drawChart(); }
+  else if(tab==="analysis"){ m.innerHTML = memberFilterPills() + viewAnalysis(); drawAnalysisCharts(); }
   else if(tab==="acct")     m.innerHTML = viewAccount();
   else if(tab==="master")   m.innerHTML = viewMaster();
 }
@@ -878,8 +917,7 @@ function memberBar(current, fn){
 /* ── 내역 탭 ── */
 function viewList(){
   const rows=scoped(); if(!rows.length) return `<div class="sec">${empty("📭","내역이 없어요.\n＋ 버튼으로 추가해보세요.")}</div>`;
-  const inc=rows.filter(r=>r.type==="입금").reduce((s,r)=>s+r.amount,0);
-  const exp=rows.filter(r=>r.type!=="입금").reduce((s,r)=>s+r.amount,0);
+  const inc=incOf(rows), exp=expOf(rows);
   const groups={}; rows.forEach(r=>{(groups[r.date]=groups[r.date]||[]).push(r);});
   const days=["일","월","화","수","목","금","토"];
   const dl=s=>{const d=new Date(s);return `${d.getMonth()+1}월 ${d.getDate()}일 (${days[d.getDay()]})`;};
@@ -889,7 +927,7 @@ function viewList(){
     <div class="card exp"><div class="c-lb">지출</div><div class="c-v r">-${won(exp)}</div></div>
   </div>`;
   Object.keys(groups).sort((a,b)=>b.localeCompare(a)).forEach(date=>{
-    const dr=groups[date], de=dr.filter(r=>r.type!=="입금").reduce((s,r)=>s+r.amount,0);
+    const dr=groups[date], de=expOf(dr);
     h+=`<div class="dgroup"><div class="dhead"><span>${dl(date)}</span><span class="dtot">${de>0?'-'+won(de):''}</span></div>`;
     dr.forEach(r=>{
       const cls=r.type==="입금"?"g":"r", pf=r.type==="입금"?"+":"-";
@@ -979,14 +1017,39 @@ function viewLimit(){
 }
 
 /* ── 분석 탭 ── */
-let chartData=[];
+let _anStash = null;   // 차트용 데이터 보관 (viewAnalysis → drawAnalysisCharts)
+
 function viewAnalysis(){
-  const _anMem=memberFilter!=="전체"?memberFilter:MEMBERS[0];
-  const periods=recentPeriods(3,_anMem);
-  chartData=periods.map(p=>{
-    const pr=myRows().filter(r=>inPeriod(r.date,p));
-    return {name:p.label.split(" ")[0], inc:pr.filter(r=>r.type==="입금").reduce((s,r)=>s+r.amount,0), exp:pr.filter(r=>r.type!=="입금").reduce((s,r)=>s+r.amount,0)};
-  });
+  const _anMem = memberFilter!=="전체" ? memberFilter : MEMBERS[0];
+  const periods = recentPeriods(3, _anMem);
+  const rowsByPeriod = periods.map(p => myRows().filter(r=>inPeriod(r.date,p)));
+  const labels = periods.map(p => p.label.split(" ")[0]);
+
+  // 주기별 수입·지출
+  const period = rowsByPeriod.map(rs => ({inc:incOf(rs), exp:expOf(rs)}));
+
+  // 현재(최근) 주기 카테고리별 지출
+  const curRows = rowsByPeriod[rowsByPeriod.length-1] || [];
+  const curCat = {};
+  curRows.filter(r=>r.type!=="입금").forEach(r => curCat[r.category]=(curCat[r.category]||0)+r.amount);
+  const curCatArr = Object.entries(curCat).sort((a,b)=>b[1]-a[1]);   // [[cat,amt], ...]
+  const totExp = curCatArr.reduce((s,[,a])=>s+a,0);
+
+  // 카테고리별 주기 추이 (현재 지출 상위 5개, 없으면 전체합 상위)
+  const catAll={};
+  rowsByPeriod.flat().filter(r=>r.type!=="입금").forEach(r=>catAll[r.category]=(catAll[r.category]||0)+r.amount);
+  const topCats = (curCatArr.length ? curCatArr.map(([c])=>c) : Object.keys(catAll).sort((a,b)=>catAll[b]-catAll[a])).slice(0,5);
+  const trend = topCats.map(c => ({cat:c, data: rowsByPeriod.map(rs => expOf(rs.filter(r=>r.category===c)))}));
+
+  _anStash = {labels, period, donut:curCatArr, totExp, trend};
+
+  // 요약 스탯
+  const avg  = Math.round(period.reduce((s,d)=>s+d.exp,0)/(period.length||1));
+  const last = period[period.length-1]?.exp||0, prev = period[period.length-2]?.exp||0;
+  const trPct  = prev?Math.round((last-prev)/prev*100):0;
+  const avgPct = avg?Math.round((last-avg)/avg*100):0;
+
+  // 반복 지출 / 일회성 큰 지출 (세부내역 기준)
   const byMemo={};
   myRows().filter(r=>r.type==="지출"&&r.memo).forEach(r=>{
     const pi=periods.findIndex(p=>inPeriod(r.date,p)); if(pi<0) return;
@@ -997,27 +1060,144 @@ function viewAnalysis(){
   const list=Object.values(byMemo).map(x=>({...x,span:x.ps.size}));
   const rec=list.filter(x=>x.span>=2).sort((a,b)=>b.total-a.total);
   const one=list.filter(x=>x.span===1&&x.total>=100000).sort((a,b)=>b.total-a.total);
-  const avg=Math.round(chartData.reduce((s,d)=>s+d.exp,0)/(chartData.length||1));
-  const last=chartData[chartData.length-1]?.exp||0, prev=chartData[chartData.length-2]?.exp||0;
-  const tr=prev?Math.round((last-prev)/prev*100):0;
-  return `<div class="sec">
-    <div class="panel"><div class="p-t">📈 주기별 수입·지출</div><canvas id="chart" height="180"></canvas></div>
-    <div class="panel"><div class="p-t">🧾 분석 요약</div><div class="p-body">최근 ${chartData.length}개 주기 평균 지출은 ${won(avg)}입니다.
-이번 주기 지출은 전 주기 대비 ${tr>=0?'+':''}${tr}% (${won(last)}).
-${rec.length?`반복 지출 ${rec.length}건이 매 주기 빠져나가고 있어요.`:"뚜렷한 반복 지출은 아직 없습니다."}</div></div>
-    <div class="panel"><div class="p-t">🔁 반복 지출</div>${rec.length?rec.map(x=>`<div class="arow"><span class="a-mo">${icon(x.cat)} ${x.memo}</span><span class="a-tag rec">${x.span}주기</span><span class="a-v">${won(x.total)}</span></div>`).join(''):'<div class="p-body">없음</div>'}</div>
-    <div class="panel"><div class="p-t">💥 일회성 큰 지출</div>${one.length?one.map(x=>`<div class="arow"><span class="a-mo">${icon(x.cat)} ${x.memo}</span><span class="a-tag one">1회</span><span class="a-v">${won(x.total)}</span></div>`).join(''):'<div class="p-body">없음</div>'}</div>
+
+  const insights = buildInsights(_anMem, periods, rowsByPeriod, curCatArr, totExp);
+
+  // ── HTML ──
+  const statBox=(lb,val,sub,subCls)=>`<div class="am"><div class="am-l">${lb}</div><div class="am-v">${val}</div>${sub?`<div class="am-d ${subCls||''}">${sub}</div>`:''}</div>`;
+  let h=`<div class="sec">`;
+
+  // 1) 요약 스탯 줄
+  h+=`<div class="astat">
+    ${statBox("이번 주기 지출",won(last))}
+    ${statBox("평균 대비", `${avgPct>=0?'+':''}${avgPct}%`, won(avg)+" 평균", avgPct>0?'r':'g')}
+    ${statBox("전 주기 대비", `${trPct>=0?'+':''}${trPct}%`, won(prev), trPct>0?'r':'g')}
   </div>`;
+
+  // 2) 카테고리별 지출 비중 (도넛)
+  if(totExp>0){
+    h+=`<div class="panel"><div class="p-t">📊 카테고리별 지출 비중 · 이번 주기</div>
+      <div class="donut-wrap"><canvas id="chartDonut" height="220"></canvas>
+        <div class="donut-center"><div class="dc-l">총 지출</div><div class="dc-v">${wonShort(totExp)}</div></div></div>
+      <div class="dlegend">${curCatArr.map(([c,a])=>`<div class="dlg"><span class="dlg-dot" style="background:${catColor(c)}"></span><span class="dlg-nm">${c}</span><span class="dlg-v">${Math.round(a/totExp*100)}%</span></div>`).join("")}</div>
+    </div>`;
+  }
+
+  // 3) 스마트 분석 & 절약 팁
+  h+=`<div class="panel"><div class="p-t">💡 스마트 분석 & 절약 팁</div>
+    ${insights.map(x=>`<div class="ins ${x.tone||''}"><div class="ins-ic">${x.ic}</div><div class="ins-bd"><div class="ins-t">${x.t}</div><div class="ins-b">${x.b}</div></div></div>`).join("")}
+  </div>`;
+
+  // 4) 주기별 수입·지출 (막대)
+  h+=`<div class="panel"><div class="p-t">📈 주기별 수입·지출</div><canvas id="chartPeriod" height="180"></canvas></div>`;
+
+  // 5) 카테고리별 추이 (라인)
+  if(trend.length && totExp>0){
+    h+=`<div class="panel"><div class="p-t">📉 카테고리별 지출 추이 · 상위 ${trend.length}개</div><canvas id="chartTrend" height="190"></canvas></div>`;
+  }
+
+  // 6) 반복 지출 / 일회성 큰 지출
+  h+=`<div class="panel"><div class="p-t">🔁 반복 지출</div>${rec.length?rec.map(x=>`<div class="arow"><span class="a-mo">${icon(x.cat)} ${x.memo}</span><span class="a-tag rec">${x.span}주기</span><span class="a-v">${won(x.total)}</span></div>`).join(''):'<div class="p-body">없음</div>'}</div>
+    <div class="panel"><div class="p-t">💥 일회성 큰 지출</div>${one.length?one.map(x=>`<div class="arow"><span class="a-mo">${icon(x.cat)} ${x.memo}</span><span class="a-tag one">1회</span><span class="a-v">${won(x.total)}</span></div>`).join(''):'<div class="p-body">없음</div>'}</div>`;
+
+  return h+`</div>`;
 }
-let chartInst=null;
-function drawChart(){
-  const ctx=document.getElementById("chart"); if(!ctx) return;
-  if(chartInst) chartInst.destroy();
-  chartInst=new Chart(ctx,{type:"bar",data:{labels:chartData.map(d=>d.name),datasets:[
-    {label:"수입",data:chartData.map(d=>d.inc),backgroundColor:"rgba(46,200,144,.75)",borderRadius:6},
-    {label:"지출",data:chartData.map(d=>d.exp),backgroundColor:"rgba(240,84,112,.75)",borderRadius:6}]},
-    options:{responsive:true,plugins:{legend:{labels:{color:"#6E6C8A",font:{size:11},boxWidth:10}}},
-      scales:{x:{ticks:{color:"#6E6C8A",font:{size:11}},grid:{display:false}},y:{ticks:{color:"#32304E",font:{size:10},callback:v=>wonShort(v)},grid:{color:"#12141F"}}}}});
+
+/* 카테고리 기반 스마트 분석 — 과지출 진단 + 절약 팁 생성 */
+function buildInsights(mem, periods, rowsByPeriod, curCatArr, totExp){
+  if(!totExp) return [{ic:"🌱",tone:"good",t:"이번 주기는 아직 지출이 없어요.",b:"지출이 쌓이면 카테고리별 과지출 진단과 절약 팁을 보여드릴게요."}];
+  const out=[];
+  const curMap = Object.fromEntries(curCatArr);
+
+  // 1) 최대 지출 카테고리 집중도
+  const [topCat, topAmt]=curCatArr[0];
+  const topPct=Math.round(topAmt/totExp*100);
+  out.push({ic:icon(topCat),tone: topPct>=40?"warn":"info",
+    t:`가장 큰 지출은 '${topCat}' · 전체의 ${topPct}%`,
+    b: topPct>=40
+      ? `이번 주기 지출이 '${topCat}'(${won(topAmt)})에 쏠려 있어요. 한 카테고리가 40%를 넘으면 예산이 흔들리기 쉬워요 — 이 항목부터 줄일 여지를 찾아보세요.`
+      : `'${topCat}'에 ${won(topAmt)}를 썼어요. 특정 항목에 과하게 몰리지 않은 건강한 분포예요.`});
+
+  // 2) 한도 초과 / 임박 (멤버 한도 기준)
+  const lim=(mem&&LIMITS[mem])||{};
+  const overs=[], nears=[];
+  Object.entries(lim).forEach(([c,l])=>{
+    if(!l) return; const used=curMap[c]||0; const pct=Math.round(used/l*100);
+    if(pct>=100) overs.push({c,used,l,pct}); else if(pct>=80) nears.push({c,pct});
+  });
+  if(overs.length) out.push({ic:"🚨",tone:"warn",t:`한도 초과 ${overs.length}건`,
+    b: overs.map(o=>`'${o.c}' ${o.pct}% (${won(o.used-o.l)} 초과)`).join(" · ")+" — 다음 주기엔 이 카테고리를 가장 먼저 조여보세요."});
+  if(nears.length) out.push({ic:"⚠️",tone:"info",t:`한도 임박 ${nears.length}건`,
+    b: nears.map(o=>`'${o.c}' ${o.pct}%`).join(" · ")+" — 한도까지 여유가 얼마 없어요."});
+
+  // 3) 평소보다 급증한 카테고리 (이전 주기 평균 대비)
+  const prevRows=rowsByPeriod.slice(0,-1).flat();
+  const prevCnt=Math.max(periods.length-1,1);
+  const prevAvg={};
+  prevRows.filter(r=>r.type!=="입금").forEach(r=>prevAvg[r.category]=(prevAvg[r.category]||0)+r.amount);
+  Object.keys(prevAvg).forEach(c=>prevAvg[c]/=prevCnt);
+  let surge=null;
+  curCatArr.forEach(([c,a])=>{
+    const base=prevAvg[c]||0;
+    if(base>=10000 && a>=base*1.3){ const up=Math.round((a-base)/base*100); if(!surge||up>surge.up) surge={c,up,a,base}; }
+  });
+  if(surge) out.push({ic:"📈",tone:"warn",t:`'${surge.c}' 지출이 평소보다 ${surge.up}% 늘었어요`,
+    b:`평소 약 ${won(Math.round(surge.base))} → 이번 ${won(surge.a)}. 일시적인 지출인지, 새 습관이 생긴 건지 점검해보세요.`});
+
+  // 4) 절약 팁 — 조절 가능한 변동 지출 중 가장 큰 항목
+  const flexTop=curCatArr.find(([c])=>!FIXED_CATS.has(c));
+  if(flexTop){
+    const [c,a]=flexTop; const cut=Math.round(a*0.1/1000)*1000;
+    out.push({ic:"💡",tone:"tip",t:`절약은 '${c}'부터 시작하세요`,
+      b:`'${c}'는 줄이기 쉬운 변동 지출 중 가장 커요(${won(a)}). 여기서 10%만 아껴도 한 주기에 약 ${won(cut)}, 1년이면 ${won(cut*12)}을 모을 수 있어요.`});
+  }
+
+  // 5) 고정 vs 변동 비율
+  let fixed=0;
+  curCatArr.forEach(([c,a])=>{ if(FIXED_CATS.has(c)) fixed+=a; });
+  const flex=totExp-fixed;
+  if(fixed>0){
+    const fpct=Math.round(fixed/totExp*100);
+    out.push({ic:"⚖️",tone:"info",t:`고정 ${fpct}% · 변동 ${100-fpct}%`,
+      b: fpct>=60
+        ? `고정성 지출 비중이 높아요(${won(fixed)}). 통신·보험·구독은 한 번 줄이면 매 주기 자동으로 절약돼요 — 우선 점검 대상이에요.`
+        : `변동 지출이 ${won(flex)}로 더 많아요. 변동 지출은 습관만 바꿔도 가장 빠르게 줄일 수 있는 영역이에요.`});
+  }
+
+  return out;
+}
+
+/* ── 차트 (도넛·막대·라인) ── */
+let _charts=[];
+function destroyCharts(){ _charts.forEach(c=>{try{c.destroy();}catch(e){}}); _charts=[]; }
+function drawAnalysisCharts(){
+  if(!_anStash) return;
+  destroyCharts();
+  const tickC="#6E6C8A", gridC="#12141F", subC="#32304E";
+  const axes={x:{ticks:{color:tickC,font:{size:11}},grid:{display:false}},y:{ticks:{color:subC,font:{size:10},callback:v=>wonShort(v)},grid:{color:gridC}}};
+
+  // 막대: 주기별 수입·지출
+  const pc=document.getElementById("chartPeriod");
+  if(pc) _charts.push(new Chart(pc,{type:"bar",data:{labels:_anStash.labels,datasets:[
+    {label:"수입",data:_anStash.period.map(d=>d.inc),backgroundColor:"rgba(46,200,144,.75)",borderRadius:6},
+    {label:"지출",data:_anStash.period.map(d=>d.exp),backgroundColor:"rgba(240,84,112,.75)",borderRadius:6}]},
+    options:{responsive:true,plugins:{legend:{labels:{color:tickC,font:{size:11},boxWidth:10}}},scales:axes}}));
+
+  // 도넛: 카테고리별 지출 비중
+  const dc=document.getElementById("chartDonut");
+  if(dc && _anStash.donut.length){
+    const labels=_anStash.donut.map(([c])=>c), data=_anStash.donut.map(([,a])=>a);
+    _charts.push(new Chart(dc,{type:"doughnut",data:{labels,datasets:[{data,backgroundColor:labels.map(catColor),borderColor:"#0E1020",borderWidth:2,hoverOffset:6}]},
+      options:{responsive:true,cutout:"64%",plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>` ${ctx.label}: ${won(ctx.parsed)} (${Math.round(ctx.parsed/_anStash.totExp*100)}%)`}}}}}));
+  }
+
+  // 라인: 카테고리별 추이
+  const tc=document.getElementById("chartTrend");
+  if(tc && _anStash.trend.length){
+    _charts.push(new Chart(tc,{type:"line",data:{labels:_anStash.labels,datasets:_anStash.trend.map(t=>({
+      label:t.cat,data:t.data,borderColor:catColor(t.cat),backgroundColor:catColor(t.cat),tension:.35,borderWidth:2,pointRadius:3,pointHoverRadius:5,fill:false}))},
+      options:{responsive:true,interaction:{mode:"index",intersect:false},plugins:{legend:{labels:{color:tickC,font:{size:10},boxWidth:8,padding:8}},tooltip:{callbacks:{label:ctx=>` ${ctx.dataset.label}: ${won(ctx.parsed.y)}`}}},scales:axes}}));
+  }
 }
 
 /* ── 계좌 탭 (멤버 필터 적용) ── */
