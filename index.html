@@ -478,16 +478,26 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .sel-btn:active{border-color:var(--ac);box-shadow:0 0 0 3px rgba(201,147,58,.1)}
 .sel-arr{color:var(--t3);font-size:.85rem;flex-shrink:0;margin-left:8px}
 .picker-ov{
-  display:none;position:fixed;inset:0;z-index:60;
-  background:rgba(0,0,0,.55);
+  position:fixed;inset:0;z-index:60;
+  background:rgba(0,0,0,0);
+  display:flex;align-items:flex-end;justify-content:center;
+  visibility:hidden;
+  transition:background .28s ease, visibility 0s linear .28s;
 }
-.picker-ov.open{display:flex;align-items:flex-end;justify-content:center}
+.picker-ov.open{
+  background:rgba(0,0,0,.55);
+  visibility:visible;
+  transition:background .28s ease, visibility 0s;
+}
 .picker-sht{
   width:100%;max-width:480px;
   background:var(--bg2);border-radius:24px 24px 0 0;
   border:1px solid var(--bd2);border-bottom:none;
   max-height:65vh;display:flex;flex-direction:column;overflow:hidden;
+  transform:translateY(100%);
+  transition:transform .3s cubic-bezier(.22,.61,.36,1);
 }
+.picker-ov.open .picker-sht{transform:translateY(0)}
 .picker-hd{
   display:flex;justify-content:space-between;align-items:center;
   padding:16px 20px;border-bottom:1px solid var(--bd);flex-shrink:0;
@@ -497,7 +507,7 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
   background:var(--bg3);border:1px solid var(--bd);border-radius:20px;
   color:var(--t2);font-size:.79rem;font-weight:700;padding:7px 15px;
 }
-.picker-opts{overflow-y:auto;-webkit-overflow-scrolling:touch;padding:4px 0}
+.picker-opts{overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:4px 0}
 .picker-opt{
   padding:15px 22px;font-size:.93rem;font-weight:600;color:var(--t1);
   border-bottom:1px solid var(--bd);transition:background .12s;
@@ -1371,6 +1381,7 @@ function openPicker(selId, title){
       `<div class="picker-opt${sel.value===o.value?' on':''}" onclick="pickOptIdx(${i})">${o.text}</div>`
     ).join("");
   }
+  document.getElementById("overlay").style.overflow = "hidden";  // 배경(입력 시트) 스크롤 잠금
   document.getElementById("pickerOv").classList.add("open");
 }
 function pickOptIdx(idx){
@@ -1382,6 +1393,7 @@ function pickOptIdx(idx){
 }
 function closePicker(){
   document.getElementById("pickerOv").classList.remove("open");
+  document.getElementById("overlay").style.overflow = "";  // 배경 스크롤 잠금 해제
   pickerSel = null;
 }
 function updateSelBtn(selId){
