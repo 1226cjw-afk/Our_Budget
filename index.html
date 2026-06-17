@@ -363,9 +363,10 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 @keyframes sp{to{transform:rotate(360deg)}}
 
 /* ── 오버레이 / 시트 ── */
-.overlay{display:none;position:fixed;inset:0;z-index:50;background:var(--bg);overflow-y:auto}
+.overlay{display:none;position:fixed;inset:0;z-index:50;background:var(--bg);overflow-y:auto;overscroll-behavior:contain}
 .overlay.open{display:block}
-.sheet{max-width:480px;margin:0 auto;min-height:100vh}
+body.sheet-open{overflow:hidden}
+.sheet{max-width:480px;margin:0 auto;min-height:100dvh}
 .s-top{
   display:flex;justify-content:space-between;align-items:center;
   padding:17px 20px;
@@ -995,7 +996,10 @@ function viewLimit(){
   ROWS.filter(r=>r.member===limitMember&&r.type==="지출"&&inPeriod(r.date,cur))
       .forEach(r=>spent[r.category]=(spent[r.category]||0)+r.amount);
 
-  const cats=Array.from(new Set([...Object.keys(memberLimits),...Object.keys(spent)]));
+  // 한도 지정 대상 = 멤버가 설정한 카테고리(master_data) + 이미 한도가 저장된 카테고리(레거시 보존)
+  // → '계좌간 이동'처럼 설정 카테고리에 없는 지출 항목은 한도 UI에 노출하지 않음
+  const memberCats=(MASTER[limitMember]&&MASTER[limitMember].categories)||[];
+  const cats=Array.from(new Set([...memberCats,...Object.keys(memberLimits)]));
   const items=cats.map(cat=>{
     const limit=memberLimits[cat]||0, used=spent[cat]||0;
     return {cat,limit,used,pct:limit?Math.round(used/limit*100):0};
@@ -1345,6 +1349,7 @@ function openSheet(){
   renderMemberSeg();
   refreshCatList();
   document.getElementById("overlay").classList.add("open");
+  document.body.classList.add("sheet-open");
 }
 function editEntry(r){
   editId=r.id;
@@ -1362,8 +1367,9 @@ function editEntry(r){
   updateSelBtn("fCategory"); updateSelBtn("fMethod"); updateSelBtn("fAccount");
   document.getElementById("fMemo").value=r.memo||"";
   document.getElementById("overlay").classList.add("open");
+  document.body.classList.add("sheet-open");
 }
-function closeSheet(){ document.getElementById("overlay").classList.remove("open"); editId=null; }
+function closeSheet(){ document.getElementById("overlay").classList.remove("open"); document.body.classList.remove("sheet-open"); editId=null; }
 document.getElementById("fAmount").addEventListener("input",e=>{
   const r=e.target.value.replace(/[^0-9]/g,"");
   e.target.value=r?Number(r).toLocaleString("ko-KR"):"";
