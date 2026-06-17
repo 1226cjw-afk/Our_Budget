@@ -152,6 +152,7 @@ memberVal    // 입력 시트의 '누가' 선택값
 | `addMember() / delMember()` | 멤버 DB CRUD |
 | `addMaster(key) / delMaster(key, val)` | 카테고리·결제수단·계좌 CRUD |
 | `refreshCatList()` | 입력 시트 select 옵션 갱신 |
+| `openPicker(sel,title) / pickOptIdx(i) / updateSelBtn(sel)` | 커스텀 하단 시트 피커 열기·선택·버튼 표시 갱신 |
 | `viewAnalysis() / buildInsights()` | 분석 탭 렌더 + 카테고리 기반 스마트 진단·절약팁 생성 |
 | `drawAnalysisCharts() / destroyCharts()` | 도넛·막대·라인 차트 렌더 / 인스턴스 일괄 파괴 |
 | `expOf(rs) / incOf(rs) / catColor(c)` | 지출·수입 합계 헬퍼, 카테고리 고정색(이름 해시) |
@@ -206,11 +207,14 @@ git push
 ⚠️ 차트 재렌더 시 이전 인스턴스 `destroyCharts()` 필수 (누수 방지). `viewX()`는 HTML만 반환, 캔버스는 `drawX()`에서.
 
 ### 모바일 대응 주의사항
-- `<input list="datalist">` 사용 금지 → iOS Safari 미지원. 반드시 `<select>` 사용
+- `<input list="datalist">` 사용 금지 → iOS Safari 미지원
+- 카테고리·결제수단·계좌는 **커스텀 하단 시트 피커**: 값은 숨김 `<select>`에 저장, 표시는 `*Disp` span, 열기는 `openPicker(selId,title)`
+- 피커 시트(`.picker-sht`)는 높이를 `dvh`로(vh 금지 — 모바일 툴바에 하단 잘림) + `padding-bottom:env(safe-area-inset-bottom)` 필수. 열릴 때 배경 `#overlay` 스크롤 잠금(`overflow:hidden`)
 - `position: fixed` 오버레이는 `overflow-y: auto` 필수
 
 ### 보안
-- `.mcp.json`엔 Supabase 연결정보 포함 → 커밋 금지 (현재 `.gitignore` 없음, 추가 권장)
+- `.mcp.json`엔 Supabase 연결정보 포함 → 커밋 금지. `.gitignore`에 `.mcp.json`·`PROGRESS.md`·`insert_master.ps1` 등록됨
+- 추적 파일은 `index.html`·`CLAUDE.md`·`backup_appscript.gs`·`.gitignore` 4개뿐
 
 ---
 
