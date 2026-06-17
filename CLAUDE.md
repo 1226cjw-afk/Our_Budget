@@ -168,6 +168,8 @@ memberVal    // 입력 시트의 '누가' 선택값
 | 계좌 (acct) | 계좌별 잔액, 멤버 필터 |
 | 설정 (master) | 멤버·카테고리·결제수단·계좌 관리 |
 
+> ⚠️ 한도 탭(`viewLimit`) 카테고리 목록은 `MASTER[멤버].categories`(master_data DB) 기준 + 기존 저장 한도. 지출 발생 카테고리(`spent`)로 만들면 '계좌간 이동'처럼 설정에 없는 항목까지 한도 UI가 떠서 안 됨.
+
 ---
 
 ## 구글 시트 백업 (단방향)
@@ -212,6 +214,7 @@ git push
 - 피커 클래스 `.picker-ov`/`.picker-sht`는 입력 피커(`#pickerOv`)와 기기 사용자 모달(`#duOv`) **공용** — CSS 수정 시 둘 다 영향
 - 피커 시트(`.picker-sht`)는 높이를 `dvh`로(vh 금지 — 모바일 툴바에 하단 잘림) + `padding-bottom:env(safe-area-inset-bottom)` 필수. 열릴 때 배경 `#overlay` 스크롤 잠금(`overflow:hidden`)
 - `position: fixed` 오버레이는 `overflow-y: auto` 필수
+- 입력 시트(`#overlay`) 열릴 때 `body.sheet-open{overflow:hidden}`으로 배경 스크롤 잠금 + `.overlay`에 `overscroll-behavior:contain` 필수 (안 하면 시트 스크롤이 뒤 내역 리스트로 전파돼 비침). `openSheet()`·`editEntry()`에서 클래스 추가, `closeSheet()`에서 제거
 
 ### 보안
 - `.mcp.json`엔 Supabase 연결정보 포함 → 커밋 금지. `.gitignore`에 `.mcp.json`·`PROGRESS.md`·`insert_master.ps1` 등록됨
