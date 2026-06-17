@@ -209,6 +209,7 @@ git push
 ### 모바일 대응 주의사항
 - `<input list="datalist">` 사용 금지 → iOS Safari 미지원
 - 카테고리·결제수단·계좌는 **커스텀 하단 시트 피커**: 값은 숨김 `<select>`에 저장, 표시는 `*Disp` span, 열기는 `openPicker(selId,title)`
+- 피커 클래스 `.picker-ov`/`.picker-sht`는 입력 피커(`#pickerOv`)와 기기 사용자 모달(`#duOv`) **공용** — CSS 수정 시 둘 다 영향
 - 피커 시트(`.picker-sht`)는 높이를 `dvh`로(vh 금지 — 모바일 툴바에 하단 잘림) + `padding-bottom:env(safe-area-inset-bottom)` 필수. 열릴 때 배경 `#overlay` 스크롤 잠금(`overflow:hidden`)
 - `position: fixed` 오버레이는 `overflow-y: auto` 필수
 
