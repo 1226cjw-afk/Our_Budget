@@ -407,6 +407,7 @@ body.sheet-open{overflow:hidden}
 }
 .tg.tg-e{background:rgba(240,84,112,.1);border-color:rgba(240,84,112,.38);color:var(--r)}
 .tg.tg-i{background:rgba(46,200,144,.1);border-color:rgba(46,200,144,.38);color:var(--g)}
+.tg.tg-t{background:rgba(91,141,239,.1);border-color:rgba(91,141,239,.38);color:#5B8DEF}
 
 .seg{display:flex;gap:8px;flex-wrap:wrap}
 .seg button{
@@ -571,28 +572,41 @@ body.sheet-open{overflow:hidden}
         <div class="toggle">
           <button class="tg tg-e" id="tgExp" onclick="setType('지출')">지출</button>
           <button class="tg" id="tgInc" onclick="setType('입금')">입금</button>
+          <button class="tg" id="tgTrf" onclick="setType('이동')">이동</button>
         </div>
       </div>
       <div class="frow"><label class="flb">누가</label><div class="seg" id="memberSeg"></div></div>
       <div class="frow"><label class="flb">날짜</label><input class="inp" type="date" id="fDate"></div>
       <div class="frow"><label class="flb">금액</label><input class="inp" id="fAmount" inputmode="numeric" placeholder="0"></div>
-      <div class="frow"><label class="flb">카테고리</label>
+      <div class="frow" id="rowCategory"><label class="flb">카테고리</label>
         <button type="button" class="sel-btn" onclick="openPicker('fCategory','카테고리')">
           <span id="fCategoryDisp">선택</span><span class="sel-arr">▾</span>
         </button>
         <select id="fCategory" style="display:none"></select>
       </div>
-      <div class="frow"><label class="flb">결제수단</label>
+      <div class="frow" id="rowMethod"><label class="flb">결제수단</label>
         <button type="button" class="sel-btn" onclick="openPicker('fMethod','결제수단')">
           <span id="fMethodDisp">선택 안함</span><span class="sel-arr">▾</span>
         </button>
         <select id="fMethod" style="display:none"></select>
       </div>
-      <div class="frow"><label class="flb">계좌</label>
+      <div class="frow" id="rowAccount"><label class="flb">계좌</label>
         <button type="button" class="sel-btn" onclick="openPicker('fAccount','계좌')">
           <span id="fAccountDisp">계좌 선택</span><span class="sel-arr">▾</span>
         </button>
         <select id="fAccount" style="display:none"></select>
+      </div>
+      <div class="frow" id="rowFrom" style="display:none"><label class="flb">출금계좌</label>
+        <button type="button" class="sel-btn" onclick="openPicker('fFromAccount','출금계좌')">
+          <span id="fFromAccountDisp">계좌 선택</span><span class="sel-arr">▾</span>
+        </button>
+        <select id="fFromAccount" style="display:none"></select>
+      </div>
+      <div class="frow" id="rowTo" style="display:none"><label class="flb">입금계좌</label>
+        <button type="button" class="sel-btn" onclick="openPicker('fToAccount','입금계좌')">
+          <span id="fToAccountDisp">계좌 선택</span><span class="sel-arr">▾</span>
+        </button>
+        <select id="fToAccount" style="display:none"></select>
       </div>
       <div class="frow"><label class="flb">세부내역</label><input class="inp" id="fMemo" placeholder="메모 (선택)"></div>
       <button class="submit" id="saveBtn" onclick="saveEntry()">저장하기</button>
@@ -603,6 +617,7 @@ body.sheet-open{overflow:hidden}
 <script>
 /* ── 상수 ── */
 const DEFAULT_CATS = ["식비","생활비","교통","의료","쇼핑","문화","교육","통신","보험","고정비","데이트","월급","이자","기타"];
+const TRANSFER_CAT = "계좌간 이동";  // 계좌간 이동 거래 카테고리 — 소비/수입 통계에선 제외, 계좌 잔액엔 반영
 const MASTER_KEYS  = {categories:"카테고리", methods:"결제수단", accounts:"계좌"};
 const MASTER_TYPE  = {categories:"category", methods:"method", accounts:"account"};  // JS key → DB type
 const MASTER_KEY_OF= {category:"categories", method:"methods", account:"accounts"};   // DB type → JS key
@@ -642,8 +657,9 @@ const empty    = (ic,msg) => `<div class="empty"><div class="e-ic">${ic}</div><p
 const defMember = () => (DEVICE_USER && MEMBERS.includes(DEVICE_USER)) ? DEVICE_USER : (MEMBERS[0]||null);
 
 // 합계 헬퍼 (지출/수입) — 여러 뷰에서 반복되던 filter+reduce 통합
-const expOf = rs => rs.reduce((s,r)=>s+(r.type!=="입금"?r.amount:0),0);
-const incOf = rs => rs.reduce((s,r)=>s+(r.type==="입금"?r.amount:0),0);
+// 계좌간 이동(TRANSFER_CAT)은 소비·수입이 아니므로 합계에서 제외
+const expOf = rs => rs.reduce((s,r)=>s+((r.type!=="입금"&&r.category!==TRANSFER_CAT)?r.amount:0),0);
+const incOf = rs => rs.reduce((s,r)=>s+((r.type==="입금"&&r.category!==TRANSFER_CAT)?r.amount:0),0);
 // 카테고리 색상 — 이름 기반 고정 해시(같은 카테고리는 항상 같은 색)
 const CAT_PALETTE = ["#C9933A","#2EC890","#F05470","#5B8DEF","#E8961E","#A06FE8","#41C7D6","#E85AA0","#8AC926","#FF8C42","#D4A030","#7C9CF0"];
 const catColor = c => { let h=0; const s=String(c); for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))>>>0; return CAT_PALETTE[h%CAT_PALETTE.length]; };
@@ -752,6 +768,7 @@ function backupToSheet(action, payload){
 /* ── 거래 저장/삭제 ── */
 async function saveEntry(){
   const amount = Number(document.getElementById("fAmount").value.replace(/,/g,""));
+  if(typeVal==="이동"){ return saveTransfer(amount); }
   const row = {
     date:     document.getElementById("fDate").value,
     amount,
@@ -781,6 +798,32 @@ async function saveEntry(){
     toast(wasEdit?"수정 완료":"저장 완료");
   } catch(e){ toast("오류: "+e.message); }
   finally{ btn.textContent=wasEdit?"수정하기":"저장하기"; btn.disabled=false; }
+}
+
+// 계좌간 이동: 출금계좌 지출 + 입금계좌 입금 2건을 한 번에 생성 (category='계좌간 이동')
+async function saveTransfer(amount){
+  const from = document.getElementById("fFromAccount").value;
+  const to   = document.getElementById("fToAccount").value;
+  const date = document.getElementById("fDate").value;
+  const memo = document.getElementById("fMemo").value.trim();
+  if(!amount||!from||!to){ toast("금액·출금계좌·입금계좌는 필수예요"); return; }
+  if(from===to){ toast("출금·입금 계좌가 같아요"); return; }
+  const memoTxt = memo || `${from} → ${to}`;
+  const base = { date, amount, member:memberVal, category:TRANSFER_CAT, method:"", memo:memoTxt };
+  const out  = { ...base, type:"지출", account:from };  // 출금계좌에서 빠짐
+  const inn  = { ...base, type:"입금", account:to };    // 입금계좌로 들어옴
+  const btn=document.getElementById("saveBtn");
+  btn.textContent="저장 중..."; btn.disabled=true;
+  try {
+    const res=await sb.from("transactions").insert([out,inn]).select("id");
+    if(res.error){ toast("저장 오류: "+res.error.message); return; }
+    const ids=(res.data||[]).map(d=>d.id);
+    if(ids[0]) backupToSheet("upsert",{id:ids[0],...out});  // 구글 시트 백업
+    if(ids[1]) backupToSheet("upsert",{id:ids[1],...inn});
+    closeSheet(); await loadAll(); render();
+    toast("이동 완료");
+  } catch(e){ toast("오류: "+e.message); }
+  finally{ btn.textContent="저장하기"; btn.disabled=false; }
 }
 
 async function delEntry(id){
@@ -957,7 +1000,7 @@ function viewList(){
 }
 
 /* ── 분류 탭 ── */
-function aggCat(rs){ const o={}; rs.forEach(r=>{(o[r.category]=o[r.category]||{inc:0,exp:0}); r.type==="입금"?o[r.category].inc+=r.amount:o[r.category].exp+=r.amount;}); return o; }
+function aggCat(rs){ const o={}; rs.forEach(r=>{ if(r.category===TRANSFER_CAT) return; (o[r.category]=o[r.category]||{inc:0,exp:0}); r.type==="입금"?o[r.category].inc+=r.amount:o[r.category].exp+=r.amount;}); return o; }
 function catCard(cat,v,pct){
   const net=v.inc-v.exp;
   let st="";
@@ -993,7 +1036,7 @@ function viewLimit(){
   const cur=billingPeriod(limitMember);
   const memberLimits=LIMITS[limitMember]||{};
   const spent={};
-  ROWS.filter(r=>r.member===limitMember&&r.type==="지출"&&inPeriod(r.date,cur))
+  ROWS.filter(r=>r.member===limitMember&&r.type==="지출"&&r.category!==TRANSFER_CAT&&inPeriod(r.date,cur))
       .forEach(r=>spent[r.category]=(spent[r.category]||0)+r.amount);
 
   // 한도 지정 대상 = 멤버가 설정한 카테고리(master_data) + 이미 한도가 저장된 카테고리(레거시 보존)
@@ -1047,13 +1090,13 @@ function viewAnalysis(){
   // 현재(최근) 주기 카테고리별 지출
   const curRows = rowsByPeriod[rowsByPeriod.length-1] || [];
   const curCat = {};
-  curRows.filter(r=>r.type!=="입금").forEach(r => curCat[r.category]=(curCat[r.category]||0)+r.amount);
+  curRows.filter(r=>r.type!=="입금"&&r.category!==TRANSFER_CAT).forEach(r => curCat[r.category]=(curCat[r.category]||0)+r.amount);
   const curCatArr = Object.entries(curCat).sort((a,b)=>b[1]-a[1]);   // [[cat,amt], ...]
   const totExp = curCatArr.reduce((s,[,a])=>s+a,0);
 
   // 카테고리별 주기 추이 (현재 지출 상위 5개, 없으면 전체합 상위)
   const catAll={};
-  rowsByPeriod.flat().filter(r=>r.type!=="입금").forEach(r=>catAll[r.category]=(catAll[r.category]||0)+r.amount);
+  rowsByPeriod.flat().filter(r=>r.type!=="입금"&&r.category!==TRANSFER_CAT).forEach(r=>catAll[r.category]=(catAll[r.category]||0)+r.amount);
   const topCats = (curCatArr.length ? curCatArr.map(([c])=>c) : Object.keys(catAll).sort((a,b)=>catAll[b]-catAll[a])).slice(0,5);
   const trend = topCats.map(c => ({cat:c, data: rowsByPeriod.map(rs => expOf(rs.filter(r=>r.category===c)))}));
 
@@ -1067,7 +1110,7 @@ function viewAnalysis(){
 
   // 반복 지출 / 일회성 큰 지출 (세부내역 기준)
   const byMemo={};
-  myRows().filter(r=>r.type==="지출"&&r.memo).forEach(r=>{
+  myRows().filter(r=>r.type==="지출"&&r.memo&&r.category!==TRANSFER_CAT).forEach(r=>{
     const pi=periods.findIndex(p=>inPeriod(r.date,p)); if(pi<0) return;
     const k=r.category+"::"+r.memo.replace(/\(.*\)/,"").trim();
     (byMemo[k]=byMemo[k]||{cat:r.category,memo:r.memo,total:0,ps:new Set()});
@@ -1150,7 +1193,7 @@ function buildInsights(mem, periods, rowsByPeriod, curCatArr, totExp){
   const prevRows=rowsByPeriod.slice(0,-1).flat();
   const prevCnt=Math.max(periods.length-1,1);
   const prevAvg={};
-  prevRows.filter(r=>r.type!=="입금").forEach(r=>prevAvg[r.category]=(prevAvg[r.category]||0)+r.amount);
+  prevRows.filter(r=>r.type!=="입금"&&r.category!==TRANSFER_CAT).forEach(r=>prevAvg[r.category]=(prevAvg[r.category]||0)+r.amount);
   Object.keys(prevAvg).forEach(c=>prevAvg[c]/=prevCnt);
   let surge=null;
   curCatArr.forEach(([c,a])=>{
@@ -1323,8 +1366,12 @@ function refreshCatList(){
   const cats=Array.from(new Set([...mdata.categories,...Object.keys(memberLimits)]));
   document.getElementById("fCategory").innerHTML=cats.map(c=>`<option value="${c}">${c}</option>`).join("");
   document.getElementById("fMethod").innerHTML=`<option value="">선택 안함</option>`+mdata.methods.map(m=>`<option value="${m}">${m}</option>`).join("");
-  document.getElementById("fAccount").innerHTML=`<option value="">계좌 선택</option>`+mdata.accounts.map(a=>`<option value="${a}">${a}</option>`).join("");
+  const acctOpts=`<option value="">계좌 선택</option>`+mdata.accounts.map(a=>`<option value="${a}">${a}</option>`).join("");
+  document.getElementById("fAccount").innerHTML=acctOpts;
+  document.getElementById("fFromAccount").innerHTML=acctOpts;
+  document.getElementById("fToAccount").innerHTML=acctOpts;
   updateSelBtn("fCategory"); updateSelBtn("fMethod"); updateSelBtn("fAccount");
+  updateSelBtn("fFromAccount"); updateSelBtn("fToAccount");
 }
 function renderMemberSeg(){
   document.getElementById("memberSeg").innerHTML=MEMBERS.map(m=>`<button class="${m===memberVal?'on':''}" onclick="setMember('${m}')">${m}</button>`).join("");
@@ -1334,6 +1381,13 @@ function setType(t){
   typeVal=t;
   document.getElementById("tgExp").className="tg"+(t==="지출"?" tg-e":"");
   document.getElementById("tgInc").className="tg"+(t==="입금"?" tg-i":"");
+  document.getElementById("tgTrf").className="tg"+(t==="이동"?" tg-t":"");
+  const trf = t==="이동";  // 계좌간 이동: 카테고리·결제수단·계좌 숨기고 출금/입금계좌 노출
+  document.getElementById("rowCategory").style.display = trf?"none":"";
+  document.getElementById("rowMethod").style.display   = trf?"none":"";
+  document.getElementById("rowAccount").style.display  = trf?"none":"";
+  document.getElementById("rowFrom").style.display     = trf?"":"none";
+  document.getElementById("rowTo").style.display       = trf?"":"none";
 }
 function openSheet(){
   if(!MEMBERS.length){ toast("설정에서 멤버를 먼저 추가해주세요"); return; }
@@ -1344,6 +1398,7 @@ function openSheet(){
   const t=new Date();
   document.getElementById("fDate").value=`${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,"0")}-${String(t.getDate()).padStart(2,"0")}`;
   document.getElementById("fAmount").value="";
+  document.getElementById("tgTrf").style.display="";  // 신규 입력에서만 이동 허용
   setType("지출");
   memberVal=memberVal||MEMBERS[0];
   renderMemberSeg();
@@ -1355,6 +1410,7 @@ function editEntry(r){
   editId=r.id;
   document.getElementById("sheetTitle").textContent="내역 수정";
   document.getElementById("saveBtn").textContent="수정하기";
+  document.getElementById("tgTrf").style.display="none";  // 수정 시엔 이동 불가(단건 수정)
   setType(r.type);
   memberVal=r.member||MEMBERS[0];
   renderMemberSeg();

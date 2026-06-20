@@ -147,7 +147,8 @@ memberVal    // 입력 시트의 '누가' 선택값
 | `loadAll()` | members·transactions·category_limits·master_data·app_settings 병렬 로드 |
 | `setDeviceUser(name) / openDeviceUser()` | 기기 기본 사용자 설정·선택 모달 |
 | `saveBillingStart(member)` | 멤버별 결제 주기 시작일 저장 |
-| `saveEntry()` | 거래 추가/수정 |
+| `saveEntry()` | 거래 추가/수정 (구분이 '이동'이면 `saveTransfer()`로 위임) |
+| `saveTransfer(amount)` | 계좌간 이동 — 출금계좌 지출 + 입금계좌 입금 2건을 한 번에 insert (category='계좌간 이동') |
 | `saveLimit(member, cat)` | 멤버별 한도 upsert |
 | `addMember() / delMember()` | 멤버 DB CRUD |
 | `addMaster(key) / delMaster(key, val)` | 카테고리·결제수단·계좌 CRUD |
@@ -207,6 +208,14 @@ git push
 ### JS 검증 (테스트 프레임워크 없음)
 브라우저 없이 인라인 JS를 확인하는 법: 마지막 `<script>` 블록을 추출 → `new Function`/`Module._compile`에 stub(supabase·Chart·document·localStorage) 주입해 파싱/순수함수 단위테스트. `node`로 실행.
 ⚠️ 차트 재렌더 시 이전 인스턴스 `destroyCharts()` 필수 (누수 방지). `viewX()`는 HTML만 반환, 캔버스는 `drawX()`에서.
+
+### 입력 시트 구분(type) — 지출 / 입금 / 이동
+- 토글 버튼 3개: `tgExp`(지출)·`tgInc`(입금)·`tgTrf`(이동). `setType(t)`가 버튼 색(`tg-e/tg-i/tg-t`)과 행 표시를 토글
+- **'이동'(계좌간 이동)** 선택 시: 카테고리·결제수단·계좌 행(`#rowCategory/#rowMethod/#rowAccount`) 숨김 → 출금/입금계좌 행(`#rowFrom/#rowTo`) 노출. `fFromAccount`·`fToAccount` 셀렉트는 계좌 마스터로 채움
+- 저장 시 `saveTransfer()`가 거래 2건 insert: 출금계좌 `지출` + 입금계좌 `입금`, 둘 다 `category=TRANSFER_CAT('계좌간 이동')`. 계좌 탭 잔액은 정확히 반영(출금 −, 입금 +)
+- **소비/수입 통계에서 제외**: `expOf/incOf`·`aggCat`·분석 집계·한도 spent에서 `category!==TRANSFER_CAT` 필터로 이동액을 뺌 → 총지출·총수입·분류·분석이 부풀지 않음. **단 계좌 탭(`viewAccount`)은 직접 순회라 이동 포함**(잔액 계산에 필요). 새 집계 추가 시 동일하게 TRANSFER_CAT 제외할지 판단
+- 내역(list) 리스트엔 이동 2건이 그대로 보임(수정/삭제 가능). 단 날짜별 소계 `de=expOf()`도 이동 제외라, 이동이 낀 날은 보이는 지출행이 소계에 안 잡힐 수 있음(의도된 동작)
+- 이동은 신규 입력 전용. 수정(`editEntry`)에선 `tgTrf` 숨김(단건 수정이라 2건 분해 불가)
 
 ### 모바일 대응 주의사항
 - `<input list="datalist">` 사용 금지 → iOS Safari 미지원
