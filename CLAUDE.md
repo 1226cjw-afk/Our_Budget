@@ -156,7 +156,8 @@ memberVal    // 입력 시트의 '누가' 선택값
 | `openPicker(sel,title) / pickOptIdx(i) / updateSelBtn(sel)` | 커스텀 하단 시트 피커 열기·선택·버튼 표시 갱신 |
 | `viewAnalysis() / buildInsights()` | 분석 탭 렌더 + 카테고리 기반 스마트 진단·절약팁 생성 |
 | `drawAnalysisCharts() / destroyCharts()` | 도넛·막대·라인 차트 렌더 / 인스턴스 일괄 파괴 |
-| `expOf(rs) / incOf(rs) / catColor(c)` | 지출·수입 합계 헬퍼, 카테고리 고정색(이름 해시) |
+| `expOf(rs) / incOf(rs) / catColor(c)` | 지출·수입 합계 헬퍼(이동 제외), 카테고리 고정색(이름 해시) |
+| `isTransfer(r)` | 계좌간 이동 거래 판별(`r.category===TRANSFER_CAT`) — 통계 제외 필터에 공통 사용 |
 | `render()` | 현재 탭 전체 재렌더 |
 
 ### 탭 구성
@@ -213,9 +214,10 @@ git push
 - 토글 버튼 3개: `tgExp`(지출)·`tgInc`(입금)·`tgTrf`(이동). `setType(t)`가 버튼 색(`tg-e/tg-i/tg-t`)과 행 표시를 토글
 - **'이동'(계좌간 이동)** 선택 시: 카테고리·결제수단·계좌 행(`#rowCategory/#rowMethod/#rowAccount`) 숨김 → 출금/입금계좌 행(`#rowFrom/#rowTo`) 노출. `fFromAccount`·`fToAccount` 셀렉트는 계좌 마스터로 채움
 - 저장 시 `saveTransfer()`가 거래 2건 insert: 출금계좌 `지출` + 입금계좌 `입금`, 둘 다 `category=TRANSFER_CAT('계좌간 이동')`. 계좌 탭 잔액은 정확히 반영(출금 −, 입금 +)
-- **소비/수입 통계에서 제외**: `expOf/incOf`·`aggCat`·분석 집계·한도 spent에서 `category!==TRANSFER_CAT` 필터로 이동액을 뺌 → 총지출·총수입·분류·분석이 부풀지 않음. **단 계좌 탭(`viewAccount`)은 직접 순회라 이동 포함**(잔액 계산에 필요). 새 집계 추가 시 동일하게 TRANSFER_CAT 제외할지 판단
-- 내역(list) 리스트엔 이동 2건이 그대로 보임(수정/삭제 가능). 단 날짜별 소계 `de=expOf()`도 이동 제외라, 이동이 낀 날은 보이는 지출행이 소계에 안 잡힐 수 있음(의도된 동작)
-- 이동은 신규 입력 전용. 수정(`editEntry`)에선 `tgTrf` 숨김(단건 수정이라 2건 분해 불가)
+- **소비/수입 통계에서 제외**: `isTransfer(r)`(=`r.category===TRANSFER_CAT`) 헬퍼로 `expOf/incOf`·`aggCat`·분석 집계·한도 spent에서 이동을 빼서 총지출·총수입·분류·분석이 부풀지 않음. **단 계좌 탭(`viewAccount`)은 직접 순회라 이동 포함**(잔액 계산에 필요). 새 집계 추가 시 `!isTransfer(r)` 적용 여부 판단
+- 내역(list) 리스트엔 이동 2건이 그대로 보임 + `🔄` 아이콘과 `.chip.trf`(파란 '출금·이동'/'입금·이동' 배지)로 한 쌍임을 표시. 날짜별 소계 `de=expOf()`도 이동 제외라, 이동이 낀 날은 보이는 지출행이 소계에 안 잡힐 수 있음(의도된 동작)
+- **수정 불가**: 이동 leg는 한 쌍이라 단건 수정 시 짝과 어긋남 → `editEntry`가 `isTransfer(r)`이면 토스트 띄우고 차단(삭제 후 재등록 유도). 신규 입력에서만 `tgTrf` 노출
+- **짝 삭제**: `delEntry(id)`가 이동 leg 삭제 시 짝(같은 member·date·amount·`TRANSFER_CAT`·반대 type)을 찾아 `.in("id",[id,mate])`로 함께 삭제 + 구글 시트 백업도 양쪽 전송. 동일 이동이 2쌍 있어도 1건씩 매칭돼 남은 쌍은 유효하게 보존됨
 
 ### 모바일 대응 주의사항
 - `<input list="datalist">` 사용 금지 → iOS Safari 미지원

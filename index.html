@@ -173,6 +173,10 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
   background:var(--acg);color:var(--ac);font-weight:700;
   border:1px solid rgba(201,147,58,.22);
 }
+.chip.trf{
+  background:rgba(91,141,239,.12);color:#5B8DEF;font-weight:700;
+  border:1px solid rgba(91,141,239,.28);
+}
 .i-memo{font-size:.79rem;color:var(--t2);margin-top:6px;line-height:1.55}
 .i-act{display:flex;gap:6px;margin-top:10px}
 .b-edit,.b-del{padding:5px 13px;font-size:.75rem;font-weight:700;border-radius:9px;border:1px solid;transition:all .15s}
@@ -625,7 +629,7 @@ const DEVICE_USER_KEY = "ourbudget.deviceUser";  // localStorage: 이 기기의 
 // 구글 시트 백업 (Apps Script 웹앱). URL 비우면 백업 비활성.
 const GAS_BACKUP_URL    = "https://script.google.com/macros/s/AKfycbweq9PLy5VDBa68VN-76aWL8wUW6nvLZOlVaktn5oZE-HMkwg_iuXNGP6dBfcqjH56G/exec";  // Apps Script 웹앱
 const GAS_BACKUP_SECRET = "ourbudget-backup-2026";  // GAS 코드의 SECRET과 동일하게
-const CAT_ICON     = {생활비:"🛒",고정비:"🏠",월급:"💵",이자:"📈",데이트:"❤️",식비:"🍽️",교통:"🚌",의료:"💊",쇼핑:"👜",문화:"🎬",교육:"📚",통신:"📱",보험:"🛡️",기타:"📌"};
+const CAT_ICON     = {생활비:"🛒",고정비:"🏠",월급:"💵",이자:"📈",데이트:"❤️",식비:"🍽️",교통:"🚌",의료:"💊",쇼핑:"👜",문화:"🎬",교육:"📚",통신:"📱",보험:"🛡️",기타:"📌","계좌간 이동":"🔄"};
 const TABS         = [["list","📋","내역"],["cat","📊","분류"],["limit","🎯","한도"],["analysis","📈","분석"],["acct","🏦","계좌"],["master","⚙️","설정"]];
 
 /* ── 상태 ── */
@@ -656,10 +660,11 @@ const empty    = (ic,msg) => `<div class="empty"><div class="e-ic">${ic}</div><p
 // 기기 기본 사용자가 멤버 목록에 있으면 그 사람을, 없으면 첫 멤버를 기본값으로
 const defMember = () => (DEVICE_USER && MEMBERS.includes(DEVICE_USER)) ? DEVICE_USER : (MEMBERS[0]||null);
 
-// 합계 헬퍼 (지출/수입) — 여러 뷰에서 반복되던 filter+reduce 통합
-// 계좌간 이동(TRANSFER_CAT)은 소비·수입이 아니므로 합계에서 제외
-const expOf = rs => rs.reduce((s,r)=>s+((r.type!=="입금"&&r.category!==TRANSFER_CAT)?r.amount:0),0);
-const incOf = rs => rs.reduce((s,r)=>s+((r.type==="입금"&&r.category!==TRANSFER_CAT)?r.amount:0),0);
+// 계좌간 이동 거래 여부 — 소비/수입 통계에선 제외, 계좌 잔액엔 포함
+const isTransfer = r => r.category===TRANSFER_CAT;
+// 합계 헬퍼 (지출/수입) — 여러 뷰에서 반복되던 filter+reduce 통합. 이동은 합계에서 제외
+const expOf = rs => rs.reduce((s,r)=>s+((r.type!=="입금"&&!isTransfer(r))?r.amount:0),0);
+const incOf = rs => rs.reduce((s,r)=>s+((r.type==="입금"&&!isTransfer(r))?r.amount:0),0);
 // 카테고리 색상 — 이름 기반 고정 해시(같은 카테고리는 항상 같은 색)
 const CAT_PALETTE = ["#C9933A","#2EC890","#F05470","#5B8DEF","#E8961E","#A06FE8","#41C7D6","#E85AA0","#8AC926","#FF8C42","#D4A030","#7C9CF0"];
 const catColor = c => { let h=0; const s=String(c); for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))>>>0; return CAT_PALETTE[h%CAT_PALETTE.length]; };
@@ -815,11 +820,10 @@ async function saveTransfer(amount){
   const btn=document.getElementById("saveBtn");
   btn.textContent="저장 중..."; btn.disabled=true;
   try {
-    const res=await sb.from("transactions").insert([out,inn]).select("id");
+    // 삽입된 행 전체를 받아 각 행 데이터 그대로 백업(반환 순서에 의존하지 않아 id-행 매칭 안전)
+    const res=await sb.from("transactions").insert([out,inn]).select();
     if(res.error){ toast("저장 오류: "+res.error.message); return; }
-    const ids=(res.data||[]).map(d=>d.id);
-    if(ids[0]) backupToSheet("upsert",{id:ids[0],...out});  // 구글 시트 백업
-    if(ids[1]) backupToSheet("upsert",{id:ids[1],...inn});
+    (res.data||[]).forEach(row=>backupToSheet("upsert",row));  // 구글 시트 백업(출금·입금 2건)
     closeSheet(); await loadAll(); render();
     toast("이동 완료");
   } catch(e){ toast("오류: "+e.message); }
@@ -827,11 +831,17 @@ async function saveTransfer(amount){
 }
 
 async function delEntry(id){
-  if(!confirm("삭제하시겠습니까?")) return;
-  const res=await sb.from("transactions").delete().eq("id",id);
+  const r = ROWS.find(x=>x.id===id);
+  const trf = r && isTransfer(r);
+  // 이동이면 짝(반대편 leg)을 찾아 함께 삭제 → 한쪽만 남아 잔액이 깨지는 것 방지
+  const mate = trf ? ROWS.find(x=>x.id!==id && isTransfer(x) && x.member===r.member
+      && x.date===r.date && Number(x.amount)===Number(r.amount) && x.type!==r.type) : null;
+  if(!confirm(trf?"계좌간 이동 거래예요. 출금·입금 양쪽이 함께 삭제됩니다. 계속할까요?":"삭제하시겠습니까?")) return;
+  const ids = mate ? [id, mate.id] : [id];
+  const res=await sb.from("transactions").delete().in("id",ids);
   if(res.error){ toast("삭제 오류: "+res.error.message); return; }
-  backupToSheet("delete",{id});  // 구글 시트 백업
-  await loadAll(); render(); toast("삭제 완료");
+  ids.forEach(x=>backupToSheet("delete",{id:x}));  // 구글 시트 백업(양쪽 모두)
+  await loadAll(); render(); toast(mate?"이동(2건) 삭제 완료":"삭제 완료");
 }
 
 /* ── 한도 저장 (멤버별) ── */
@@ -989,7 +999,7 @@ function viewList(){
       const cls=r.type==="입금"?"g":"r", pf=r.type==="입금"?"+":"-";
       h+=`<div class="item"><div class="i-ic">${icon(r.category)}</div><div class="i-bd">
         <div class="i-top"><span class="i-cat">${r.category}</span><span class="i-amt ${cls}">${pf}${won(r.amount)}</span></div>
-        <div class="chips">${r.member?`<span class="chip mem">${r.member}</span>`:""}<span class="chip">${r.account}</span>${r.method?`<span class="chip">${r.method}</span>`:""}</div>
+        <div class="chips">${r.member?`<span class="chip mem">${r.member}</span>`:""}<span class="chip">${r.account}</span>${r.method?`<span class="chip">${r.method}</span>`:""}${isTransfer(r)?`<span class="chip trf">${r.type==="입금"?"입금":"출금"}·이동</span>`:""}</div>
         ${r.memo?`<div class="i-memo">${r.memo}</div>`:""}
         <div class="i-act"><button class="b-edit" onclick='editEntry(${JSON.stringify(r)})'>수정</button><button class="b-del" onclick="delEntry('${r.id}')">삭제</button></div>
       </div></div>`;
@@ -1000,7 +1010,7 @@ function viewList(){
 }
 
 /* ── 분류 탭 ── */
-function aggCat(rs){ const o={}; rs.forEach(r=>{ if(r.category===TRANSFER_CAT) return; (o[r.category]=o[r.category]||{inc:0,exp:0}); r.type==="입금"?o[r.category].inc+=r.amount:o[r.category].exp+=r.amount;}); return o; }
+function aggCat(rs){ const o={}; rs.forEach(r=>{ if(isTransfer(r)) return; (o[r.category]=o[r.category]||{inc:0,exp:0}); r.type==="입금"?o[r.category].inc+=r.amount:o[r.category].exp+=r.amount;}); return o; }
 function catCard(cat,v,pct){
   const net=v.inc-v.exp;
   let st="";
@@ -1036,7 +1046,7 @@ function viewLimit(){
   const cur=billingPeriod(limitMember);
   const memberLimits=LIMITS[limitMember]||{};
   const spent={};
-  ROWS.filter(r=>r.member===limitMember&&r.type==="지출"&&r.category!==TRANSFER_CAT&&inPeriod(r.date,cur))
+  ROWS.filter(r=>r.member===limitMember&&r.type==="지출"&&!isTransfer(r)&&inPeriod(r.date,cur))
       .forEach(r=>spent[r.category]=(spent[r.category]||0)+r.amount);
 
   // 한도 지정 대상 = 멤버가 설정한 카테고리(master_data) + 이미 한도가 저장된 카테고리(레거시 보존)
@@ -1090,13 +1100,13 @@ function viewAnalysis(){
   // 현재(최근) 주기 카테고리별 지출
   const curRows = rowsByPeriod[rowsByPeriod.length-1] || [];
   const curCat = {};
-  curRows.filter(r=>r.type!=="입금"&&r.category!==TRANSFER_CAT).forEach(r => curCat[r.category]=(curCat[r.category]||0)+r.amount);
+  curRows.filter(r=>r.type!=="입금"&&!isTransfer(r)).forEach(r => curCat[r.category]=(curCat[r.category]||0)+r.amount);
   const curCatArr = Object.entries(curCat).sort((a,b)=>b[1]-a[1]);   // [[cat,amt], ...]
   const totExp = curCatArr.reduce((s,[,a])=>s+a,0);
 
   // 카테고리별 주기 추이 (현재 지출 상위 5개, 없으면 전체합 상위)
   const catAll={};
-  rowsByPeriod.flat().filter(r=>r.type!=="입금"&&r.category!==TRANSFER_CAT).forEach(r=>catAll[r.category]=(catAll[r.category]||0)+r.amount);
+  rowsByPeriod.flat().filter(r=>r.type!=="입금"&&!isTransfer(r)).forEach(r=>catAll[r.category]=(catAll[r.category]||0)+r.amount);
   const topCats = (curCatArr.length ? curCatArr.map(([c])=>c) : Object.keys(catAll).sort((a,b)=>catAll[b]-catAll[a])).slice(0,5);
   const trend = topCats.map(c => ({cat:c, data: rowsByPeriod.map(rs => expOf(rs.filter(r=>r.category===c)))}));
 
@@ -1110,7 +1120,7 @@ function viewAnalysis(){
 
   // 반복 지출 / 일회성 큰 지출 (세부내역 기준)
   const byMemo={};
-  myRows().filter(r=>r.type==="지출"&&r.memo&&r.category!==TRANSFER_CAT).forEach(r=>{
+  myRows().filter(r=>r.type==="지출"&&r.memo&&!isTransfer(r)).forEach(r=>{
     const pi=periods.findIndex(p=>inPeriod(r.date,p)); if(pi<0) return;
     const k=r.category+"::"+r.memo.replace(/\(.*\)/,"").trim();
     (byMemo[k]=byMemo[k]||{cat:r.category,memo:r.memo,total:0,ps:new Set()});
@@ -1193,7 +1203,7 @@ function buildInsights(mem, periods, rowsByPeriod, curCatArr, totExp){
   const prevRows=rowsByPeriod.slice(0,-1).flat();
   const prevCnt=Math.max(periods.length-1,1);
   const prevAvg={};
-  prevRows.filter(r=>r.type!=="입금"&&r.category!==TRANSFER_CAT).forEach(r=>prevAvg[r.category]=(prevAvg[r.category]||0)+r.amount);
+  prevRows.filter(r=>r.type!=="입금"&&!isTransfer(r)).forEach(r=>prevAvg[r.category]=(prevAvg[r.category]||0)+r.amount);
   Object.keys(prevAvg).forEach(c=>prevAvg[c]/=prevCnt);
   let surge=null;
   curCatArr.forEach(([c,a])=>{
@@ -1407,6 +1417,8 @@ function openSheet(){
   document.body.classList.add("sheet-open");
 }
 function editEntry(r){
+  // 계좌간 이동은 2건이 한 쌍 → 단건 수정 시 짝과 어긋나므로 막음(삭제 후 재등록 유도)
+  if(isTransfer(r)){ toast("계좌간 이동은 수정할 수 없어요. 삭제 후 다시 추가해주세요"); return; }
   editId=r.id;
   document.getElementById("sheetTitle").textContent="내역 수정";
   document.getElementById("saveBtn").textContent="수정하기";
