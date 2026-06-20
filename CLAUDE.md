@@ -208,6 +208,8 @@ git push
 
 ### JS 검증 (테스트 프레임워크 없음)
 브라우저 없이 인라인 JS를 확인하는 법: 마지막 `<script>` 블록을 추출 → `new Function`/`Module._compile`에 stub(supabase·Chart·document·localStorage) 주입해 파싱/순수함수 단위테스트. `node`로 실행.
+- 빠른 문법 검사(복붙용): `node -e "const fs=require('fs');const c=[...fs.readFileSync('index.html','utf8').matchAll(/<script>([\s\S]*?)<\/script>/g)].pop()[1];try{new Function(c);console.log('JS OK')}catch(e){console.error(e.message);process.exit(1)}"`
+- 순수함수 단위테스트: 대상 헬퍼(`expOf`·`isTransfer` 등)를 `node -e`에 그대로 복사해 입력/기대값 비교 (이번 세션 이동 제외·짝 매칭 검증에 사용)
 ⚠️ 차트 재렌더 시 이전 인스턴스 `destroyCharts()` 필수 (누수 방지). `viewX()`는 HTML만 반환, 캔버스는 `drawX()`에서.
 
 ### 입력 시트 구분(type) — 지출 / 입금 / 이동
