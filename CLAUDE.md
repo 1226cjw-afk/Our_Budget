@@ -2,9 +2,9 @@
 
 ## 프로젝트 개요
 
-가족 공용 가계부 웹앱. 단일 HTML 파일(`index.html`)로 배포, GitHub Pages로 서빙, Supabase를 백엔드로 사용.
+가족 공용 가계부 웹앱. 단일 HTML 파일(`index.html`)로 배포, Cloudflare Workers로 서빙, Supabase를 백엔드로 사용.
 
-- **배포 URL**: `https://1226cjw-afk.github.io/Our_Budget/`
+- **배포 URL**: `https://ourbudget.1226cjw.workers.dev/` (Cloudflare Workers)
 - **GitHub**: `https://github.com/1226cjw-afk/Our_Budget`
 - **로컬 경로**: `C:/Users/1226c/Projects/Our_Budget/` ← 여기서 작업
 
@@ -17,7 +17,8 @@
 remote: https://github.com/1226cjw-afk/Our_Budget.git
 branch: main
 ```
-작업 후 항상 `git add index.html && git commit && git push` — GitHub Pages가 자동 배포됨.
+작업 후 항상 `git add index.html && git commit && git push` — Cloudflare Workers가 GitHub `main`을 감지해 자동 배포됨.
+> Cloudflare가 GitHub 연결 시 자동 생성한 `cloudflare/workers-autoconfig` 원격 브랜치가 연동 증거. 배포 설정은 저장소가 아니라 Cloudflare 대시보드에 있음.
 
 ### Supabase MCP (SQL 직접 실행)
 프로젝트 폴더의 `Our_Budget/.mcp.json`에 설정됨 (project 범위).
@@ -202,7 +203,7 @@ Supabase MCP가 연결되어 있으면:
 git add index.html
 git commit -m "..."
 git push
-# GitHub Pages 자동 배포 (1~2분 소요)
+# Cloudflare Workers 자동 배포 (1~2분 소요)
 ```
 > GAS 백업 코드를 고쳤다면 `backup_appscript.gs`도 함께 커밋. (단 실제 반영은 Apps Script "새 버전" 재배포 필요)
 
