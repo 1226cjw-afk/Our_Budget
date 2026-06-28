@@ -267,10 +267,17 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .a-tag.one{background:var(--gb);color:var(--g);border:1px solid rgba(46,200,144,.18)}
 .a-v{font-size:.83rem;font-weight:700;white-space:nowrap}
 
-/* 분석 요약 스탯 줄 */
-.astat{display:flex;gap:8px;margin-bottom:12px}
-.astat .am{flex:1}
-.am-d{font-size:.62rem;font-weight:700;margin-top:3px}
+/* 분석 요약 메트릭 카드 */
+.astat{display:flex;gap:9px;margin-bottom:14px}
+.astat .am{flex:1;position:relative;overflow:hidden;padding:13px 12px 14px}
+.astat .am::before{content:'';position:absolute;left:0;top:11px;bottom:11px;width:3px;border-radius:3px;background:linear-gradient(var(--ac),var(--ac2));opacity:.6}
+.astat .am-l{margin-bottom:2px}
+.astat .am-v{font-size:1.05rem;font-weight:900;letter-spacing:-.6px;margin-top:2px}
+.am-sub{font-size:.64rem;font-weight:700;color:var(--t2);margin-top:6px}
+.am-d{display:inline-flex;align-items:center;gap:2px;font-size:.63rem;font-weight:800;padding:1px 7px;border-radius:20px}
+.am-d.r{color:var(--r);background:var(--rb)}
+.am-d.g{color:var(--g);background:var(--gb)}
+.am-d.f{color:var(--t2);background:var(--bg3)}
 
 /* 도넛 차트 (중앙 총액 + 커스텀 범례) */
 .donut-wrap{position:relative;max-width:280px;margin:0 auto}
@@ -523,6 +530,36 @@ body.sheet-open{overflow:hidden}
 .picker-opt:last-child{border:none}
 .picker-opt.on{color:var(--ac);background:var(--acg2)}
 .picker-opt:active{background:var(--bg3)}
+
+/* ── 분석 패널 보강 ── */
+.p-t{display:flex;align-items:center;gap:8px}
+.p-t::before{content:'';width:3px;height:14px;border-radius:3px;background:linear-gradient(var(--ac),var(--ac2));flex-shrink:0}
+.p-sub{font-size:.64rem;font-weight:700;color:var(--t3);margin-left:auto;letter-spacing:.2px;
+  background:var(--bg3);border:1px solid var(--bd);padding:2px 9px;border-radius:20px}
+/* 일회성 이상치 행 */
+.anom{display:flex;align-items:center;gap:11px;padding:12px 0;border-bottom:1px solid var(--bd)}
+.anom:last-child{border:none;padding-bottom:0}
+.anom-ic{width:36px;height:36px;min-width:36px;border-radius:11px;background:var(--bg3);border:1px solid var(--bd);
+  display:flex;align-items:center;justify-content:center;font-size:1.05rem}
+.anom-bd{flex:1;min-width:0}
+.anom-t{display:flex;align-items:center;gap:7px;min-width:0}
+.anom-tt{font-size:.86rem;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.anom-x{flex-shrink:0;font-size:.6rem;font-weight:800;color:var(--amber);background:var(--amberg);
+  border:1px solid rgba(232,150,30,.28);padding:1px 8px;border-radius:20px}
+.anom-s{font-size:.71rem;color:var(--t2);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.anom-v{font-size:.9rem;font-weight:900;color:var(--r);white-space:nowrap;letter-spacing:-.3px}
+
+/* ── 진입 모션 (한 번, staggered) ── */
+@keyframes riseIn{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:translateY(0)}}
+.panel,.cards .card,.astat .am,.acct-tot,.acct-grid .am,.m-section,.lcard{
+  animation:riseIn .38s cubic-bezier(.22,.61,.36,1) both}
+.panel:nth-child(2){animation-delay:.03s}.panel:nth-child(3){animation-delay:.06s}
+.panel:nth-child(4){animation-delay:.09s}.panel:nth-child(5){animation-delay:.12s}
+.panel:nth-child(6){animation-delay:.15s}.panel:nth-child(7){animation-delay:.18s}
+.astat .am:nth-child(2){animation-delay:.04s}.astat .am:nth-child(3){animation-delay:.08s}
+@media(prefers-reduced-motion:reduce){
+  .panel,.cards .card,.astat .am,.acct-tot,.acct-grid .am,.m-section,.lcard{animation:none}
+}
 </style>
 </head>
 <body>
@@ -1088,37 +1125,65 @@ function viewLimit(){
 /* ── 분석 탭 ── */
 let _anStash = null;   // 차트용 데이터 보관 (viewAnalysis → drawAnalysisCharts)
 
+/* 분석 보조 ── 카테고리 '평소 금액(중앙값)' 대비 크게 튄 개별 지출(일회성 이상치) 추출 */
+const _median = a => { const s=[...a].sort((x,y)=>x-y), n=s.length; return n?(n%2?s[(n-1)/2]:(s[n/2-1]+s[n/2])/2):0; };
+const _md     = s => { const d=new Date(s.length===10?s+"T12:00:00":s); return `${d.getMonth()+1}/${d.getDate()}`; };
+function bigSpends(rows){
+  const byCat={};
+  rows.filter(r=>r.type==="지출"&&!isTransfer(r)).forEach(r=>(byCat[r.category]=byCat[r.category]||[]).push(r));
+  const out=[];
+  Object.entries(byCat).forEach(([,arr])=>{
+    if(arr.length<3) return;                          // 표본이 적으면 '평소'를 신뢰 못함
+    const med=_median(arr.map(r=>r.amount)); if(med<=0) return;
+    arr.forEach(r=>{ if(r.amount>=med*2.5 && r.amount>=30000) out.push({...r,med,ratio:r.amount/med}); });
+  });
+  return out.sort((a,b)=>b.ratio-a.ratio).slice(0,8);  // 평소 대비 배수가 큰 순
+}
+
 function viewAnalysis(){
   const _anMem = memberFilter!=="전체" ? memberFilter : MEMBERS[0];
   const periods = recentPeriods(3, _anMem);
   const rowsByPeriod = periods.map(p => myRows().filter(r=>inPeriod(r.date,p)));
   const labels = periods.map(p => p.label.split(" ")[0]);
 
-  // 주기별 수입·지출
+  // 주기별 수입·지출 합계
   const period = rowsByPeriod.map(rs => ({inc:incOf(rs), exp:expOf(rs)}));
+  const incomeByPeriod = period.map(d=>d.inc);
 
-  // 현재(최근) 주기 카테고리별 지출
+  // 최근(현재) 주기 카테고리별 지출 (도넛)
   const curRows = rowsByPeriod[rowsByPeriod.length-1] || [];
   const curCat = {};
   curRows.filter(r=>r.type!=="입금"&&!isTransfer(r)).forEach(r => curCat[r.category]=(curCat[r.category]||0)+r.amount);
   const curCatArr = Object.entries(curCat).sort((a,b)=>b[1]-a[1]);   // [[cat,amt], ...]
   const totExp = curCatArr.reduce((s,[,a])=>s+a,0);
 
-  // 카테고리별 주기 추이 (현재 지출 상위 5개, 없으면 전체합 상위)
-  const catAll={};
-  rowsByPeriod.flat().filter(r=>r.type!=="입금"&&!isTransfer(r)).forEach(r=>catAll[r.category]=(catAll[r.category]||0)+r.amount);
-  const topCats = (curCatArr.length ? curCatArr.map(([c])=>c) : Object.keys(catAll).sort((a,b)=>catAll[b]-catAll[a])).slice(0,5);
+  // 카테고리 × 주기 지출 매트릭스 → 스택 막대용 (전체합 상위 6 + 나머지 '기타')
+  const catByPeriod = {};
+  rowsByPeriod.forEach((rs,pi)=>rs.filter(r=>r.type!=="입금"&&!isTransfer(r))
+    .forEach(r=>{(catByPeriod[r.category]=catByPeriod[r.category]||Array(periods.length).fill(0))[pi]+=r.amount;}));
+  const catTotals = Object.entries(catByPeriod).map(([c,a])=>[c,a.reduce((s,x)=>s+x,0)]).sort((a,b)=>b[1]-a[1]);
+  const TOPN=6;
+  const stackSeries = catTotals.slice(0,TOPN).map(([c])=>({cat:c,data:catByPeriod[c]}));
+  if(catTotals.length>TOPN){
+    const etc=Array(periods.length).fill(0);
+    catTotals.slice(TOPN).forEach(([c])=>catByPeriod[c].forEach((v,i)=>etc[i]+=v));
+    stackSeries.push({cat:"기타",data:etc});
+  }
+
+  // 카테고리별 추이 (라인, 현재 지출 상위 5 / 없으면 전체합 상위)
+  const topCats = (curCatArr.length ? curCatArr.map(([c])=>c) : catTotals.map(([c])=>c)).slice(0,5);
   const trend = topCats.map(c => ({cat:c, data: rowsByPeriod.map(rs => expOf(rs.filter(r=>r.category===c)))}));
 
-  _anStash = {labels, period, donut:curCatArr, totExp, trend};
+  _anStash = {labels, period, incomeByPeriod, stackSeries, donut:curCatArr, totExp, trend};
 
   // 요약 스탯
   const avg  = Math.round(period.reduce((s,d)=>s+d.exp,0)/(period.length||1));
-  const last = period[period.length-1]?.exp||0, prev = period[period.length-2]?.exp||0;
+  const last = period[period.length-1]?.exp||0, prev = period[period.length-2]?.exp||0, lastInc = period[period.length-1]?.inc||0;
   const trPct  = prev?Math.round((last-prev)/prev*100):0;
   const avgPct = avg?Math.round((last-avg)/avg*100):0;
+  const net    = lastInc-last;
 
-  // 반복 지출 / 일회성 큰 지출 (세부내역 기준)
+  // 반복 지출 (세부내역 기준, 2주기 이상 등장)
   const byMemo={};
   myRows().filter(r=>r.type==="지출"&&r.memo&&!isTransfer(r)).forEach(r=>{
     const pi=periods.findIndex(p=>inPeriod(r.date,p)); if(pi<0) return;
@@ -1126,48 +1191,59 @@ function viewAnalysis(){
     (byMemo[k]=byMemo[k]||{cat:r.category,memo:r.memo,total:0,ps:new Set()});
     byMemo[k].total+=r.amount; byMemo[k].ps.add(pi);
   });
-  const list=Object.values(byMemo).map(x=>({...x,span:x.ps.size}));
-  const rec=list.filter(x=>x.span>=2).sort((a,b)=>b.total-a.total);
-  const one=list.filter(x=>x.span===1&&x.total>=100000).sort((a,b)=>b.total-a.total);
+  const rec=Object.values(byMemo).map(x=>({...x,span:x.ps.size})).filter(x=>x.span>=2).sort((a,b)=>b.total-a.total);
+
+  // 일회성 큰 지출 = 개별 거래가 '자기 카테고리 평소(중앙값)'보다 크게 튄 이상치
+  const anom = bigSpends(rowsByPeriod.flat());
 
   const insights = buildInsights(_anMem, periods, rowsByPeriod, curCatArr, totExp);
 
   // ── HTML ──
-  const statBox=(lb,val,sub,subCls)=>`<div class="am"><div class="am-l">${lb}</div><div class="am-v">${val}</div>${sub?`<div class="am-d ${subCls||''}">${sub}</div>`:''}</div>`;
+  const trChip = p => `<span class="am-d ${p>0?'r':p<0?'g':'f'}">${p>0?'▲':p<0?'▼':'–'}${Math.abs(p)}%</span>`;
   let h=`<div class="sec">`;
 
-  // 1) 요약 스탯 줄
+  // 1) 메트릭 카드 (지출 / 수입 / 평균 대비)
   h+=`<div class="astat">
-    ${statBox("이번 주기 지출",won(last))}
-    ${statBox("평균 대비", `${avgPct>=0?'+':''}${avgPct}%`, won(avg)+" 평균", avgPct>0?'r':'g')}
-    ${statBox("전 주기 대비", `${trPct>=0?'+':''}${trPct}%`, won(prev), trPct>0?'r':'g')}
+    <div class="am"><div class="am-l">이번 주기 지출</div><div class="am-v r">${won(last)}</div>${prev?`<div class="am-sub">${trChip(trPct)} <span style="color:var(--t3)">전 주기</span></div>`:`<div class="am-sub" style="color:var(--t3)">기록 시작</div>`}</div>
+    <div class="am"><div class="am-l">이번 주기 수입</div><div class="am-v g">${won(lastInc)}</div><div class="am-sub" style="color:var(--t3)">순 ${net>=0?'+':'-'}${wonShort(Math.abs(net))}</div></div>
+    <div class="am"><div class="am-l">평균 대비</div><div class="am-v ${avgPct>0?'r':avgPct<0?'g':''}">${avgPct>=0?'+':''}${avgPct}%</div><div class="am-sub" style="color:var(--t3)">평균 ${wonShort(avg)}</div></div>
   </div>`;
 
-  // 2) 카테고리별 지출 비중 (도넛)
+  // 2) 주기별 지출 구성 — 카테고리 스택 막대 + 수입 막대 (한눈에 주기별 카테고리 지출/수입)
+  if(catTotals.length || incomeByPeriod.some(v=>v>0)){
+    h+=`<div class="panel"><div class="p-t">📊 주기별 지출 구성<span class="p-sub">카테고리별 · 수입</span></div>
+      <canvas id="chartPeriod" height="200"></canvas></div>`;
+  }
+
+  // 3) 카테고리별 지출 비중 (도넛, 이번 주기)
   if(totExp>0){
-    h+=`<div class="panel"><div class="p-t">📊 카테고리별 지출 비중 · 이번 주기</div>
+    h+=`<div class="panel"><div class="p-t">🍩 카테고리별 지출 비중<span class="p-sub">이번 주기</span></div>
       <div class="donut-wrap"><canvas id="chartDonut" height="220"></canvas>
         <div class="donut-center"><div class="dc-l">총 지출</div><div class="dc-v">${wonShort(totExp)}</div></div></div>
       <div class="dlegend">${curCatArr.map(([c,a])=>`<div class="dlg"><span class="dlg-dot" style="background:${catColor(c)}"></span><span class="dlg-nm">${c}</span><span class="dlg-v">${Math.round(a/totExp*100)}%</span></div>`).join("")}</div>
     </div>`;
   }
 
-  // 3) 스마트 분석 & 절약 팁
+  // 4) 카테고리별 추이 (라인)
+  if(trend.length && catTotals.length){
+    h+=`<div class="panel"><div class="p-t">📉 카테고리별 지출 추이<span class="p-sub">상위 ${trend.length}개</span></div><canvas id="chartTrend" height="190"></canvas></div>`;
+  }
+
+  // 5) 스마트 분석 & 절약 팁
   h+=`<div class="panel"><div class="p-t">💡 스마트 분석 & 절약 팁</div>
     ${insights.map(x=>`<div class="ins ${x.tone||''}"><div class="ins-ic">${x.ic}</div><div class="ins-bd"><div class="ins-t">${x.t}</div><div class="ins-b">${x.b}</div></div></div>`).join("")}
   </div>`;
 
-  // 4) 주기별 수입·지출 (막대)
-  h+=`<div class="panel"><div class="p-t">📈 주기별 수입·지출</div><canvas id="chartPeriod" height="180"></canvas></div>`;
+  // 6) 반복 지출
+  h+=`<div class="panel"><div class="p-t">🔁 반복 지출<span class="p-sub">2주기 이상</span></div>${rec.length?rec.map(x=>`<div class="arow"><span class="a-mo">${icon(x.cat)} ${x.memo}</span><span class="a-tag rec">${x.span}주기</span><span class="a-v">${won(x.total)}</span></div>`).join(''):'<div class="p-body">없음</div>'}</div>`;
 
-  // 5) 카테고리별 추이 (라인)
-  if(trend.length && totExp>0){
-    h+=`<div class="panel"><div class="p-t">📉 카테고리별 지출 추이 · 상위 ${trend.length}개</div><canvas id="chartTrend" height="190"></canvas></div>`;
-  }
-
-  // 6) 반복 지출 / 일회성 큰 지출
-  h+=`<div class="panel"><div class="p-t">🔁 반복 지출</div>${rec.length?rec.map(x=>`<div class="arow"><span class="a-mo">${icon(x.cat)} ${x.memo}</span><span class="a-tag rec">${x.span}주기</span><span class="a-v">${won(x.total)}</span></div>`).join(''):'<div class="p-body">없음</div>'}</div>
-    <div class="panel"><div class="p-t">💥 일회성 큰 지출</div>${one.length?one.map(x=>`<div class="arow"><span class="a-mo">${icon(x.cat)} ${x.memo}</span><span class="a-tag one">1회</span><span class="a-v">${won(x.total)}</span></div>`).join(''):'<div class="p-body">없음</div>'}</div>`;
+  // 7) 일회성 큰 지출 — 자기 카테고리 평소 금액 대비 크게 튄 항목만
+  h+=`<div class="panel"><div class="p-t">💥 일회성 큰 지출<span class="p-sub">평소 대비 튄 항목</span></div>${
+    anom.length?anom.map(x=>`<div class="anom"><div class="anom-ic">${icon(x.category)}</div>
+      <div class="anom-bd"><div class="anom-t"><span class="anom-tt">${x.memo?x.memo:x.category}</span><span class="anom-x">${x.ratio.toFixed(1)}배</span></div>
+        <div class="anom-s">${x.category} · 평소 ${wonShort(Math.round(x.med))}원대 · ${_md(x.date)}</div></div>
+      <div class="anom-v">${won(x.amount)}</div></div>`).join('')
+    :'<div class="p-body">카테고리 평소 금액보다 크게 튄 일회성 지출이 없어요.</div>'}</div>`;
 
   return h+`</div>`;
 }
@@ -1245,12 +1321,22 @@ function drawAnalysisCharts(){
   const tickC="#6E6C8A", gridC="#12141F", subC="#32304E";
   const axes={x:{ticks:{color:tickC,font:{size:11}},grid:{display:false}},y:{ticks:{color:subC,font:{size:10},callback:v=>wonShort(v)},grid:{color:gridC}}};
 
-  // 막대: 주기별 수입·지출
+  // 스택 막대(왼축): 주기별 카테고리 지출 구성 + 수입은 라인(오른축)으로 분리
+  // → 수입이 지출보다 훨씬 커도 카테고리 구성이 눌리지 않도록 축을 따로 둠
   const pc=document.getElementById("chartPeriod");
-  if(pc) _charts.push(new Chart(pc,{type:"bar",data:{labels:_anStash.labels,datasets:[
-    {label:"수입",data:_anStash.period.map(d=>d.inc),backgroundColor:"rgba(46,200,144,.75)",borderRadius:6},
-    {label:"지출",data:_anStash.period.map(d=>d.exp),backgroundColor:"rgba(240,84,112,.75)",borderRadius:6}]},
-    options:{responsive:true,plugins:{legend:{labels:{color:tickC,font:{size:11},boxWidth:10}}},scales:axes}}));
+  if(pc && _anStash.stackSeries){
+    const ds=_anStash.stackSeries.map(s=>({type:"bar",label:s.cat,data:s.data,backgroundColor:catColor(s.cat),stack:"exp",borderRadius:3,borderSkipped:false,maxBarThickness:54,yAxisID:"yExp"}));
+    ds.push({type:"line",label:"수입",data:_anStash.incomeByPeriod,borderColor:"#2EC890",backgroundColor:"#2EC890",borderWidth:2,pointRadius:3,pointHoverRadius:5,tension:.3,fill:false,yAxisID:"yInc",order:0});
+    _charts.push(new Chart(pc,{type:"bar",data:{labels:_anStash.labels,datasets:ds},
+      options:{responsive:true,interaction:{mode:"index",intersect:false},
+        plugins:{legend:{labels:{color:tickC,font:{size:10},boxWidth:8,padding:6}},
+          tooltip:{callbacks:{label:ctx=>` ${ctx.dataset.label}: ${won(ctx.parsed.y)}`}}},
+        scales:{
+          x:{ticks:{color:tickC,font:{size:11}},grid:{display:false},stacked:true},
+          yExp:{position:"left",stacked:true,beginAtZero:true,ticks:{color:subC,font:{size:10},callback:v=>wonShort(v)},grid:{color:gridC},title:{display:true,text:"지출",color:subC,font:{size:9}}},
+          yInc:{position:"right",beginAtZero:true,ticks:{color:"#2EC890",font:{size:10},callback:v=>wonShort(v)},grid:{display:false},title:{display:true,text:"수입",color:"#2EC890",font:{size:9}}}
+        }}}));
+  }
 
   // 도넛: 카테고리별 지출 비중
   const dc=document.getElementById("chartDonut");
