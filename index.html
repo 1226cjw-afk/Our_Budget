@@ -703,7 +703,8 @@ const isTransfer = r => r.category===TRANSFER_CAT;
 const expOf = rs => rs.reduce((s,r)=>s+((r.type!=="입금"&&!isTransfer(r))?r.amount:0),0);
 const incOf = rs => rs.reduce((s,r)=>s+((r.type==="입금"&&!isTransfer(r))?r.amount:0),0);
 // 카테고리 색상 — 이름 기반 고정 해시(같은 카테고리는 항상 같은 색)
-const CAT_PALETTE = ["#C9933A","#2EC890","#F05470","#5B8DEF","#E8961E","#A06FE8","#41C7D6","#E85AA0","#8AC926","#FF8C42","#D4A030","#7C9CF0"];
+// 색상환을 고르게 채운 12색 — 인접 카테고리도 또렷이 구분되도록 hue 간격을 넓힘 (도넛·스택·추이 공통)
+const CAT_PALETTE = ["#F0556E","#FF8C42","#F2C14E","#9BD13C","#2EC890","#2BC0B8","#41C7D6","#5B8DEF","#7C6FF0","#A86FE8","#E85AA0","#D98A3A"];
 const catColor = c => { let h=0; const s=String(c); for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))>>>0; return CAT_PALETTE[h%CAT_PALETTE.length]; };
 // 고정성 지출 카테고리 (절약 팁/고정·변동 분석에서 '고정'으로 분류)
 const FIXED_CATS = new Set(["고정비","통신","보험","이자","월세","관리비","교육","구독","월급"]);
@@ -1321,20 +1322,20 @@ function drawAnalysisCharts(){
   const tickC="#6E6C8A", gridC="#12141F", subC="#32304E";
   const axes={x:{ticks:{color:tickC,font:{size:11}},grid:{display:false}},y:{ticks:{color:subC,font:{size:10},callback:v=>wonShort(v)},grid:{color:gridC}}};
 
-  // 스택 막대(왼축): 주기별 카테고리 지출 구성 + 수입은 라인(오른축)으로 분리
-  // → 수입이 지출보다 훨씬 커도 카테고리 구성이 눌리지 않도록 축을 따로 둠
+  // 지출은 카테고리 스택 막대(왼축), 수입은 그 옆 초록 막대(오른축).
+  // → 수입이 지출보다 훨씬 커도 한 축에 눌리지 않도록 축을 분리(왼축 지출 / 오른축 수입)
   const pc=document.getElementById("chartPeriod");
   if(pc && _anStash.stackSeries){
-    const ds=_anStash.stackSeries.map(s=>({type:"bar",label:s.cat,data:s.data,backgroundColor:catColor(s.cat),stack:"exp",borderRadius:3,borderSkipped:false,maxBarThickness:54,yAxisID:"yExp"}));
-    ds.push({type:"line",label:"수입",data:_anStash.incomeByPeriod,borderColor:"#2EC890",backgroundColor:"#2EC890",borderWidth:2,pointRadius:3,pointHoverRadius:5,tension:.3,fill:false,yAxisID:"yInc",order:0});
+    const ds=_anStash.stackSeries.map(s=>({type:"bar",label:s.cat,data:s.data,backgroundColor:catColor(s.cat),stack:"exp",borderRadius:3,borderSkipped:false,maxBarThickness:38,yAxisID:"yExp"}));
+    ds.push({type:"bar",label:"수입",data:_anStash.incomeByPeriod,backgroundColor:"rgba(46,200,144,.85)",stack:"inc",borderRadius:3,borderSkipped:false,maxBarThickness:22,yAxisID:"yInc"});
     _charts.push(new Chart(pc,{type:"bar",data:{labels:_anStash.labels,datasets:ds},
       options:{responsive:true,interaction:{mode:"index",intersect:false},
         plugins:{legend:{labels:{color:tickC,font:{size:10},boxWidth:8,padding:6}},
           tooltip:{callbacks:{label:ctx=>` ${ctx.dataset.label}: ${won(ctx.parsed.y)}`}}},
         scales:{
           x:{ticks:{color:tickC,font:{size:11}},grid:{display:false},stacked:true},
-          yExp:{position:"left",stacked:true,beginAtZero:true,ticks:{color:subC,font:{size:10},callback:v=>wonShort(v)},grid:{color:gridC},title:{display:true,text:"지출",color:subC,font:{size:9}}},
-          yInc:{position:"right",beginAtZero:true,ticks:{color:"#2EC890",font:{size:10},callback:v=>wonShort(v)},grid:{display:false},title:{display:true,text:"수입",color:"#2EC890",font:{size:9}}}
+          yExp:{position:"left",stacked:true,beginAtZero:true,ticks:{color:subC,font:{size:10},callback:v=>wonShort(v)},grid:{color:gridC},title:{display:true,text:"지출(왼쪽 막대)",color:subC,font:{size:9}}},
+          yInc:{position:"right",beginAtZero:true,ticks:{color:"#2EC890",font:{size:10},callback:v=>wonShort(v)},grid:{display:false},title:{display:true,text:"수입(오른쪽 막대)",color:"#2EC890",font:{size:9}}}
         }}}));
   }
 
