@@ -155,9 +155,9 @@ memberVal    // 입력 시트의 '누가' 선택값
 | `addMaster(key) / delMaster(key, val)` | 카테고리·결제수단·계좌 CRUD |
 | `refreshCatList()` | 입력 시트 select 옵션 갱신 |
 | `openPicker(sel,title) / pickOptIdx(i) / updateSelBtn(sel)` | 커스텀 하단 시트 피커 열기·선택·버튼 표시 갱신 |
-| `viewAnalysis() / buildInsights()` | 분석 탭 렌더 + 카테고리 기반 스마트 진단·절약팁 생성 |
-| `drawAnalysisCharts() / destroyCharts()` | 도넛·막대·라인 차트 렌더 / 인스턴스 일괄 파괴 |
-| `expOf(rs) / incOf(rs) / catColor(c)` | 지출·수입 합계 헬퍼(이동 제외), 카테고리 고정색(이름 해시) |
+| `viewAnalysis() / buildInsights() / bigSpends(rows)` | 분석 탭 렌더 + 스마트 진단·절약팁 + 일회성 이상치(카테고리 중앙값 대비 ≥2.5배·표본≥3) |
+| `drawAnalysisCharts() / destroyCharts()` | 도넛 + 주기별 스택막대(지출=카테고리·왼축, 수입=오른 보조축) + 추이 라인 / 인스턴스 일괄 파괴 |
+| `expOf(rs) / incOf(rs) / catColor(c)` | 지출·수입 합계 헬퍼(이동 제외), 카테고리 색 — **처음 등장 순서대로 팔레트 배정**(`_catOrder`). ⚠️이름해시 금지: 한글 카테고리가 한 칸에 몰려 전부 초록으로 보였음 |
 | `isTransfer(r)` | 계좌간 이동 거래 판별(`r.category===TRANSFER_CAT`) — 통계 제외 필터에 공통 사용 |
 | `render()` | 현재 탭 전체 재렌더 |
 
@@ -211,6 +211,8 @@ git push
 브라우저 없이 인라인 JS를 확인하는 법: 마지막 `<script>` 블록을 추출 → `new Function`/`Module._compile`에 stub(supabase·Chart·document·localStorage) 주입해 파싱/순수함수 단위테스트. `node`로 실행.
 - 빠른 문법 검사(복붙용): `node -e "const fs=require('fs');const c=[...fs.readFileSync('index.html','utf8').matchAll(/<script>([\s\S]*?)<\/script>/g)].pop()[1];try{new Function(c);console.log('JS OK')}catch(e){console.error(e.message);process.exit(1)}"`
 - 순수함수 단위테스트: 대상 헬퍼(`expOf`·`isTransfer` 등)를 `node -e`에 그대로 복사해 입력/기대값 비교 (이번 세션 이동 제외·짝 매칭 검증에 사용)
+- 차트·UI 시각 확인(헤드리스 Chrome): index.html 복사본의 supabase CDN 뒤에 mock(`window.supabase.createClient`→체이너블 thenable `{data,error}`)+`localStorage` 기기사용자 주입, `goTab()`로 탭 강제 후 `chrome --headless=new --screenshot=out.png --window-size=480,H --force-device-scale-factor=2`. CDN(Chart.js·폰트)은 헤드리스에서도 로드됨. Chrome 경로: `C:\Program Files\Google\Chrome\Application\chrome.exe`
+- ⚠️ `node -e '...'`에 작은따옴표 든 JS(예: `goTab('analysis')`)는 bash 따옴표와 충돌해 조용히 no-op → heredoc 스크립트 파일로. node에 경로는 인자로 전달(`-e` 문자열 속 `/tmp`는 `C:\tmp`로 오인됨)
 ⚠️ 차트 재렌더 시 이전 인스턴스 `destroyCharts()` 필수 (누수 방지). `viewX()`는 HTML만 반환, 캔버스는 `drawX()`에서.
 
 ### 입력 시트 구분(type) — 지출 / 입금 / 이동
