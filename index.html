@@ -703,9 +703,17 @@ const isTransfer = r => r.category===TRANSFER_CAT;
 const expOf = rs => rs.reduce((s,r)=>s+((r.type!=="입금"&&!isTransfer(r))?r.amount:0),0);
 const incOf = rs => rs.reduce((s,r)=>s+((r.type==="입금"&&!isTransfer(r))?r.amount:0),0);
 // 카테고리 색상 — 이름 기반 고정 해시(같은 카테고리는 항상 같은 색)
-// 색상환을 고르게 채운 12색 — 인접 카테고리도 또렷이 구분되도록 hue 간격을 넓힘 (도넛·스택·추이 공통)
-const CAT_PALETTE = ["#F0556E","#FF8C42","#F2C14E","#9BD13C","#2EC890","#2BC0B8","#41C7D6","#5B8DEF","#7C6FF0","#A86FE8","#E85AA0","#D98A3A"];
-const catColor = c => { let h=0; const s=String(c); for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))>>>0; return CAT_PALETTE[h%CAT_PALETTE.length]; };
+// 다크모드에서 또렷이 구분되는 12색(웜/쿨 교차, 초록 계열 최소화). 도넛·스택·추이 공통.
+const CAT_PALETTE = ["#FF6B6B","#4DABF7","#FFA94D","#9775FA","#51CF66","#F06595","#FFD43B","#22B8CF","#DA77F2","#C99A5B","#20C997","#5C7CFA"];
+// 카테고리 색은 '처음 등장한 순서'대로 팔레트를 배정 → 서로 다른 카테고리는 항상 다른 색.
+// (기존 이름 해시 방식은 카페·문화·데이트·이자·기타가 같은 칸[4]에 몰려 전부 초록으로 보이던 문제가 있었음)
+let _catOrder = [];
+function catColor(c){
+  const s = String(c);
+  let i = _catOrder.indexOf(s);
+  if(i < 0){ i = _catOrder.length; _catOrder.push(s); }
+  return CAT_PALETTE[i % CAT_PALETTE.length];
+}
 // 고정성 지출 카테고리 (절약 팁/고정·변동 분석에서 '고정'으로 분류)
 const FIXED_CATS = new Set(["고정비","통신","보험","이자","월세","관리비","교육","구독","월급"]);
 
