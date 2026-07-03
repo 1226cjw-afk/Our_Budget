@@ -102,9 +102,12 @@ unique (member, type, value)
 key   text primary key
 value text
 ```
-> 전역 key-value 설정. 결제 주기 시작일 저장에 사용.
+> 전역 key-value 설정.
 > - `billing_start_day` : 전역 기본 시작일 (fallback)
 > - `billing_start_<멤버명>` : 멤버별 시작일 override (예: `billing_start_지현` = `21`)
+> - `warn_threshold` : 한도 경고 임계값 % (50~99, 기본 80) — 한도 탭 warn 상태·분석 '한도 임박' 공통
+> - `analysis_periods` : 분석·분류 탭 표시 주기 수 (2~6, 기본 3)
+> - `cat_icon_<카테고리명>` : 카테고리 이모지 아이콘 (전 멤버 공통). master_data에 icon 컬럼을 두지 않은 이유: 신규 멤버는 카테고리가 DB 없이 DEFAULT_CATS fallback으로 돌아 행이 없을 수 있음
 
 ### RLS 정책 (모든 테이블 공통)
 ```sql
@@ -123,10 +126,14 @@ LIMITS         // { 멤버: { 카테고리: 금액 } }
 MASTER         // { 멤버: { categories, methods, accounts } }
 BILLING_STARTS // { 멤버: 시작일 } — app_settings에서 로드
 DEVICE_USER    // 이 기기의 기본 사용자 (localStorage, 없으면 null)
+USER_ICONS     // { 카테고리: 이모지 } — app_settings의 cat_icon_* (icon() 헬퍼가 CAT_ICON보다 우선 사용)
+WARN_TH        // 한도 경고 임계값 % (app_settings.warn_threshold, 기본 80)
+AN_PERIODS     // 분석·분류 탭 표시 주기 수 (app_settings.analysis_periods, 기본 3)
 
 tab          // 현재 탭: list | cat | limit | analysis | acct | master
 scope        // 'current' | 'all'
 memberFilter // 내역·분류·분석·계좌 탭 공통 멤버 필터 ('전체' 포함)
+searchQ      // 내역 탭 검색어 (메모·카테고리·계좌·결제수단·멤버 부분일치)
 limitMember  // 한도 탭 전용 멤버 선택 (null 없음)
 masterMember // 설정 탭 전용 멤버 선택
 memberVal    // 입력 시트의 '누가' 선택값
@@ -146,11 +153,18 @@ memberVal    // 입력 시트의 '누가' 선택값
 | 함수 | 역할 |
 |------|------|
 | `loadAll()` | members·transactions·category_limits·master_data·app_settings 병렬 로드 |
-| `setDeviceUser(name) / openDeviceUser()` | 기기 기본 사용자 설정·선택 모달 |
+| `refreshData()` | 헤더 ↻ 버튼 — 수동 재로드 (다른 기기 입력 동기화) |
+| `setSearch(v)` | 내역 검색 — 200ms 디바운스 후 render, searchBox 포커스·커서 복원 |
+| `setDeviceUser(name) / openDeviceUser()` | 기기 기본 사용자 설정·선택 모달 (헤더 👤 칩에서도 열림) |
 | `saveBillingStart(member)` | 멤버별 결제 주기 시작일 저장 |
+| `saveAppSetting(key,elId,min,max,def,unit)` | 전역 앱 설정 upsert (warn_threshold·analysis_periods) |
+| `openIconPicker(cat) / saveIcon(emo)` | 카테고리 이모지 설정 — pickerOv 재사용(이모지 그리드+직접입력), app_settings `cat_icon_*` upsert/삭제. 빈값=기본 복귀 |
+| `esc(s) / jsq(s)` | HTML 이스케이프 / onclick 속성 내 JS 문자열 이스케이프 — **innerHTML에 넣는 사용자 문자열은 esc, onclick 인자는 jsq 필수** |
+| `bumpAmt(n) / fmtNum(el)` | 금액 빠른 입력 칩(+n 누적, 0=지움) / 동적 input 콤마 포맷 |
 | `saveEntry()` | 거래 추가/수정 (구분이 '이동'이면 `saveTransfer()`로 위임) |
 | `saveTransfer(amount)` | 계좌간 이동 — 출금계좌 지출 + 입금계좌 입금 2건을 한 번에 insert (category='계좌간 이동') |
-| `saveLimit(member, cat)` | 멤버별 한도 upsert |
+| `saveLimit(member, cat)` | 멤버별 한도 upsert — **빈값/0이면 해당 행 delete**(한도 해제) |
+| `editEntry(id)` | 수정 시트 열기 — id로 ROWS 조회. ⚠️행 JSON을 onclick에 인라인 금지(메모 따옴표에 깨짐) |
 | `addMember() / delMember()` | 멤버 DB CRUD |
 | `addMaster(key) / delMaster(key, val)` | 카테고리·결제수단·계좌 CRUD |
 | `refreshCatList()` | 입력 시트 select 옵션 갱신 |
@@ -164,12 +178,14 @@ memberVal    // 입력 시트의 '누가' 선택값
 ### 탭 구성
 | 탭 | 설명 |
 |----|------|
-| 내역 (list) | 날짜별 거래 목록, 주기/멤버 필터 |
+| 내역 (list) | 날짜별 거래 목록, 주기/멤버 필터 + 검색바(searchQ)·건수 표시 |
 | 분류 (cat) | 카테고리별 집계, 주기/멤버 필터 |
-| 한도 (limit) | 멤버별 한도 설정 및 진행률 |
-| 분석 (analysis) | 최근 3주기 차트·반복지출·요약 |
-| 계좌 (acct) | 계좌별 잔액, 멤버 필터 |
-| 설정 (master) | 멤버·카테고리·결제수단·계좌 관리 |
+| 한도 (limit) | 멤버별 한도 설정 및 진행률 (warn 임계값=WARN_TH) |
+| 분석 (analysis) | 최근 AN_PERIODS주기 차트·반복지출·요약 |
+| 계좌 (acct) | 계좌별 잔액(이동 포함), 총수입·지출(이동 제외), 멤버 필터 |
+| 설정 (master) | 멤버·기기사용자·앱설정(임계값·주기수)·결제주기·카테고리(아이콘 포함)·결제수단·계좌 관리 |
+
+> 헤더 우측: 👤 기기사용자 칩(누르면 openDeviceUser) + ↻ 새로고침(refreshData). 칩 텍스트는 render()에서 갱신.
 
 > ⚠️ 한도 탭(`viewLimit`) 카테고리 목록은 `MASTER[멤버].categories`(master_data DB) 기준 + 기존 저장 한도. 지출 발생 카테고리(`spent`)로 만들면 '계좌간 이동'처럼 설정에 없는 항목까지 한도 UI가 떠서 안 됨.
 
@@ -219,7 +235,7 @@ git push
 - 토글 버튼 3개: `tgExp`(지출)·`tgInc`(입금)·`tgTrf`(이동). `setType(t)`가 버튼 색(`tg-e/tg-i/tg-t`)과 행 표시를 토글
 - **'이동'(계좌간 이동)** 선택 시: 카테고리·결제수단·계좌 행(`#rowCategory/#rowMethod/#rowAccount`) 숨김 → 출금/입금계좌 행(`#rowFrom/#rowTo`) 노출. `fFromAccount`·`fToAccount` 셀렉트는 계좌 마스터로 채움
 - 저장 시 `saveTransfer()`가 거래 2건 insert: 출금계좌 `지출` + 입금계좌 `입금`, 둘 다 `category=TRANSFER_CAT('계좌간 이동')`. 계좌 탭 잔액은 정확히 반영(출금 −, 입금 +)
-- **소비/수입 통계에서 제외**: `isTransfer(r)`(=`r.category===TRANSFER_CAT`) 헬퍼로 `expOf/incOf`·`aggCat`·분석 집계·한도 spent에서 이동을 빼서 총지출·총수입·분류·분석이 부풀지 않음. **단 계좌 탭(`viewAccount`)은 직접 순회라 이동 포함**(잔액 계산에 필요). 새 집계 추가 시 `!isTransfer(r)` 적용 여부 판단
+- **소비/수입 통계에서 제외**: `isTransfer(r)`(=`r.category===TRANSFER_CAT`) 헬퍼로 `expOf/incOf`·`aggCat`·분석 집계·한도 spent에서 이동을 빼서 총지출·총수입·분류·분석이 부풀지 않음. **계좌 탭(`viewAccount`)은 이원화**: 잔액(`bal`·계좌별)은 이동 포함(계좌간 돈 흐름에 필요), 상단 총수입·총지출 카드는 이동 제외 표시('계좌간 이동 제외' 캡션). 새 집계 추가 시 `!isTransfer(r)` 적용 여부 판단
 - 내역(list) 리스트엔 이동 2건이 그대로 보임 + `🔄` 아이콘과 `.chip.trf`(파란 '출금·이동'/'입금·이동' 배지)로 한 쌍임을 표시. 날짜별 소계 `de=expOf()`도 이동 제외라, 이동이 낀 날은 보이는 지출행이 소계에 안 잡힐 수 있음(의도된 동작)
 - **수정 불가**: 이동 leg는 한 쌍이라 단건 수정 시 짝과 어긋남 → `editEntry`가 `isTransfer(r)`이면 토스트 띄우고 차단(삭제 후 재등록 유도). 신규 입력에서만 `tgTrf` 노출
 - **짝 삭제**: `delEntry(id)`가 이동 leg 삭제 시 짝(같은 member·date·amount·`TRANSFER_CAT`·반대 type)을 찾아 `.in("id",[id,mate])`로 함께 삭제 + 구글 시트 백업도 양쪽 전송. 동일 이동이 2쌍 있어도 1건씩 매칭돼 남은 쌍은 유효하게 보존됨
@@ -235,6 +251,7 @@ git push
 ### 보안
 - `.mcp.json`엔 Supabase 연결정보 포함 → 커밋 금지. `.gitignore`에 `.mcp.json`·`PROGRESS.md`·`insert_master.ps1` 등록됨
 - 추적 파일은 `index.html`·`CLAUDE.md`·`backup_appscript.gs`·`.gitignore` 4개뿐
+- **사용자 입력 렌더링 규칙**: innerHTML에 들어가는 모든 사용자 문자열(메모·항목명·멤버명·계좌명)은 `esc()`, `onclick="fn('…')"` 인자는 `jsq()` 필수. 안 지키면 따옴표·`<` 든 입력에 UI가 깨짐 (2026-07 전면 적용됨)
 
 ---
 
