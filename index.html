@@ -773,6 +773,7 @@ let tab          = "list";
 let scope        = "current";
 let memberFilter = "전체";  // 내역·분류·계좌 탭 공통 필터
 let searchQ      = "";      // 내역 탭 검색어
+let catBy        = "category"; // 분류 탭 집계 기준: 'category' | 'method'
 let limitMember  = null;    // 한도 탭 전용
 let masterMember = null;    // 설정 탭 전용
 let typeVal      = "지출";
@@ -1120,6 +1121,7 @@ function buildNav(){
 function goTab(k){ tab=k; buildNav(); render(); }
 function setScope(s){ scope=s; render(); }
 function setMemberFilter(m){ memberFilter=m; render(); }
+function setCatBy(v){ catBy=v; render(); }
 function setLimitMember(m){ limitMember=m; render(); }
 function setMasterMember(m){ masterMember=m; render(); }
 
@@ -1235,7 +1237,8 @@ function viewList(){
 }
 
 /* ── 분류 탭 ── */
-function aggCat(rs){ const o={}; rs.forEach(r=>{ if(isTransfer(r)) return; (o[r.category]=o[r.category]||{inc:0,exp:0}); r.type==="입금"?o[r.category].inc+=r.amount:o[r.category].exp+=r.amount;}); return o; }
+// field: 'category' | 'method' — 분류 탭 집계 기준. 값이 비면 '미지정'으로 묶음 (입금 등 결제수단 없는 건)
+function aggCat(rs, field="category"){ const o={}; rs.forEach(r=>{ if(isTransfer(r)) return; const k=r[field]||"미지정"; (o[k]=o[k]||{inc:0,exp:0}); r.type==="입금"?o[k].inc+=r.amount:o[k].exp+=r.amount;}); return o; }
 function catCard(cat,v,pct){
   const net=v.inc-v.exp;
   let st="";
@@ -1248,15 +1251,17 @@ function catCard(cat,v,pct){
   return `<div class="ccard"><div class="c-h"><div class="c-l"><div class="c-ic">${icon(cat)}</div><div class="c-nm">${esc(cat)}</div></div><span class="c-bd ${net>=0?'bg':'br'}">${net>=0?'+':''}${won(net)}</span></div>${st}${pct>0?`<div class="barw"><div class="bar" style="width:${pct}%"></div></div>`:""}</div>`;
 }
 function viewCategory(){
-  const rows=scoped(), sum=aggCat(rows);
-  if(!Object.keys(sum).length) return `<div class="sec">${empty("📭","데이터가 없습니다")}</div>`;
+  const field = catBy==="method" ? "method" : "category";
+  const byBar=`<div class="filter">${[["category","카테고리별"],["method","결제수단별"]].map(([k,lb])=>`<span class="pill${catBy===k?' on':''}" onclick="setCatBy('${k}')">${lb}</span>`).join("")}</div>`;
+  const rows=scoped(), sum=aggCat(rows,field);
+  if(!Object.keys(sum).length) return byBar+`<div class="sec">${empty("📭","데이터가 없습니다")}</div>`;
   const totExp=Object.values(sum).reduce((s,v)=>s+v.exp,0);
-  let h=`<div class="sec">`;
+  let h=byBar+`<div class="sec">`;
   Object.entries(sum).sort((a,b)=>b[1].exp-a[1].exp).forEach(([c,v])=>h+=catCard(c,v,totExp?Math.round(v.exp/totExp*100):0));
   if(scope==="all"){
     const _catMem=memberFilter!=="전체"?memberFilter:MEMBERS[0];
     [...recentPeriods(AN_PERIODS,_catMem)].reverse().forEach(p=>{
-      const ma=aggCat(myRows().filter(r=>inPeriod(r.date,p)));
+      const ma=aggCat(myRows().filter(r=>inPeriod(r.date,p)),field);
       if(!Object.keys(ma).length) return;
       h+=`<div class="sec-t">📅 ${p.label}</div>`;
       Object.entries(ma).sort((a,b)=>b[1].exp-a[1].exp).forEach(([c,v])=>h+=catCard(c,v,0));

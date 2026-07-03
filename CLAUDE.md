@@ -134,6 +134,7 @@ tab          // 현재 탭: list | cat | limit | analysis | acct | master
 scope        // 'current' | 'all'
 memberFilter // 내역·분류·분석·계좌 탭 공통 멤버 필터 ('전체' 포함)
 searchQ      // 내역 탭 검색어 (메모·카테고리·계좌·결제수단·멤버 부분일치)
+catBy        // 분류 탭 집계 기준: 'category' | 'method' — aggCat(rs, field)가 키 필드로 사용, 빈 결제수단은 '미지정'
 limitMember  // 한도 탭 전용 멤버 선택 (null 없음)
 masterMember // 설정 탭 전용 멤버 선택
 memberVal    // 입력 시트의 '누가' 선택값
@@ -179,7 +180,7 @@ memberVal    // 입력 시트의 '누가' 선택값
 | 탭 | 설명 |
 |----|------|
 | 내역 (list) | 날짜별 거래 목록, 주기/멤버 필터 + 검색바(searchQ)·건수 표시 |
-| 분류 (cat) | 카테고리별 집계, 주기/멤버 필터 |
+| 분류 (cat) | 카테고리별/결제수단별 집계(catBy 토글 필), 주기/멤버 필터 |
 | 한도 (limit) | 멤버별 한도 설정 및 진행률 (warn 임계값=WARN_TH) |
 | 분석 (analysis) | 최근 AN_PERIODS주기 차트·반복지출·요약 |
 | 계좌 (acct) | 계좌별 잔액(이동 포함), 총수입·지출(이동 제외), 멤버 필터 |
