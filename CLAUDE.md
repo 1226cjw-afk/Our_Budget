@@ -132,6 +132,7 @@ AN_PERIODS     // 분석·분류 탭 표시 주기 수 (app_settings.analysis_pe
 
 tab          // 현재 탭: list | cat | limit | analysis | acct | master
 scope        // 'current' | 'all'
+periodOffset // 내역·분류 탭 주기 탐색: 0=이번 주기, -1=한 주기 전 … (◀▶로 이동, 0 초과 불가)
 memberFilter // 내역·분류·분석·계좌 탭 공통 멤버 필터 ('전체' 포함)
 searchQ      // 내역 탭 검색어 (메모·카테고리·계좌·결제수단·멤버 부분일치)
 catBy        // 분류 탭 집계 기준: 'category' | 'method' — aggCat(rs, field)가 키 필드로 사용, 빈 결제수단은 '미지정'
@@ -149,6 +150,7 @@ memberVal    // 입력 시트의 '누가' 선택값
 
 ### 결제 주기
 멤버별 시작일 설정 (`BILLING_STARTS`, 기본 매월 25일~익월 24일). `billingPeriod(member, ref)`가 해당 멤버 주기 계산.
+`viewedPeriod(member)`는 여기에 `periodOffset`을 반영한 '현재 조회 중인 주기' — `scoped()`가 사용.
 
 ### 주요 함수
 | 함수 | 역할 |
@@ -174,17 +176,23 @@ memberVal    // 입력 시트의 '누가' 선택값
 | `drawAnalysisCharts() / destroyCharts()` | 도넛 + 주기별 스택막대(지출=카테고리·왼축, 수입=오른 보조축) + 추이 라인 / 인스턴스 일괄 파괴 |
 | `expOf(rs) / incOf(rs) / catColor(c)` | 지출·수입 합계 헬퍼(이동 제외), 카테고리 색 — **처음 등장 순서대로 팔레트 배정**(`_catOrder`). ⚠️이름해시 금지: 한글 카테고리가 한 칸에 몰려 전부 초록으로 보였음 |
 | `isTransfer(r)` | 계좌간 이동 거래 판별(`r.category===TRANSFER_CAT`) — 통계 제외 필터에 공통 사용 |
+| `$(id) / parseDate(s) / todayStr() / amtVal(id)` | getElementById 축약 / 날짜 파싱(YYYY-MM-DD는 정오로 — 타임존 경계 안전) / 오늘 날짜 문자열 / 콤마 금액 input→숫자 |
+| `reloadAndRender()` | `loadAll()+render()` — CRUD 후 공통 마무리 |
+| `movePeriod(d) / resetPeriod() / viewedPeriod(m)` | 내역·분류 탭 ◀▶ 주기 탐색 (periodOffset 0 클램프, 누르면 scope='current') |
+| `drillTo(q)` | 분류 카드 클릭 → 내역 탭 이동 + 검색어 세팅 (주기·멤버 필터 유지, '미지정' 카드는 비활성) |
+| `exportCSV()` | 설정 탭 — 전체 거래 CSV 다운로드 (UTF-8 BOM, 콤마·따옴표·개행 인용 처리) |
+| `ensureOpt(selId,val)` | 수정 시트에서 마스터에 없는 기존 값을 select에 임시 옵션으로 추가 — 삭제된 카테고리·계좌가 첫 옵션으로 바뀌는 것 방지 |
 | `render()` | 현재 탭 전체 재렌더 |
 
 ### 탭 구성
 | 탭 | 설명 |
 |----|------|
-| 내역 (list) | 날짜별 거래 목록, 주기/멤버 필터 + 검색바(searchQ)·건수 표시 |
-| 분류 (cat) | 카테고리별/결제수단별 집계(catBy 토글 필), 주기/멤버 필터 |
-| 한도 (limit) | 멤버별 한도 설정 및 진행률 (warn 임계값=WARN_TH) |
+| 내역 (list) | 날짜별 거래 목록, 주기(◀▶ 과거 주기 탐색)/멤버 필터 + 검색바(searchQ)·건수 표시 |
+| 분류 (cat) | 카테고리별/결제수단별 집계(catBy 토글 필), 주기(◀▶)/멤버 필터, 카드 클릭 시 내역 드릴다운 |
+| 한도 (limit) | 멤버별 한도 설정 및 진행률 (warn 임계값=WARN_TH) + 상단 '전체 한도 요약' 카드 |
 | 분석 (analysis) | 최근 AN_PERIODS주기 차트·반복지출·요약 |
 | 계좌 (acct) | 계좌별 잔액(이동 포함), 총수입·지출(이동 제외), 멤버 필터 |
-| 설정 (master) | 멤버·기기사용자·앱설정(임계값·주기수)·결제주기·카테고리(아이콘 포함)·결제수단·계좌 관리 |
+| 설정 (master) | 멤버·기기사용자·앱설정(임계값·주기수)·CSV 내보내기·결제주기·카테고리(아이콘 포함)·결제수단·계좌 관리 |
 
 > 헤더 우측: 👤 기기사용자 칩(누르면 openDeviceUser) + ↻ 새로고침(refreshData). 칩 텍스트는 render()에서 갱신.
 
