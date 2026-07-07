@@ -128,6 +128,7 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
   white-space:nowrap;transition:all .18s;
 }
 .pill.on{background:var(--acg);border-color:rgba(201,147,58,.45);color:var(--ac)}
+.pill.dis{opacity:.3;pointer-events:none}
 .sec{padding:14px 16px 0}
 .g{color:var(--g)}.r{color:var(--r)}
 
@@ -219,8 +220,10 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 /* ── 분류 카드 ── */
 .ccard{
   background:var(--card);border:1px solid var(--bd);border-radius:20px;
-  padding:16px;margin-bottom:10px;transition:border-color .2s;
+  padding:16px;margin-bottom:10px;transition:border-color .2s,transform .15s;
 }
+.ccard.link{cursor:pointer}
+.ccard.link:active{transform:scale(.99);border-color:rgba(201,147,58,.3)}
 .c-h{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:12px}
 .c-l{display:flex;align-items:center;gap:10px;min-width:0}
 .c-ic{
@@ -771,6 +774,7 @@ let AN_PERIODS     = 3;     // 분석·분류 탭 표시 주기 수 — app_sett
 
 let tab          = "list";
 let scope        = "current";
+let periodOffset = 0;       // 내역·분류 탭 주기 탐색: 0=이번 주기, -1=한 주기 전 …
 let memberFilter = "전체";  // 내역·분류·계좌 탭 공통 필터
 let searchQ      = "";      // 내역 탭 검색어
 let catBy        = "category"; // 분류 탭 집계 기준: 'category' | 'method'
@@ -782,6 +786,12 @@ let editId       = null;
 let loadError    = null;
 
 /* ── 유틸 ── */
+const $        = id => document.getElementById(id);
+// 날짜 문자열 → Date ('YYYY-MM-DD'는 정오로 파싱해 타임존 경계 오차 방지)
+const parseDate = s => new Date(s.length===10 ? s+"T12:00:00" : s);
+const todayStr  = () => { const t=new Date(); return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,"0")}-${String(t.getDate()).padStart(2,"0")}`; };
+// 콤마 포함 금액 input 값 → 숫자
+const amtVal   = id => Number($(id).value.replace(/[^0-9]/g,""))||0;
 const won      = n => Number(n||0).toLocaleString("ko-KR")+"원";
 const wonShort = n => n>=10000 ? (n/10000).toFixed(n%10000?1:0)+"만" : Number(n).toLocaleString("ko-KR");
 const icon     = c => USER_ICONS[c] || CAT_ICON[c] || "💳";
@@ -789,7 +799,7 @@ const icon     = c => USER_ICONS[c] || CAT_ICON[c] || "💳";
 const esc = s => String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
 // onclick="fn('…')" 속 JS 문자열 리터럴용 — JS 이스케이프 후 HTML 이스케이프 (따옴표 든 항목명에도 안전)
 const jsq = s => esc(String(s==null?"":s).replace(/\\/g,"\\\\").replace(/'/g,"\\'"));
-const toast    = m => { const t=document.getElementById("toast"); t.textContent=m; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),1800); };
+const toast    = m => { const t=$("toast"); t.textContent=m; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),1800); };
 const empty    = (ic,msg) => `<div class="empty"><div class="e-ic">${ic}</div><p>${msg.replace(/\n/g,"<br>")}</p></div>`;
 // 기기 기본 사용자가 멤버 목록에 있으면 그 사람을, 없으면 첫 멤버를 기본값으로
 const defMember = () => (DEVICE_USER && MEMBERS.includes(DEVICE_USER)) ? DEVICE_USER : (MEMBERS[0]||null);
@@ -830,7 +840,14 @@ function recentPeriods(n, member){
   const cur=billingPeriod(member);
   return Array.from({length:n},(_,i)=>billingPeriod(member,new Date(cur.start.getFullYear(),cur.start.getMonth()-(n-1-i),sd)));
 }
-const inPeriod = (s,p) => { const d=new Date(s.length===10?s+"T12:00:00":s); return d>=p.start&&d<=p.end; };
+const inPeriod = (s,p) => { const d=parseDate(s); return d>=p.start&&d<=p.end; };
+// 현재 조회 중인 주기 — periodOffset(0=이번, -1=한 주기 전…) 반영
+function viewedPeriod(member){
+  const cur=billingPeriod(member);
+  if(!periodOffset) return cur;
+  const sd=(member&&BILLING_STARTS[member])||25;
+  return billingPeriod(member, new Date(cur.start.getFullYear(), cur.start.getMonth()+periodOffset, sd));
+}
 
 /* ── 초기화 ── */
 window.onload = async () => {
@@ -904,6 +921,9 @@ async function loadAll(){
   MEMBERS.forEach(m=>{if(!(m in BILLING_STARTS))BILLING_STARTS[m]=_globalBS;});
 }
 
+/* 데이터 재로드 + 재렌더 — CRUD 후 공통 마무리 */
+async function reloadAndRender(){ await loadAll(); render(); }
+
 /* ── 구글 시트 백업 (단방향, fire-and-forget) ── */
 function backupToSheet(action, payload){
   if(!GAS_BACKUP_URL) return;  // URL 미설정 시 비활성
@@ -918,20 +938,20 @@ function backupToSheet(action, payload){
 
 /* ── 거래 저장/삭제 ── */
 async function saveEntry(){
-  const amount = Number(document.getElementById("fAmount").value.replace(/,/g,""));
+  const amount = amtVal("fAmount");
   if(typeVal==="이동"){ return saveTransfer(amount); }
   const row = {
-    date:     document.getElementById("fDate").value,
+    date:     $("fDate").value,
     amount,
     type:     typeVal,
     member:   memberVal,
-    category: document.getElementById("fCategory").value,
-    method:   document.getElementById("fMethod").value,
-    account:  document.getElementById("fAccount").value,
-    memo:     document.getElementById("fMemo").value.trim()
+    category: $("fCategory").value,
+    method:   $("fMethod").value,
+    account:  $("fAccount").value,
+    memo:     $("fMemo").value.trim()
   };
   if(!row.amount||!row.category||!row.account){ toast("금액·카테고리·계좌는 필수예요"); return; }
-  const btn=document.getElementById("saveBtn");
+  const btn=$("saveBtn");
   btn.textContent="저장 중..."; btn.disabled=true;
   const wasEdit=!!editId;
   try {
@@ -945,7 +965,7 @@ async function saveEntry(){
       savedId=res.data&&res.data.id;
     }
     backupToSheet("upsert",{id:savedId,...row});  // 구글 시트 백업
-    closeSheet(); await loadAll(); render();
+    closeSheet(); await reloadAndRender();
     toast(wasEdit?"수정 완료":"저장 완료");
   } catch(e){ toast("오류: "+e.message); }
   finally{ btn.textContent=wasEdit?"수정하기":"저장하기"; btn.disabled=false; }
@@ -953,24 +973,24 @@ async function saveEntry(){
 
 // 계좌간 이동: 출금계좌 지출 + 입금계좌 입금 2건을 한 번에 생성 (category='계좌간 이동')
 async function saveTransfer(amount){
-  const from = document.getElementById("fFromAccount").value;
-  const to   = document.getElementById("fToAccount").value;
-  const date = document.getElementById("fDate").value;
-  const memo = document.getElementById("fMemo").value.trim();
+  const from = $("fFromAccount").value;
+  const to   = $("fToAccount").value;
+  const date = $("fDate").value;
+  const memo = $("fMemo").value.trim();
   if(!amount||!from||!to){ toast("금액·출금계좌·입금계좌는 필수예요"); return; }
   if(from===to){ toast("출금·입금 계좌가 같아요"); return; }
   const memoTxt = memo || `${from} → ${to}`;
   const base = { date, amount, member:memberVal, category:TRANSFER_CAT, method:"", memo:memoTxt };
   const out  = { ...base, type:"지출", account:from };  // 출금계좌에서 빠짐
   const inn  = { ...base, type:"입금", account:to };    // 입금계좌로 들어옴
-  const btn=document.getElementById("saveBtn");
+  const btn=$("saveBtn");
   btn.textContent="저장 중..."; btn.disabled=true;
   try {
     // 삽입된 행 전체를 받아 각 행 데이터 그대로 백업(반환 순서에 의존하지 않아 id-행 매칭 안전)
     const res=await sb.from("transactions").insert([out,inn]).select();
     if(res.error){ toast("저장 오류: "+res.error.message); return; }
     (res.data||[]).forEach(row=>backupToSheet("upsert",row));  // 구글 시트 백업(출금·입금 2건)
-    closeSheet(); await loadAll(); render();
+    closeSheet(); await reloadAndRender();
     toast("이동 완료");
   } catch(e){ toast("오류: "+e.message); }
   finally{ btn.textContent="저장하기"; btn.disabled=false; }
@@ -987,36 +1007,36 @@ async function delEntry(id){
   const res=await sb.from("transactions").delete().in("id",ids);
   if(res.error){ toast("삭제 오류: "+res.error.message); return; }
   ids.forEach(x=>backupToSheet("delete",{id:x}));  // 구글 시트 백업(양쪽 모두)
-  await loadAll(); render(); toast(mate?"이동(2건) 삭제 완료":"삭제 완료");
+  await reloadAndRender(); toast(mate?"이동(2건) 삭제 완료":"삭제 완료");
 }
 
 /* ── 한도 저장 (멤버별) — 빈값/0이면 한도 삭제 ── */
 async function saveLimit(member, cat){
-  const v = Number(document.getElementById(`lim_${member}_${cat}`).value.replace(/[^0-9]/g,""));
+  const v = amtVal(`lim_${member}_${cat}`);
   const res = v>0
     ? await sb.from("category_limits").upsert({member, category:cat, monthly_limit:v},{onConflict:"member,category"})
     : await sb.from("category_limits").delete().eq("member",member).eq("category",cat);
   if(res.error){ toast("한도 저장 오류: "+res.error.message); return; }
-  await loadAll(); render(); toast(v>0?"한도 저장":"한도 삭제");
+  await reloadAndRender(); toast(v>0?"한도 저장":"한도 삭제");
 }
 
 /* ── 멤버 추가/삭제 (설정 탭) ── */
 async function addMember(){
-  const el=document.getElementById("m_input_member"), val=el.value.trim(); if(!val) return;
+  const el=$("m_input_member"), val=el.value.trim(); if(!val) return;
   const res=await sb.from("members").insert({name:val});
   if(res.error){ toast("오류: "+res.error.message); return; }
-  el.value=""; await loadAll(); render();
+  el.value=""; await reloadAndRender();
 }
 async function delMember(name){
   if(!confirm(`'${name}' 멤버를 삭제하시겠습니까?\n해당 멤버의 마스터 데이터와 한도 설정이 함께 삭제됩니다.`)) return;
   const res=await sb.from("members").delete().eq("name",name);
   if(res.error){ toast("오류: "+res.error.message); return; }
-  await loadAll(); render();
+  await reloadAndRender();
 }
 
 /* ── 결제 주기 저장 (멤버별) ── */
 async function saveBillingStart(member){
-  const raw=Number(document.getElementById(`m_billing_start_${member}`).value);
+  const raw=Number($(`m_billing_start_${member}`).value);
   const v=Math.max(1,Math.min(28,raw||25));
   const res=await sb.from("app_settings").upsert({key:`billing_start_${member}`,value:String(v)},{onConflict:"key"});
   if(res.error){ toast("오류: "+res.error.message); return; }
@@ -1028,7 +1048,7 @@ async function saveBillingStart(member){
 
 /* ── 앱 설정 저장 (전역, app_settings) ── */
 async function saveAppSetting(key, elId, min, max, def, unit){
-  const raw=Number(document.getElementById(elId).value);
+  const raw=Number($(elId).value);
   const v=Math.max(min,Math.min(max,raw||def));
   const res=await sb.from("app_settings").upsert({key,value:String(v)},{onConflict:"key"});
   if(res.error){ toast("오류: "+res.error.message); return; }
@@ -1042,15 +1062,15 @@ const EMOJI_SET=["🍽️","🍜","☕","🍰","🍺","🛒","🏠","💡","🚌
 let iconCat=null;
 function openIconPicker(cat){
   iconCat=cat;
-  document.getElementById("pickerTitle").textContent=`'${cat}' 아이콘 변경`;
-  document.getElementById("pickerOpts").innerHTML=
+  $("pickerTitle").textContent=`'${cat}' 아이콘 변경`;
+  $("pickerOpts").innerHTML=
     `<div class="emo-grid">${EMOJI_SET.map(e=>`<button class="emo${icon(cat)===e?' on':''}" onclick="saveIcon('${e}')">${e}</button>`).join("")}</div>
      <div style="padding:6px 18px 18px;display:flex;gap:8px">
        <input class="search-inp" id="emoCustom" placeholder="직접 입력 (이모지)" maxlength="4" style="flex:1;padding-right:15px">
-       <button class="m-save" onclick="saveIcon(document.getElementById('emoCustom').value.trim())">적용</button>
+       <button class="m-save" onclick="saveIcon($('emoCustom').value.trim())">적용</button>
        <button class="m-save" style="color:var(--t2);background:var(--bg3);border-color:var(--bd)" onclick="saveIcon('')">기본</button>
      </div>`;
-  document.getElementById("pickerOv").classList.add("open");
+  $("pickerOv").classList.add("open");
 }
 async function saveIcon(emo){
   const cat=iconCat; if(!cat) return;
@@ -1064,9 +1084,24 @@ async function saveIcon(emo){
   toast(emo?`'${cat}' 아이콘 → ${emo}`:`'${cat}' 아이콘 기본값으로`);
 }
 
+/* ── CSV 내보내기 (전체 거래내역, 엑셀용 UTF-8 BOM) ── */
+function exportCSV(){
+  if(!ROWS.length){ toast("내보낼 내역이 없어요"); return; }
+  const q=v=>{ v=String(v==null?"":v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
+  const lines=[["날짜","구분","멤버","카테고리","금액","결제수단","계좌","메모"].join(",")];
+  [...ROWS].sort((a,b)=>String(a.date).localeCompare(String(b.date)))
+    .forEach(r=>lines.push([r.date,r.type,r.member,r.category,r.amount,r.method,r.account,r.memo].map(q).join(",")));
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(new Blob(["\uFEFF"+lines.join("\r\n")],{type:"text/csv;charset=utf-8"}));  // BOM: 엑셀 한글 깨짐 방지
+  a.download=`우리집가계부_${todayStr()}.csv`;
+  a.click();
+  setTimeout(()=>URL.revokeObjectURL(a.href),1000);
+  toast(`${ROWS.length}건 내보냈어요`);
+}
+
 /* ── 수동 새로고침 (헤더 ↻) — 다른 기기에서 입력한 내역 동기화 ── */
 async function refreshData(){
-  const b=document.getElementById("hdRefresh"); if(b)b.classList.add("rot");
+  const b=$("hdRefresh"); if(b)b.classList.add("rot");
   try{ await loadAll(); loadError=null; render(); toast("최신 데이터로 갱신했어요"); }
   catch(e){ loadError=e.message; render(); }
   finally{ if(b)b.classList.remove("rot"); }
@@ -1081,7 +1116,7 @@ function setSearch(v){
     const hadFocus=document.activeElement&&document.activeElement.id==="searchBox";
     render();
     if(hadFocus){
-      const b=document.getElementById("searchBox");
+      const b=$("searchBox");
       if(b){ b.focus(); const L=b.value.length; try{b.setSelectionRange(L,L);}catch(e){} }
     }
   },200);
@@ -1089,32 +1124,30 @@ function setSearch(v){
 
 /* ── 금액 빠른 입력 (+n원 누적, 0이면 지움) ── */
 function bumpAmt(n){
-  const el=document.getElementById("fAmount");
-  const cur=Number(el.value.replace(/[^0-9]/g,""))||0;
-  el.value=n?(cur+n).toLocaleString("ko-KR"):"";
+  $("fAmount").value = n ? (amtVal("fAmount")+n).toLocaleString("ko-KR") : "";
 }
 /* 숫자 입력 콤마 포맷 (한도 입력 등 동적 input용) */
 function fmtNum(el){ const r=el.value.replace(/[^0-9]/g,""); el.value=r?Number(r).toLocaleString("ko-KR"):""; }
 
 /* ── 마스터 데이터 추가/삭제 ── */
 async function addMaster(key){
-  const el=document.getElementById("m_input_"+key), val=el.value.trim(); if(!val||!masterMember) return;
+  const el=$("m_input_"+key), val=el.value.trim(); if(!val||!masterMember) return;
   const type=MASTER_TYPE[key];
   const res=await sb.from("master_data").upsert({member:masterMember,type,value:val},{onConflict:'member,type,value'});
   if(res.error){ toast("오류: "+res.error.message); return; }
-  el.value=""; await loadAll(); render();
+  el.value=""; await reloadAndRender();
 }
 async function delMaster(key,val){
   if(!masterMember) return;
   const type=MASTER_TYPE[key];
   const res=await sb.from("master_data").delete().eq("member",masterMember).eq("type",type).eq("value",val);
   if(res.error){ toast("오류: "+res.error.message); return; }
-  await loadAll(); render();
+  await reloadAndRender();
 }
 
 /* ── 네비 / 필터 ── */
 function buildNav(){
-  document.getElementById("nav").innerHTML = TABS.map(([k,ic,lb])=>
+  $("nav").innerHTML = TABS.map(([k,ic,lb])=>
     `<button class="tab${k===tab?' on':''}" onclick="goTab('${k}')"><span class="tab-ic">${ic}</span>${lb}</button>`
   ).join("");
 }
@@ -1128,10 +1161,10 @@ function setMasterMember(m){ masterMember=m; render(); }
 /* ── 기기 기본 사용자 (localStorage) ── */
 function openDeviceUser(){
   const opts=MEMBERS.map(m=>`<div class="picker-opt${DEVICE_USER===m?' on':''}" onclick="setDeviceUser('${jsq(m)}')">👤 ${esc(m)}</div>`).join("");
-  document.getElementById("duOpts").innerHTML=opts+`<div class="picker-opt${!DEVICE_USER?' on':''}" onclick="setDeviceUser('')">공용 (정하지 않음)</div>`;
-  document.getElementById("duOv").classList.add("open");
+  $("duOpts").innerHTML=opts+`<div class="picker-opt${!DEVICE_USER?' on':''}" onclick="setDeviceUser('')">공용 (정하지 않음)</div>`;
+  $("duOv").classList.add("open");
 }
-function closeDeviceUser(){ document.getElementById("duOv").classList.remove("open"); }
+function closeDeviceUser(){ $("duOv").classList.remove("open"); }
 function setDeviceUser(name){
   DEVICE_USER = name || null;
   try{ name ? localStorage.setItem(DEVICE_USER_KEY,name) : localStorage.removeItem(DEVICE_USER_KEY); }catch(e){}
@@ -1144,15 +1177,15 @@ function setDeviceUser(name){
 function myRows(){ return memberFilter==="전체" ? ROWS : ROWS.filter(r=>r.member===memberFilter); }
 function scoped(){
   if(scope!=="current") return myRows();
-  if(memberFilter!=="전체") return myRows().filter(r=>inPeriod(r.date,billingPeriod(memberFilter)));
-  return myRows().filter(r=>inPeriod(r.date,billingPeriod(r.member)));
+  if(memberFilter!=="전체") return myRows().filter(r=>inPeriod(r.date,viewedPeriod(memberFilter)));
+  return myRows().filter(r=>inPeriod(r.date,viewedPeriod(r.member)));
 }
 
 /* ── 렌더 ── */
 function render(){
-  const hu=document.getElementById("hdUser");
+  const hu=$("hdUser");
   if(hu) hu.textContent = DEVICE_USER ? `👤 ${DEVICE_USER}` : "👤 공용";
-  const m=document.getElementById("main");
+  const m=$("main");
   if(loadError){
     m.innerHTML=`<div class="sec"><div class="err-card">
       <div style="font-size:1.05rem;font-weight:900;color:var(--r);margin-bottom:8px">⚠️ 데이터 연결 오류</div>
@@ -1176,7 +1209,7 @@ function render(){
 }
 
 async function retryLoad(){
-  document.getElementById("main").innerHTML='<div class="spin"></div>';
+  $("main").innerHTML='<div class="spin"></div>';
   try{ await loadAll(); }catch(e){ loadError=e.message; }
   render();
 }
@@ -1187,11 +1220,19 @@ function memberFilterPills(){
   return `<div class="filter">${["전체",...MEMBERS].map(mm=>`<span class="pill${memberFilter===mm?' on':''}" onclick="setMemberFilter('${jsq(mm)}')">${esc(mm)}</span>`).join("")}</div>`;
 }
 function filterBar(){
-  const _pLabel=memberFilter!=="전체"?billingPeriod(memberFilter).label:"각자 기준";
-  const scopes=[["current",`이번 주기 (${_pLabel})`],["all","전체"]];
-  return `<div class="filter">${scopes.map(([k,lb])=>`<span class="pill${scope===k?' on':''}" onclick="setScope('${k}')">${lb}</span>`).join("")}</div>
-    ${memberFilterPills()}`;
+  const _pLabel = memberFilter!=="전체" ? viewedPeriod(memberFilter).label
+                : (periodOffset ? `${-periodOffset}주기 전 · 각자` : "각자 기준");
+  const curLb = periodOffset ? `📅 ${_pLabel}` : `이번 주기 (${_pLabel})`;
+  return `<div class="filter">
+    <span class="pill" onclick="movePeriod(-1)">◀</span>
+    <span class="pill${scope==='current'?' on':''}" onclick="resetPeriod()">${curLb}</span>
+    <span class="pill${periodOffset<0?'':' dis'}" onclick="movePeriod(1)">▶</span>
+    <span class="pill${scope==='all'?' on':''}" onclick="setScope('all')">전체</span>
+  </div>${memberFilterPills()}`;
 }
+// 주기 이동 (◀ 과거 / ▶ 미래, 이번 주기까지) — 누르면 '이번 주기' 스코프로 전환
+function movePeriod(d){ periodOffset=Math.min(0,periodOffset+d); scope="current"; render(); }
+function resetPeriod(){ periodOffset=0; scope="current"; render(); }
 
 /* ── 멤버 전용 바 (한도·계좌 탭: '전체' 없음) ── */
 function memberBar(current, fn){
@@ -1212,7 +1253,7 @@ function viewList(){
   const inc=incOf(rows), exp=expOf(rows);
   const groups={}; rows.forEach(r=>{(groups[r.date]=groups[r.date]||[]).push(r);});
   const days=["일","월","화","수","목","금","토"];
-  const dl=s=>{const d=new Date(s.length===10?s+"T12:00:00":s);return `${d.getMonth()+1}월 ${d.getDate()}일 (${days[d.getDay()]})`;};
+  const dl=s=>{const d=parseDate(s);return `${d.getMonth()+1}월 ${d.getDate()}일 (${days[d.getDay()]})`;};
   let h=searchBar+`<div class="sec">`;
   if(scope==="current"&&!q) h+=`<div class="cards">
     <div class="card inc"><div class="c-lb">수입</div><div class="c-v g">+${won(inc)}</div></div>
@@ -1239,7 +1280,7 @@ function viewList(){
 /* ── 분류 탭 ── */
 // field: 'category' | 'method' — 분류 탭 집계 기준. 값이 비면 '미지정'으로 묶음 (입금 등 결제수단 없는 건)
 function aggCat(rs, field="category"){ const o={}; rs.forEach(r=>{ if(isTransfer(r)) return; const k=r[field]||"미지정"; (o[k]=o[k]||{inc:0,exp:0}); r.type==="입금"?o[k].inc+=r.amount:o[k].exp+=r.amount;}); return o; }
-function catCard(cat,v,pct){
+function catCard(cat,v,pct,drill){
   const net=v.inc-v.exp;
   let st="";
   if(v.inc>0||v.exp>0){
@@ -1248,8 +1289,11 @@ function catCard(cat,v,pct){
     if(v.exp>0) st+=`<div class="st"><div class="st-l">지출</div><div class="st-v r">-${won(v.exp)}</div></div>`;
     st+=`</div>`;
   }
-  return `<div class="ccard"><div class="c-h"><div class="c-l"><div class="c-ic">${icon(cat)}</div><div class="c-nm">${esc(cat)}</div></div><span class="c-bd ${net>=0?'bg':'br'}">${net>=0?'+':''}${won(net)}</span></div>${st}${pct>0?`<div class="barw"><div class="bar" style="width:${pct}%"></div></div>`:""}</div>`;
+  const clk=drill?` class="ccard link" onclick="drillTo('${jsq(cat)}')"`:` class="ccard"`;
+  return `<div${clk}><div class="c-h"><div class="c-l"><div class="c-ic">${icon(cat)}</div><div class="c-nm">${esc(cat)}</div></div><span class="c-bd ${net>=0?'bg':'br'}">${net>=0?'+':''}${won(net)}</span></div>${st}${pct>0?`<div class="barw"><div class="bar" style="width:${pct}%"></div></div>`:""}</div>`;
 }
+// 분류 카드 → 내역 탭 드릴다운 (검색어로 해당 항목만 필터, 주기·멤버 필터 유지)
+function drillTo(q){ tab="list"; searchQ=q; buildNav(); render(); }
 function viewCategory(){
   const field = catBy==="method" ? "method" : "category";
   const byBar=`<div class="filter">${[["category","카테고리별"],["method","결제수단별"]].map(([k,lb])=>`<span class="pill${catBy===k?' on':''}" onclick="setCatBy('${k}')">${lb}</span>`).join("")}</div>`;
@@ -1257,7 +1301,7 @@ function viewCategory(){
   if(!Object.keys(sum).length) return byBar+`<div class="sec">${empty("📭","데이터가 없습니다")}</div>`;
   const totExp=Object.values(sum).reduce((s,v)=>s+v.exp,0);
   let h=byBar+`<div class="sec">`;
-  Object.entries(sum).sort((a,b)=>b[1].exp-a[1].exp).forEach(([c,v])=>h+=catCard(c,v,totExp?Math.round(v.exp/totExp*100):0));
+  Object.entries(sum).sort((a,b)=>b[1].exp-a[1].exp).forEach(([c,v])=>h+=catCard(c,v,totExp?Math.round(v.exp/totExp*100):0,c!=="미지정"));
   if(scope==="all"){
     const _catMem=memberFilter!=="전체"?memberFilter:MEMBERS[0];
     [...recentPeriods(AN_PERIODS,_catMem)].reverse().forEach(p=>{
@@ -1293,6 +1337,19 @@ function viewLimit(){
   h+=`<div class="sec-t" style="padding-top:4px">${esc(limitMember)}의 이번 주기 한도 · ${cur.label}</div>`;
   if(over.length) h+=`<div class="alert">⚠️ <b>${over.map(o=>esc(o.cat)).join(", ")}</b> 한도 초과!</div>`;
 
+  // 종합 요약 — 한도가 설정된 카테고리 전체의 사용률
+  const withLim=items.filter(i=>i.limit>0);
+  if(withLim.length){
+    const tl=withLim.reduce((s,i)=>s+i.limit,0), tu=withLim.reduce((s,i)=>s+i.used,0);
+    const tp=tl?Math.round(tu/tl*100):0;
+    const st=tp>=100?"over":tp>=WARN_TH?"warn":"ok";
+    h+=`<div class="lcard ${st}">
+      <div class="l-h"><div class="c-l"><div class="c-ic">📦</div><div class="c-nm">전체 한도 요약</div></div><div class="l-pct ${st}">${tp}%</div></div>
+      <div class="l-bar-w"><div class="l-bar ${st}" style="width:${Math.min(tp,100)}%"></div></div>
+      <div class="l-meta"><span>${won(tu)}</span><span class="l-lim">/ ${won(tl)}</span><span style="margin-left:auto;font-size:.76rem;color:${tu<=tl?'var(--g)':'var(--r)'}">${tu<=tl?'남음 '+won(tl-tu):'초과 '+won(tu-tl)}</span></div>
+    </div>`;
+  }
+
   if(!items.length){
     h+=empty("🎯","지출 내역이나 설정된 한도가 없어요.\n아래에서 한도를 직접 추가할 수 있어요.");
   } else {
@@ -1320,7 +1377,7 @@ let _anStash = null;   // 차트용 데이터 보관 (viewAnalysis → drawAnaly
 
 /* 분석 보조 ── 카테고리 '평소 금액(중앙값)' 대비 크게 튄 개별 지출(일회성 이상치) 추출 */
 const _median = a => { const s=[...a].sort((x,y)=>x-y), n=s.length; return n?(n%2?s[(n-1)/2]:(s[n/2-1]+s[n/2])/2):0; };
-const _md     = s => { const d=new Date(s.length===10?s+"T12:00:00":s); return `${d.getMonth()+1}/${d.getDate()}`; };
+const _md     = s => { const d=parseDate(s); return `${d.getMonth()+1}/${d.getDate()}`; };
 function bigSpends(rows){
   const byCat={};
   rows.filter(r=>r.type==="지출"&&!isTransfer(r)).forEach(r=>(byCat[r.category]=byCat[r.category]||[]).push(r));
@@ -1516,7 +1573,7 @@ function drawAnalysisCharts(){
 
   // 지출은 카테고리 스택 막대(왼축), 수입은 그 옆 초록 막대(오른축).
   // → 수입이 지출보다 훨씬 커도 한 축에 눌리지 않도록 축을 분리(왼축 지출 / 오른축 수입)
-  const pc=document.getElementById("chartPeriod");
+  const pc=$("chartPeriod");
   if(pc && _anStash.stackSeries){
     const ds=_anStash.stackSeries.map(s=>({type:"bar",label:s.cat,data:s.data,backgroundColor:catColor(s.cat),stack:"exp",borderRadius:3,borderSkipped:false,maxBarThickness:38,yAxisID:"yExp"}));
     ds.push({type:"bar",label:"수입",data:_anStash.incomeByPeriod,backgroundColor:"rgba(46,200,144,.85)",stack:"inc",borderRadius:3,borderSkipped:false,maxBarThickness:22,yAxisID:"yInc"});
@@ -1532,7 +1589,7 @@ function drawAnalysisCharts(){
   }
 
   // 도넛: 카테고리별 지출 비중
-  const dc=document.getElementById("chartDonut");
+  const dc=$("chartDonut");
   if(dc && _anStash.donut.length){
     const labels=_anStash.donut.map(([c])=>c), data=_anStash.donut.map(([,a])=>a);
     _charts.push(new Chart(dc,{type:"doughnut",data:{labels,datasets:[{data,backgroundColor:labels.map(catColor),borderColor:"#0E1020",borderWidth:2,hoverOffset:6}]},
@@ -1540,7 +1597,7 @@ function drawAnalysisCharts(){
   }
 
   // 라인: 카테고리별 추이
-  const tc=document.getElementById("chartTrend");
+  const tc=$("chartTrend");
   if(tc && _anStash.trend.length){
     _charts.push(new Chart(tc,{type:"line",data:{labels:_anStash.labels,datasets:_anStash.trend.map(t=>({
       label:t.cat,data:t.data,borderColor:catColor(t.cat),backgroundColor:catColor(t.cat),tension:.35,borderWidth:2,pointRadius:3,pointHoverRadius:5,fill:false}))},
@@ -1550,7 +1607,7 @@ function drawAnalysisCharts(){
 
 /* ── 계좌 탭 (멤버 필터 적용) ── */
 function viewAccount(){
-  const rows = memberFilter==="전체" ? ROWS : ROWS.filter(r=>r.member===memberFilter);
+  const rows = myRows();
   // 잔액(acct)엔 이동 포함(계좌 간 돈 흐름), 총 수입·지출 표시엔 이동 제외(같은 금액이 양쪽에 잡혀 부풀어 보임)
   let inc=0, exp=0, bal=0, acct={};
   rows.forEach(r=>{
@@ -1632,6 +1689,15 @@ function viewMaster(){
     </div>
   </div>`;
 
+  // 데이터 내보내기 (전역)
+  h+=`<div class="m-section">
+    <div class="m-title">💾 데이터 내보내기</div>
+    <div style="font-size:.8rem;color:var(--t2);margin-bottom:12px;line-height:1.7">
+      전체 거래내역 <b style="color:var(--ac)">${ROWS.length}건</b>을 CSV 파일로 저장합니다. 엑셀·구글시트에서 바로 열 수 있어요.
+    </div>
+    <button class="m-save" style="width:100%;padding:12px" onclick="exportCSV()">📥 CSV 다운로드</button>
+  </div>`;
+
   if(!masterMember){
     return h+`</div>`;
   }
@@ -1684,47 +1750,45 @@ function refreshCatList(){
   const mdata=MASTER[memberVal]||{categories:[...DEFAULT_CATS],methods:[],accounts:[]};
   const memberLimits=LIMITS[memberVal]||{};
   const cats=Array.from(new Set([...mdata.categories,...Object.keys(memberLimits)]));
-  document.getElementById("fCategory").innerHTML=cats.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join("");
-  document.getElementById("fMethod").innerHTML=`<option value="">선택 안함</option>`+mdata.methods.map(m=>`<option value="${esc(m)}">${esc(m)}</option>`).join("");
+  $("fCategory").innerHTML=cats.map(c=>`<option value="${esc(c)}">${esc(c)}</option>`).join("");
+  $("fMethod").innerHTML=`<option value="">선택 안함</option>`+mdata.methods.map(m=>`<option value="${esc(m)}">${esc(m)}</option>`).join("");
   const acctOpts=`<option value="">계좌 선택</option>`+mdata.accounts.map(a=>`<option value="${esc(a)}">${esc(a)}</option>`).join("");
-  document.getElementById("fAccount").innerHTML=acctOpts;
-  document.getElementById("fFromAccount").innerHTML=acctOpts;
-  document.getElementById("fToAccount").innerHTML=acctOpts;
+  $("fAccount").innerHTML=acctOpts;
+  $("fFromAccount").innerHTML=acctOpts;
+  $("fToAccount").innerHTML=acctOpts;
   updateSelBtn("fCategory"); updateSelBtn("fMethod"); updateSelBtn("fAccount");
   updateSelBtn("fFromAccount"); updateSelBtn("fToAccount");
 }
 function renderMemberSeg(){
-  document.getElementById("memberSeg").innerHTML=MEMBERS.map(m=>`<button class="${m===memberVal?'on':''}" onclick="setMember('${jsq(m)}')">${esc(m)}</button>`).join("");
+  $("memberSeg").innerHTML=MEMBERS.map(m=>`<button class="${m===memberVal?'on':''}" onclick="setMember('${jsq(m)}')">${esc(m)}</button>`).join("");
 }
 function setMember(m){ memberVal=m; renderMemberSeg(); refreshCatList(); }
 function setType(t){
   typeVal=t;
-  document.getElementById("tgExp").className="tg"+(t==="지출"?" tg-e":"");
-  document.getElementById("tgInc").className="tg"+(t==="입금"?" tg-i":"");
-  document.getElementById("tgTrf").className="tg"+(t==="이동"?" tg-t":"");
+  $("tgExp").className="tg"+(t==="지출"?" tg-e":"");
+  $("tgInc").className="tg"+(t==="입금"?" tg-i":"");
+  $("tgTrf").className="tg"+(t==="이동"?" tg-t":"");
   const trf = t==="이동";  // 계좌간 이동: 카테고리·결제수단·계좌 숨기고 출금/입금계좌 노출
-  document.getElementById("rowCategory").style.display = trf?"none":"";
-  document.getElementById("rowMethod").style.display   = trf?"none":"";
-  document.getElementById("rowAccount").style.display  = trf?"none":"";
-  document.getElementById("rowFrom").style.display     = trf?"":"none";
-  document.getElementById("rowTo").style.display       = trf?"":"none";
+  $("rowCategory").style.display = trf?"none":"";
+  $("rowMethod").style.display   = trf?"none":"";
+  $("rowAccount").style.display  = trf?"none":"";
+  $("rowFrom").style.display     = trf?"":"none";
+  $("rowTo").style.display       = trf?"":"none";
 }
 function openSheet(){
   if(!MEMBERS.length){ toast("설정에서 멤버를 먼저 추가해주세요"); return; }
   editId=null;
-  document.getElementById("sheetTitle").textContent="내역 추가";
-  document.getElementById("saveBtn").textContent="저장하기";
-  document.getElementById("fMemo").value="";
-  const t=new Date();
-  document.getElementById("fDate").value=`${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,"0")}-${String(t.getDate()).padStart(2,"0")}`;
-  document.getElementById("fAmount").value="";
-  document.getElementById("tgTrf").style.display="";  // 신규 입력에서만 이동 허용
+  $("sheetTitle").textContent="내역 추가";
+  $("saveBtn").textContent="저장하기";
+  $("fMemo").value="";
+  $("fDate").value=todayStr();
+  $("fAmount").value="";
+  $("tgTrf").style.display="";  // 신규 입력에서만 이동 허용
   setType("지출");
   memberVal=memberVal||defMember();
   renderMemberSeg();
   refreshCatList();
-  document.getElementById("overlay").classList.add("open");
-  document.body.classList.add("sheet-open");
+  showSheet();
 }
 function editEntry(id){
   // id로 ROWS에서 조회 — 행 JSON을 onclick 속성에 인라인하면 메모의 따옴표에 깨짐
@@ -1732,61 +1796,72 @@ function editEntry(id){
   // 계좌간 이동은 2건이 한 쌍 → 단건 수정 시 짝과 어긋나므로 막음(삭제 후 재등록 유도)
   if(isTransfer(r)){ toast("계좌간 이동은 수정할 수 없어요. 삭제 후 다시 추가해주세요"); return; }
   editId=r.id;
-  document.getElementById("sheetTitle").textContent="내역 수정";
-  document.getElementById("saveBtn").textContent="수정하기";
-  document.getElementById("tgTrf").style.display="none";  // 수정 시엔 이동 불가(단건 수정)
+  $("sheetTitle").textContent="내역 수정";
+  $("saveBtn").textContent="수정하기";
+  $("tgTrf").style.display="none";  // 수정 시엔 이동 불가(단건 수정)
   setType(r.type);
   memberVal=r.member||MEMBERS[0];
   renderMemberSeg();
   refreshCatList();
-  document.getElementById("fDate").value=r.date;
-  document.getElementById("fAmount").value=Number(r.amount).toLocaleString("ko-KR");
-  document.getElementById("fCategory").value=r.category;
-  document.getElementById("fMethod").value=r.method||"";
-  document.getElementById("fAccount").value=r.account||"";
+  $("fDate").value=r.date;
+  $("fAmount").value=Number(r.amount).toLocaleString("ko-KR");
+  ensureOpt("fCategory",r.category);
+  ensureOpt("fMethod",r.method);
+  ensureOpt("fAccount",r.account);
   updateSelBtn("fCategory"); updateSelBtn("fMethod"); updateSelBtn("fAccount");
-  document.getElementById("fMemo").value=r.memo||"";
-  document.getElementById("overlay").classList.add("open");
-  document.body.classList.add("sheet-open");
+  $("fMemo").value=r.memo||"";
+  showSheet();
 }
-function closeSheet(){ document.getElementById("overlay").classList.remove("open"); document.body.classList.remove("sheet-open"); editId=null; }
-document.getElementById("fAmount").addEventListener("input",e=>{
-  const r=e.target.value.replace(/[^0-9]/g,"");
-  e.target.value=r?Number(r).toLocaleString("ko-KR"):"";
+// 마스터에서 삭제된 값이라도 수정 시 그대로 유지되도록 — select에 없으면 옵션 임시 추가
+function ensureOpt(selId,val){
+  const sel=$(selId);
+  if(val && ![...sel.options].some(o=>o.value===val)) sel.add(new Option(val,val));
+  sel.value=val||"";
+}
+function showSheet(){ $("overlay").classList.add("open"); document.body.classList.add("sheet-open"); }
+function closeSheet(){ $("overlay").classList.remove("open"); document.body.classList.remove("sheet-open"); editId=null; }
+$("fAmount").addEventListener("input",e=>fmtNum(e.target));
+
+/* ESC 키로 열린 레이어 닫기 (피커 → 기기사용자 모달 → 입력 시트 순) */
+document.addEventListener("keydown",e=>{
+  if(e.key!=="Escape") return;
+  if($("pickerOv").classList.contains("open")) closePicker();
+  else if($("duOv").classList.contains("open")) closeDeviceUser();
+  else if($("overlay").classList.contains("open")) closeSheet();
 });
 
 /* ── 커스텀 피커 ── */
 let pickerSel = null;
 function openPicker(selId, title){
   pickerSel = selId;
-  const sel = document.getElementById(selId);
+  const sel = $(selId);
   const opts = Array.from(sel.options);
-  document.getElementById("pickerTitle").textContent = title;
+  $("pickerTitle").textContent = title;
   if(!opts.length){
-    document.getElementById("pickerOpts").innerHTML = '<div style="padding:24px 20px;text-align:center;color:var(--t3);font-size:.85rem">항목이 없어요. 설정에서 추가해주세요.</div>';
+    $("pickerOpts").innerHTML = '<div style="padding:24px 20px;text-align:center;color:var(--t3);font-size:.85rem">항목이 없어요. 설정에서 추가해주세요.</div>';
   } else {
-    document.getElementById("pickerOpts").innerHTML = opts.map((o,i)=>
+    $("pickerOpts").innerHTML = opts.map((o,i)=>
       `<div class="picker-opt${sel.value===o.value?' on':''}" onclick="pickOptIdx(${i})">${esc(o.text)}</div>`
     ).join("");
   }
-  document.getElementById("overlay").style.overflow = "hidden";  // 배경(입력 시트) 스크롤 잠금
-  document.getElementById("pickerOv").classList.add("open");
+  $("overlay").style.overflow = "hidden";  // 배경(입력 시트) 스크롤 잠금
+  $("pickerOv").classList.add("open");
 }
 function pickOptIdx(idx){
   if(!pickerSel) return;
-  const sel = document.getElementById(pickerSel);
+  const sel = $(pickerSel);
   sel.selectedIndex = idx;
   updateSelBtn(pickerSel);
   closePicker();
 }
 function closePicker(){
-  document.getElementById("pickerOv").classList.remove("open");
-  document.getElementById("overlay").style.overflow = "";  // 배경 스크롤 잠금 해제
+  $("pickerOv").classList.remove("open");
+  $("overlay").style.overflow = "";  // 배경 스크롤 잠금 해제
   pickerSel = null; iconCat = null;
 }
 function updateSelBtn(selId){
-  const sel = document.getElementById(selId);
-  const disp = document.getElementById(selId+"Disp");
+  const sel = $(selId);
+  const disp = $(selId+"Disp");
   if(!sel||!disp) return;
   const opt = sel.options[sel.selectedIndex];
   disp.textContent = opt ? opt.text : "선택";
