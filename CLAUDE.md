@@ -52,6 +52,8 @@ CSS · JS 모두 `index.html` 안에 인라인. 외부 의존성:
 - `chart.js` (CDN)
 - Pretendard / Noto Sans KR (Google Fonts)
 
+웹 아이콘도 인라인: `<head>`에 SVG 파비콘(data URI) + `apple-touch-icon`(180×180 PNG base64, 헤드리스 Chrome 캔버스로 생성) + `theme-color`·standalone 메타. 별도 이미지 파일 없음 — 아이콘 교체 시 data URI를 다시 생성해 갈아끼울 것.
+
 ---
 
 ## DB 스키마
@@ -149,7 +151,7 @@ memberVal    // 입력 시트의 '누가' 선택값
 - '공용' 선택 시 기존처럼 `MEMBERS[0]` 기본 + `memberFilter='전체'`
 
 ### 결제 주기
-멤버별 시작일 설정 (`BILLING_STARTS`, 기본 매월 25일~익월 24일). `billingPeriod(member, ref)`가 해당 멤버 주기 계산.
+멤버별 시작일 설정 (`BILLING_STARTS`, 기본 매월 25일~익월 24일). `billingPeriod(member, ref)`가 해당 멤버 주기 계산 — 종료일은 '다음 시작일 하루 전'으로 산출 (시작일=1이면 같은 달 말일. 과거엔 1일 설정 시 두 달짜리 주기가 되던 버그 → 2026-07 수정, 회귀 금지).
 `viewedPeriod(member)`는 여기에 `periodOffset`을 반영한 '현재 조회 중인 주기' — `scoped()`가 사용.
 
 ### 주요 함수
@@ -177,6 +179,9 @@ memberVal    // 입력 시트의 '누가' 선택값
 | `expOf(rs) / incOf(rs) / catColor(c)` | 지출·수입 합계 헬퍼(이동 제외), 카테고리 색 — **처음 등장 순서대로 팔레트 배정**(`_catOrder`). ⚠️이름해시 금지: 한글 카테고리가 한 칸에 몰려 전부 초록으로 보였음 |
 | `isTransfer(r)` | 계좌간 이동 거래 판별(`r.category===TRANSFER_CAT`) — 통계 제외 필터에 공통 사용 |
 | `$(id) / parseDate(s) / todayStr() / amtVal(id)` | getElementById 축약 / 날짜 파싱(YYYY-MM-DD는 정오로 — 타임존 경계 안전) / 오늘 날짜 문자열 / 콤마 금액 input→숫자 |
+| `comma(n) / dbErr(res,pre?)` | 콤마 숫자 포맷 / Supabase 응답 에러 공통 처리(에러면 토스트 후 true — `if(dbErr(res))return;` 패턴) |
+| `pills(items,cur,fn) / segBtns(items,cur,fn)` | 필 바(.filter)·세그먼트(.seg) 버튼 공통 빌더 — items는 문자열 또는 [값,라벨] 쌍 배열, jsq/esc 내장 |
+| `catsOf(m)` | 멤버 카테고리 목록 = master_data 설정 + 저장된 한도 카테고리 합집합 (한도 탭·입력 시트 공용) |
 | `reloadAndRender()` | `loadAll()+render()` — CRUD 후 공통 마무리 |
 | `movePeriod(d) / resetPeriod() / viewedPeriod(m)` | 내역·분류 탭 ◀▶ 주기 탐색 (periodOffset 0 클램프, 누르면 scope='current') |
 | `drillTo(q)` | 분류 카드 클릭 → 내역 탭 이동 + 검색어 세팅 (주기·멤버 필터 유지, '미지정' 카드는 비활성) |
@@ -238,7 +243,7 @@ git push
 - 순수함수 단위테스트: 대상 헬퍼(`expOf`·`isTransfer` 등)를 `node -e`에 그대로 복사해 입력/기대값 비교 (이번 세션 이동 제외·짝 매칭 검증에 사용)
 - 차트·UI 시각 확인(헤드리스 Chrome): index.html 복사본의 supabase CDN 뒤에 mock(`window.supabase.createClient`→체이너블 thenable `{data,error}`)+`localStorage` 기기사용자 주입, `goTab()`로 탭 강제 후 `chrome --headless=new --screenshot=<절대경로>.png --window-size=480,H --force-device-scale-factor=2 --virtual-time-budget=6000`(탭 강제 setTimeout이 돌 시간 확보 — 없으면 탭 전환 전에 찍힘). `--screenshot`은 절대경로 필수(상대경로면 "액세스 거부(0x5)"로 파일 미생성). CDN(Chart.js·폰트)은 헤드리스에서도 로드됨. Chrome 경로: `C:\Program Files\Google\Chrome\Application\chrome.exe`
 - ⚠️ `node -e '...'`에 작은따옴표 든 JS(예: `goTab('analysis')`)는 bash 따옴표와 충돌해 조용히 no-op. **heredoc도 금지**: 인용 heredoc(`<<'EOF'`)조차 백슬래시 `\\`가 소실돼 정규식/이스케이프 든 JS가 깨짐 → 스크립트 파일은 Write 도구로 생성 후 `node <절대경로>`로 실행. node에 경로는 인자로 전달(`-e` 문자열 속 `/tmp`는 `C:\tmp`로 오인됨)
-⚠️ 차트 재렌더 시 이전 인스턴스 `destroyCharts()` 필수 (누수 방지). `viewX()`는 HTML만 반환, 캔버스는 `drawX()`에서.
+⚠️ 차트 재렌더 시 이전 인스턴스 `destroyCharts()` 필수 (누수 방지) — `render()` 첫 줄에서 항상 호출됨(분석 탭 이탈 시 해제 포함). `viewX()`는 HTML만 반환, 캔버스는 `drawX()`에서.
 
 ### 입력 시트 구분(type) — 지출 / 입금 / 이동
 - 토글 버튼 3개: `tgExp`(지출)·`tgInc`(입금)·`tgTrf`(이동). `setType(t)`가 버튼 색(`tg-e/tg-i/tg-t`)과 행 표시를 토글
