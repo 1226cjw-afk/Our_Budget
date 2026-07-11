@@ -53,6 +53,8 @@ CSS · JS 모두 `index.html` 안에 인라인. 외부 의존성:
 - Pretendard / Noto Sans KR (Google Fonts)
 
 웹 아이콘도 인라인: `<head>`에 SVG 파비콘(data URI) + `apple-touch-icon`(180×180 PNG base64, 헤드리스 Chrome 캔버스로 생성) + `theme-color`·standalone 메타. 별도 이미지 파일 없음 — 아이콘 교체 시 data URI를 다시 생성해 갈아끼울 것.
+재생성법: canvas에 그린 뒤 `toDataURL()`을 `document.body.textContent`로 출력하는 임시 HTML을 Write 도구로 만들고 `chrome --headless=new --dump-dom --virtual-time-budget=4000 file:///<절대경로>`로 덤프해서 추출 (Node에 이미지 라이브러리 불필요).
+크기 주의: 이모지 PNG는 180px ≈ 57KB로 큼 → 120px로 생성(≈26KB)해 iOS가 확대하게 두는 게 절충안. ₩ 글리프+그림자는 오히려 더 커짐(blur가 압축 방해).
 
 ---
 
