@@ -1127,11 +1127,13 @@ async function refreshData(){
 }
 
 /* ── 내역 검색 (디바운스 + 재렌더 후 포커스 복원) ── */
-let _searchT=null;
+/* 한글 IME 조합 중 render()가 input을 교체하면 조합이 끊겨 자모가 낱개로 확정됨 → 조합 끝날 때까지 재렌더 보류 */
+let _searchT=null,_composing=false;
 function setSearch(v){
   searchQ=v;
   clearTimeout(_searchT);
-  _searchT=setTimeout(()=>{
+  _searchT=setTimeout(function tick(){
+    if(_composing){ _searchT=setTimeout(tick,200); return; }
     const hadFocus=document.activeElement&&document.activeElement.id==="searchBox";
     render();
     if(hadFocus){
@@ -1266,7 +1268,7 @@ function viewList(){
   const q=searchQ.trim().toLowerCase();
   const rows=q?all.filter(r=>[r.memo,r.category,r.account,r.method,r.member].some(f=>f&&String(f).toLowerCase().includes(q))):all;
   const searchBar=`<div class="searchw"><div>
-    <input class="search-inp" id="searchBox" placeholder="🔍 메모·카테고리·계좌 검색" value="${esc(searchQ)}" oninput="setSearch(this.value)">
+    <input class="search-inp" id="searchBox" placeholder="🔍 메모·카테고리·계좌 검색" value="${esc(searchQ)}" oninput="setSearch(this.value)" oncompositionstart="_composing=true" oncompositionend="_composing=false;setSearch(this.value)">
     ${searchQ?`<button class="search-x" onclick="setSearch('')">✕</button>`:""}
   </div></div>`;
   if(!rows.length) return searchBar+`<div class="sec">${empty("🔍",`'${esc(searchQ)}' 검색 결과가 없어요.`)}</div>`;
