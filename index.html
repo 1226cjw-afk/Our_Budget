@@ -43,8 +43,8 @@ const SUPABASE_ANON = "sb_publishable_phZGH7odPTBoB4z8FQF_4A_mO2ltQ6J";
   --amber:#E8961E;
   --amberg:rgba(232,150,30,.10);
   --t1:#EDE8F8;
-  --t2:#6E6C8A;
-  --t3:#32304E;
+  --t2:#8B89A8;
+  --t3:#5D5B80;
   --shadow:0 10px 48px rgba(0,0,0,.7);
   --glow:0 0 40px rgba(201,147,58,.14);
 }
@@ -54,7 +54,9 @@ body{
   font-family:'Pretendard','Noto Sans KR',-apple-system,sans-serif;
   background:var(--bg);color:var(--t1);
   line-height:1.6;-webkit-font-smoothing:antialiased;
+  font-variant-numeric:tabular-nums; /* 금액·날짜 숫자 폭 고정 — 목록 정렬감 */
 }
+:focus-visible{outline:2px solid var(--ac);outline-offset:2px;border-radius:6px}
 body::before{
   content:'';position:fixed;inset:0;pointer-events:none;z-index:0;
   background:
@@ -62,7 +64,7 @@ body::before{
     radial-gradient(ellipse 300px 400px at 0% 100%, rgba(46,200,144,.035) 0%, transparent 60%);
 }
 
-.app{max-width:480px;margin:0 auto;min-height:100vh;position:relative;padding-bottom:116px;z-index:1}
+.app{max-width:480px;margin:0 auto;min-height:100vh;position:relative;padding-bottom:calc(158px + env(safe-area-inset-bottom,0px));z-index:1}
 button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
 
 /* ── 헤더 ── */
@@ -99,32 +101,45 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
   font-size:.72rem;font-weight:700;white-space:nowrap;transition:all .18s;
 }
 .hd-chip:active{border-color:rgba(201,147,58,.4);color:var(--ac)}
+.hd-chip svg{width:13px;height:13px;flex-shrink:0}
 .hd-btn{
   width:36px;height:36px;border-radius:12px;flex-shrink:0;
   background:var(--bg3);border:1px solid var(--bd);color:var(--t2);font-size:1.05rem;
   display:flex;align-items:center;justify-content:center;transition:all .18s;
 }
 .hd-btn:active{border-color:rgba(201,147,58,.4);color:var(--ac)}
-.hd-btn.rot{animation:sp .75s linear infinite;color:var(--ac)}
+.hd-btn svg{width:16px;height:16px}
+.hd-btn.rot svg{animation:sp .75s linear infinite;color:var(--ac)}
 
-/* ── 네비 ── */
+/* ── 네비 (하단 고정 탭바) ── */
 .nav{
+  position:fixed;bottom:0;left:50%;transform:translateX(-50%);
+  width:100%;max-width:480px;
   display:flex;
-  background:rgba(7,8,14,.88);
-  backdrop-filter:blur(32px);-webkit-backdrop-filter:blur(32px);
-  border-bottom:1px solid var(--bd);
-  position:sticky;top:68px;z-index:19;
-  padding:0 4px;
+  background:rgba(9,10,17,.88);
+  backdrop-filter:blur(32px) saturate(1.4);-webkit-backdrop-filter:blur(32px) saturate(1.4);
+  border-top:1px solid var(--bd2);
+  box-shadow:0 -10px 40px rgba(0,0,0,.45);
+  padding:6px 8px calc(7px + env(safe-area-inset-bottom,0px));
+  z-index:30;
 }
 .tab{
-  flex:1;padding:9px 2px 11px;
-  font-size:.67rem;font-weight:700;color:var(--t3);
-  border-bottom:2px solid transparent;
-  transition:color .18s,border-color .18s;
+  flex:1;min-width:0;
+  display:flex;flex-direction:column;align-items:center;gap:3px;
+  padding:6px 0 4px;
+  font-size:.62rem;font-weight:700;color:var(--t3);
+  transition:color .18s;
   letter-spacing:.1px;
 }
-.tab.on{color:var(--ac);border-bottom-color:var(--ac)}
-.tab-ic{display:block;font-size:1.15rem;margin-bottom:3px}
+.tab.on{color:var(--ac)}
+.tab:active{color:var(--t2)}
+.tab-ic{
+  display:flex;align-items:center;justify-content:center;
+  width:44px;height:26px;border-radius:13px;
+  transition:background .18s;
+}
+.tab-ic svg{width:20px;height:20px}
+.tab.on .tab-ic{background:var(--acg)}
 
 /* ── 필터 ── */
 .filter{display:flex;gap:6px;padding:14px 16px 0;overflow-x:auto;scrollbar-width:none}
@@ -151,9 +166,9 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 }
 .search-inp:focus{border-color:var(--ac)}
 .search-x{
-  position:absolute;right:10px;top:50%;transform:translateY(-50%);
-  width:24px;height:24px;border-radius:50%;
-  background:var(--bg3);color:var(--t3);font-size:.68rem;
+  position:absolute;right:6px;top:50%;transform:translateY(-50%);
+  width:32px;height:32px;border-radius:50%;
+  background:var(--bg3);color:var(--t3);font-size:.72rem;
   border:1px solid var(--bd);display:flex;align-items:center;justify-content:center;
 }
 
@@ -381,20 +396,21 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 
 /* ── FAB ── */
 .fab{
-  position:fixed;bottom:28px;
+  position:fixed;bottom:calc(80px + env(safe-area-inset-bottom,0px));
   right:calc(50% - 240px + 20px);
   width:54px;height:54px;
   background:linear-gradient(140deg,#A06F1E,#D4A030);
-  color:#fff;border-radius:16px;font-size:1.55rem;
+  color:#fff;border-radius:18px;
   box-shadow:0 8px 36px rgba(201,147,58,.50),0 2px 6px rgba(0,0,0,.35);
   z-index:30;display:flex;align-items:center;justify-content:center;
   transition:transform .18s,box-shadow .18s;
 }
+.fab svg{width:26px;height:26px}
 .fab:active{transform:scale(.92);box-shadow:0 4px 20px rgba(201,147,58,.4)}
 @media(max-width:480px){.fab{right:20px}}
 
 .toast{
-  position:fixed;bottom:110px;left:50%;transform:translateX(-50%);
+  position:fixed;bottom:calc(152px + env(safe-area-inset-bottom,0px));left:50%;transform:translateX(-50%);
   background:var(--bg3);border:1px solid var(--bd2);
   padding:10px 22px;border-radius:26px;
   font-size:.8rem;font-weight:700;
@@ -575,7 +591,8 @@ body.sheet-open{overflow:hidden}
   transition:border-color .18s,box-shadow .18s;
 }
 .sel-btn:active{border-color:var(--ac);box-shadow:0 0 0 3px rgba(201,147,58,.1)}
-.sel-arr{color:var(--t3);font-size:.85rem;flex-shrink:0;margin-left:8px}
+.sel-arr{color:var(--t3);flex-shrink:0;margin-left:8px;display:flex;align-items:center}
+.sel-arr svg{width:16px;height:16px}
 .picker-ov{
   position:fixed;inset:0;z-index:60;
   background:rgba(0,0,0,0);
@@ -657,13 +674,20 @@ body.sheet-open{overflow:hidden}
       <div class="hd-t">우리집 가계부</div>
     </div>
     <div class="hd-r">
-      <button class="hd-chip" id="hdUser" onclick="openDeviceUser()">👤</button>
-      <button class="hd-btn" id="hdRefresh" onclick="refreshData()" aria-label="새로고침">↻</button>
+      <button class="hd-chip" id="hdUser" onclick="openDeviceUser()" aria-label="기기 사용자 설정">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+        <span id="hdUserName"></span>
+      </button>
+      <button class="hd-btn" id="hdRefresh" onclick="refreshData()" aria-label="새로고침">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>
+      </button>
     </div>
   </header>
   <nav class="nav" id="nav"></nav>
   <main id="main"><div class="spin"></div></main>
-  <button class="fab" onclick="openSheet()">＋</button>
+  <button class="fab" onclick="openSheet()" aria-label="내역 추가">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+  </button>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -720,31 +744,31 @@ body.sheet-open{overflow:hidden}
       </div>
       <div class="frow" id="rowCategory"><label class="flb">카테고리</label>
         <button type="button" class="sel-btn" onclick="openPicker('fCategory','카테고리')">
-          <span id="fCategoryDisp">선택</span><span class="sel-arr">▾</span>
+          <span id="fCategoryDisp">선택</span><span class="sel-arr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>
         </button>
         <select id="fCategory" style="display:none"></select>
       </div>
       <div class="frow" id="rowMethod"><label class="flb">결제수단</label>
         <button type="button" class="sel-btn" onclick="openPicker('fMethod','결제수단')">
-          <span id="fMethodDisp">선택 안함</span><span class="sel-arr">▾</span>
+          <span id="fMethodDisp">선택 안함</span><span class="sel-arr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>
         </button>
         <select id="fMethod" style="display:none"></select>
       </div>
       <div class="frow" id="rowAccount"><label class="flb">계좌</label>
         <button type="button" class="sel-btn" onclick="openPicker('fAccount','계좌')">
-          <span id="fAccountDisp">계좌 선택</span><span class="sel-arr">▾</span>
+          <span id="fAccountDisp">계좌 선택</span><span class="sel-arr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>
         </button>
         <select id="fAccount" style="display:none"></select>
       </div>
       <div class="frow" id="rowFrom" style="display:none"><label class="flb">출금계좌</label>
         <button type="button" class="sel-btn" onclick="openPicker('fFromAccount','출금계좌')">
-          <span id="fFromAccountDisp">계좌 선택</span><span class="sel-arr">▾</span>
+          <span id="fFromAccountDisp">계좌 선택</span><span class="sel-arr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>
         </button>
         <select id="fFromAccount" style="display:none"></select>
       </div>
       <div class="frow" id="rowTo" style="display:none"><label class="flb">입금계좌</label>
         <button type="button" class="sel-btn" onclick="openPicker('fToAccount','입금계좌')">
-          <span id="fToAccountDisp">계좌 선택</span><span class="sel-arr">▾</span>
+          <span id="fToAccountDisp">계좌 선택</span><span class="sel-arr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>
         </button>
         <select id="fToAccount" style="display:none"></select>
       </div>
@@ -766,7 +790,16 @@ const DEVICE_USER_KEY = "ourbudget.deviceUser";  // localStorage: 이 기기의 
 const GAS_BACKUP_URL    = "https://script.google.com/macros/s/AKfycbweq9PLy5VDBa68VN-76aWL8wUW6nvLZOlVaktn5oZE-HMkwg_iuXNGP6dBfcqjH56G/exec";  // Apps Script 웹앱
 const GAS_BACKUP_SECRET = "ourbudget-backup-2026";  // GAS 코드의 SECRET과 동일하게
 const CAT_ICON     = {생활비:"🛒",고정비:"🏠",월급:"💵",이자:"📈",데이트:"❤️",식비:"🍽️",교통:"🚌",의료:"💊",쇼핑:"👜",문화:"🎬",교육:"📚",통신:"📱",보험:"🛡️",기타:"📌","계좌간 이동":"🔄"};
-const TABS         = [["list","📋","내역"],["cat","📊","분류"],["limit","🎯","한도"],["analysis","📈","분석"],["acct","🏦","계좌"],["master","⚙️","설정"]];
+// 탭 아이콘 — Lucide 스타일 인라인 SVG (이모지는 OS별 렌더가 제각각이라 구조 아이콘엔 미사용)
+const NI = p => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+const TABS = [
+  ["list",     NI('<path d="M4 2v20l2-1 2 1 2-1 2 1 2-1 2 1 2-1 2 1V2l-2 1-2-1-2 1-2-1-2 1-2-1-2 1Z"/><path d="M14 8H8"/><path d="M16 12H8"/><path d="M13 16H8"/>'), "내역"],
+  ["cat",      NI('<path d="M21.21 15.89A10 10 0 1 1 8 2.83"/><path d="M22 12A10 10 0 0 0 12 2v10z"/>'), "분류"],
+  ["limit",    NI('<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>'), "한도"],
+  ["analysis", NI('<polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/>'), "분석"],
+  ["acct",     NI('<path d="M21 12V7H5a2 2 0 0 1 0-4h14v4"/><path d="M3 5v14a2 2 0 0 0 2 2h16v-5"/><path d="M18 12a2 2 0 0 0 0 4h4v-4Z"/>'), "계좌"],
+  ["master",   NI('<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>'), "설정"]
+];
 
 /* ── 상태 ── */
 let sb;
@@ -1205,8 +1238,8 @@ function scoped(){
 /* ── 렌더 ── */
 function render(){
   destroyCharts();  // 분석 탭을 떠날 때 detached 캔버스를 잡고 있는 Chart 인스턴스 해제
-  const hu=$("hdUser");
-  if(hu) hu.textContent = DEVICE_USER ? `👤 ${DEVICE_USER}` : "👤 공용";
+  const hu=$("hdUserName");
+  if(hu) hu.textContent = DEVICE_USER || "공용";
   const m=$("main");
   if(loadError){
     m.innerHTML=`<div class="sec"><div class="err-card">

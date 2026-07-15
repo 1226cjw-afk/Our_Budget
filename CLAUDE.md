@@ -201,7 +201,14 @@ memberVal    // 입력 시트의 '누가' 선택값
 | 계좌 (acct) | 계좌별 잔액(이동 포함), 총수입·지출(이동 제외), 멤버 필터 |
 | 설정 (master) | 멤버·기기사용자·앱설정(임계값·주기수)·CSV 내보내기·결제주기·카테고리(아이콘 포함)·결제수단·계좌 관리 |
 
-> 헤더 우측: 👤 기기사용자 칩(누르면 openDeviceUser) + ↻ 새로고침(refreshData). 칩 텍스트는 render()에서 갱신.
+> 헤더 우측: 기기사용자 칩(누르면 openDeviceUser) + 새로고침(refreshData). 칩의 이름 텍스트는 `#hdUserName` span을 render()에서 갱신 (칩 innerHTML을 통째로 덮으면 SVG 아이콘이 사라지므로 금지).
+
+### 네비게이션·아이콘 (2026-07 모던 리디자인)
+- **네비는 하단 고정 탭바**: `.nav`가 `position:fixed; bottom:0` + 글래스 블러 + `env(safe-area-inset-bottom)` 패딩. z-index 30이라 입력 시트(z-50)·피커(z-60)가 위를 덮음. 활성 탭은 아이콘 뒤 골드 필(`.tab.on .tab-ic`)
+- FAB·토스트·`.app` padding-bottom은 하단 탭바 높이만큼 올려둠(모두 `env(safe-area-inset-bottom)` 반영) — 탭바 높이 바꾸면 셋 다 조정할 것
+- **구조 아이콘은 인라인 SVG** (Lucide 스타일, stroke=currentColor): 탭 아이콘은 `TABS` 상수의 `NI()` 헬퍼, 헤더 칩·새로고침·FAB·셀렉트 화살표(.sel-arr)는 HTML에 직접. 이모지를 구조 아이콘으로 되돌리지 말 것(OS별 렌더 제각각) — 단 **카테고리 이모지(icon()·cat_icon_*)는 사용자 설정 콘텐츠라 유지**
+- 숫자는 body에 `font-variant-numeric:tabular-nums`(금액 세로 정렬), 전역 `:focus-visible` 골드 링 있음
+- 텍스트 토큰 대비: `--t2` ≈4.5:1↑, `--t3` ≈3:1 (마이크로 라벨용) — 더 어둡게 내리면 WCAG 미달로 회귀
 
 > ⚠️ 한도 탭(`viewLimit`) 카테고리 목록은 `MASTER[멤버].categories`(master_data DB) 기준 + 기존 저장 한도. 지출 발생 카테고리(`spent`)로 만들면 '계좌간 이동'처럼 설정에 없는 항목까지 한도 UI가 떠서 안 됨.
 
