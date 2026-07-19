@@ -204,8 +204,7 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
   padding:14px 14px;
   margin-bottom:8px;
   display:flex;gap:12px;
-  transition:border-color .2s,transform .2s,box-shadow .2s;
-  will-change:transform;
+  transition:border-color .2s,transform .2s;
 }
 .item:active{transform:scale(.99)}
 .i-ic{
@@ -841,7 +840,8 @@ const icon     = c => USER_ICONS[c] || CAT_ICON[c] || "💳";
 const esc = s => String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
 // onclick="fn('…')" 속 JS 문자열 리터럴용 — JS 이스케이프 후 HTML 이스케이프 (따옴표 든 항목명에도 안전)
 const jsq = s => esc(String(s==null?"":s).replace(/\\/g,"\\\\").replace(/'/g,"\\'"));
-const toast    = m => { const t=$("toast"); t.textContent=m; t.classList.add("show"); setTimeout(()=>t.classList.remove("show"),1800); };
+let _toastT=null;  // 연속 호출 시 이전 타이머가 새 토스트를 조기에 닫지 않도록
+const toast    = m => { const t=$("toast"); t.textContent=m; t.classList.add("show"); clearTimeout(_toastT); _toastT=setTimeout(()=>t.classList.remove("show"),1800); };
 const empty    = (ic,msg) => `<div class="empty"><div class="e-ic">${ic}</div><p>${msg.replace(/\n/g,"<br>")}</p></div>`;
 // Supabase 응답 에러 공통 처리 — 에러면 토스트 후 true (호출부는 if(dbErr(res))return; 한 줄)
 const dbErr    = (res,pre="오류") => { if(res.error){ toast(pre+": "+res.error.message); return true; } return false; };
@@ -923,7 +923,7 @@ async function loadAll(){
   loadError = null;
   const [mem, tx, lim, mst, cfg] = await Promise.all([
     sb.from("members").select("name").order("id"),
-    sb.from("transactions").select("*").order("date",{ascending:false}),
+    sb.from("transactions").select("*").order("date",{ascending:false}).order("id"),  // id 2차 정렬: 같은 날짜 내 순서가 리로드마다 안 뒤섞이게
     sb.from("category_limits").select("*"),
     sb.from("master_data").select("*"),
     sb.from("app_settings").select("*")
@@ -1003,6 +1003,7 @@ async function saveEntry(){
     account:  $("fAccount").value,
     memo:     $("fMemo").value.trim()
   };
+  if(!row.date){ toast("날짜를 선택해주세요"); return; }
   if(!row.amount||!row.category||!row.account){ toast("금액·카테고리·계좌는 필수예요"); return; }
   const btn=$("saveBtn");
   btn.textContent="저장 중..."; btn.disabled=true;
@@ -1030,6 +1031,7 @@ async function saveTransfer(amount){
   const to   = $("fToAccount").value;
   const date = $("fDate").value;
   const memo = $("fMemo").value.trim();
+  if(!date){ toast("날짜를 선택해주세요"); return; }
   if(!amount||!from||!to){ toast("금액·출금계좌·입금계좌는 필수예요"); return; }
   if(from===to){ toast("출금·입금 계좌가 같아요"); return; }
   const memoTxt = memo || `${from} → ${to}`;
@@ -1118,10 +1120,11 @@ function openIconPicker(cat){
   $("pickerOpts").innerHTML=
     `<div class="emo-grid">${EMOJI_SET.map(e=>`<button class="emo${icon(cat)===e?' on':''}" onclick="saveIcon('${e}')">${e}</button>`).join("")}</div>
      <div style="padding:6px 18px 18px;display:flex;gap:8px">
-       <input class="search-inp" id="emoCustom" placeholder="직접 입력 (이모지)" maxlength="4" style="flex:1;padding-right:15px">
+       <input class="search-inp" id="emoCustom" placeholder="직접 입력 (이모지)" maxlength="12" style="flex:1;padding-right:15px">
        <button class="m-save" onclick="saveIcon($('emoCustom').value.trim())">적용</button>
        <button class="m-save" style="color:var(--t2);background:var(--bg3);border-color:var(--bd)" onclick="saveIcon('')">기본</button>
      </div>`;
+  document.body.classList.add("sheet-open");  // 배경(설정 탭) 스크롤 잠금
   $("pickerOv").classList.add("open");
 }
 async function saveIcon(emo){
@@ -1216,9 +1219,13 @@ function setMasterMember(m){ masterMember=m; render(); }
 function openDeviceUser(){
   const opts=MEMBERS.map(m=>`<div class="picker-opt${DEVICE_USER===m?' on':''}" onclick="setDeviceUser('${jsq(m)}')">👤 ${esc(m)}</div>`).join("");
   $("duOpts").innerHTML=opts+`<div class="picker-opt${!DEVICE_USER?' on':''}" onclick="setDeviceUser('')">공용 (정하지 않음)</div>`;
+  document.body.classList.add("sheet-open");  // 배경 스크롤 잠금
   $("duOv").classList.add("open");
 }
-function closeDeviceUser(){ $("duOv").classList.remove("open"); }
+function closeDeviceUser(){
+  $("duOv").classList.remove("open");
+  if(!$("overlay").classList.contains("open")) document.body.classList.remove("sheet-open");
+}
 function setDeviceUser(name){
   DEVICE_USER = name || null;
   try{ name ? localStorage.setItem(DEVICE_USER_KEY,name) : localStorage.removeItem(DEVICE_USER_KEY); }catch(e){}
@@ -1231,8 +1238,9 @@ function setDeviceUser(name){
 function myRows(){ return memberFilter==="전체" ? ROWS : ROWS.filter(r=>r.member===memberFilter); }
 function scoped(){
   if(scope!=="current") return myRows();
-  if(memberFilter!=="전체") return myRows().filter(r=>inPeriod(r.date,viewedPeriod(memberFilter)));
-  return myRows().filter(r=>inPeriod(r.date,viewedPeriod(r.member)));
+  if(memberFilter!=="전체"){ const p=viewedPeriod(memberFilter); return myRows().filter(r=>inPeriod(r.date,p)); }
+  const pc={};  // 멤버별 주기 캐시 — 행마다 viewedPeriod(Date 2개 생성)를 재계산하지 않도록
+  return myRows().filter(r=>inPeriod(r.date, pc[r.member]||(pc[r.member]=viewedPeriod(r.member))));
 }
 
 /* ── 렌더 ── */
@@ -1302,7 +1310,7 @@ function viewList(){
   const rows=q?all.filter(r=>[r.memo,r.category,r.account,r.method,r.member].some(f=>f&&String(f).toLowerCase().includes(q))):all;
   const searchBar=`<div class="searchw"><div>
     <input class="search-inp" id="searchBox" placeholder="🔍 메모·카테고리·계좌 검색" value="${esc(searchQ)}" oninput="setSearch(this.value)" oncompositionstart="_composing=true" oncompositionend="_composing=false;setSearch(this.value)">
-    ${searchQ?`<button class="search-x" onclick="setSearch('')">✕</button>`:""}
+    ${searchQ?`<button class="search-x" onclick="setSearch('')" aria-label="검색 지우기">✕</button>`:""}
   </div></div>`;
   if(!rows.length) return searchBar+`<div class="sec">${empty("🔍",`'${esc(searchQ)}' 검색 결과가 없어요.`)}</div>`;
   const inc=incOf(rows), exp=expOf(rows);
@@ -1567,8 +1575,9 @@ function buildInsights(mem, periods, rowsByPeriod, curCatArr, totExp){
       ? `이번 주기 지출이 '${topCat}'(${won(topAmt)})에 쏠려 있어요. 한 카테고리가 40%를 넘으면 예산이 흔들리기 쉬워요 — 이 항목부터 줄일 여지를 찾아보세요.`
       : `'${topCat}'에 ${won(topAmt)}를 썼어요. 특정 항목에 과하게 몰리지 않은 건강한 분포예요.`});
 
-  // 2) 한도 초과 / 임박 (멤버 한도 기준)
-  const lim=(mem&&LIMITS[mem])||{};
+  // 2) 한도 초과 / 임박 (멤버 한도 기준) — '전체' 필터에선 가족 합산 지출을 한 멤버 한도와
+  //    비교하게 돼 거짓 경고가 뜨므로, 특정 멤버를 선택했을 때만 표시
+  const lim=(memberFilter!=="전체"&&mem&&LIMITS[mem])||{};
   const overs=[], nears=[];
   Object.entries(lim).forEach(([c,l])=>{
     if(!l) return; const used=curMap[c]||0; const pct=Math.round(used/l*100);
@@ -1909,6 +1918,8 @@ function pickOptIdx(idx){
 function closePicker(){
   $("pickerOv").classList.remove("open");
   $("overlay").style.overflow = "";  // 배경 스크롤 잠금 해제
+  // 입력 시트가 열려 있으면(시트 위 피커) body 잠금은 시트 몫이라 유지, 아니면 해제
+  if(!$("overlay").classList.contains("open")) document.body.classList.remove("sheet-open");
   pickerSel = null; iconCat = null;
 }
 function updateSelBtn(selId){
