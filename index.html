@@ -1162,20 +1162,19 @@ async function refreshData(){
   finally{ if(b)b.classList.remove("rot"); }
 }
 
-/* ── 내역 검색 (디바운스 + 재렌더 후 포커스 복원) ── */
-/* 한글 IME 조합 중 render()가 input을 교체하면 조합이 끊겨 자모가 낱개로 확정됨 → 조합 끝날 때까지 재렌더 보류 */
-let _searchT=null,_composing=false;
+/* ── 내역 검색 (디바운스 + 결과 목록만 부분 갱신) ── */
+/* 한글 IME 조합이 깨지는 근본 원인: render()가 #main 전체를 교체하며 조합 중인 #searchBox input 노드까지 새것으로 바꿈
+   → 조합 버퍼가 자모 낱개로 flush('ㅇㅣㅂㄹㅕㄱ'). 모바일 IME는 compositionstart/end를 신뢰성 있게 쏘지 않아 조합 가드로는 못 막음.
+   해법: 검색 중엔 input은 DOM에 그대로 두고 결과 목록(#listResults)만 갈아끼움 → 어떤 IME 이벤트에도 조합이 안 끊김 */
+let _searchT=null;
 function setSearch(v){
   searchQ=v;
+  const x=$("searchClear"); if(x) x.style.display = v ? "flex" : "none";  // ✕ 버튼 토글 (input은 건드리지 않음)
   clearTimeout(_searchT);
-  _searchT=setTimeout(function tick(){
-    if(_composing){ _searchT=setTimeout(tick,200); return; }
-    const hadFocus=document.activeElement&&document.activeElement.id==="searchBox";
-    render();
-    if(hadFocus){
-      const b=$("searchBox");
-      if(b){ b.focus(); const L=b.value.length; try{b.setSelectionRange(L,L);}catch(e){} }
-    }
+  _searchT=setTimeout(function(){
+    const res=$("listResults");
+    if(tab==="list" && $("searchBox") && res) res.innerHTML=listResultsHtml();  // input 유지, 결과만 갱신
+    else render();  // 다른 탭이거나 구조가 없으면(초기) 전체 렌더
   },200);
 }
 
@@ -1306,18 +1305,23 @@ function memberBar(current, fn){
 function viewList(){
   const all=scoped();
   if(!all.length) return `<div class="sec">${empty("📭","내역이 없어요.\n＋ 버튼으로 추가해보세요.")}</div>`;
+  const searchBar=`<div class="searchw"><div>
+    <input class="search-inp" id="searchBox" placeholder="🔍 메모·카테고리·계좌 검색" value="${esc(searchQ)}" oninput="setSearch(this.value)">
+    <button class="search-x" id="searchClear" onclick="setSearch('')" aria-label="검색 지우기" style="display:${searchQ?'flex':'none'}">✕</button>
+  </div></div>`;
+  return searchBar+`<div id="listResults">${listResultsHtml(all)}</div>`;
+}
+/* 검색 결과 목록만 반환 (검색바 제외) — setSearch가 #listResults만 부분 갱신할 때 재사용 */
+function listResultsHtml(all){
+  all = all || scoped();
   const q=searchQ.trim().toLowerCase();
   const rows=q?all.filter(r=>[r.memo,r.category,r.account,r.method,r.member].some(f=>f&&String(f).toLowerCase().includes(q))):all;
-  const searchBar=`<div class="searchw"><div>
-    <input class="search-inp" id="searchBox" placeholder="🔍 메모·카테고리·계좌 검색" value="${esc(searchQ)}" oninput="setSearch(this.value)" oncompositionstart="_composing=true" oncompositionend="_composing=false;setSearch(this.value)">
-    ${searchQ?`<button class="search-x" onclick="setSearch('')" aria-label="검색 지우기">✕</button>`:""}
-  </div></div>`;
-  if(!rows.length) return searchBar+`<div class="sec">${empty("🔍",`'${esc(searchQ)}' 검색 결과가 없어요.`)}</div>`;
+  if(!rows.length) return `<div class="sec">${empty("🔍",`'${esc(searchQ)}' 검색 결과가 없어요.`)}</div>`;
   const inc=incOf(rows), exp=expOf(rows);
   const groups={}; rows.forEach(r=>{(groups[r.date]=groups[r.date]||[]).push(r);});
   const days=["일","월","화","수","목","금","토"];
   const dl=s=>{const d=parseDate(s);return `${d.getMonth()+1}월 ${d.getDate()}일 (${days[d.getDay()]})`;};
-  let h=searchBar+`<div class="sec">`;
+  let h=`<div class="sec">`;
   if(scope==="current"&&!q) h+=`<div class="cards">
     <div class="card inc"><div class="c-lb">수입</div><div class="c-v g">+${won(inc)}</div></div>
     <div class="card exp"><div class="c-lb">지출</div><div class="c-v r">-${won(exp)}</div></div>
