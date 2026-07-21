@@ -4,3 +4,10 @@
 # 로컬 보조 스크립트 / 메모 (배포 산출물 아님)
 PROGRESS.md
 insert_master.ps1
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example
