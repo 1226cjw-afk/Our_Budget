@@ -47,10 +47,11 @@ Our_Budget/
 # (git 미추적 보조: PROGRESS.md, insert_master.ps1, .mcp.json — 커밋 대상 아님)
 ```
 
-CSS · JS 모두 `index.html` 안에 인라인. 외부 의존성:
-- `@supabase/supabase-js@2` (CDN)
-- `chart.js` (CDN)
-- Pretendard / Noto Sans KR (Google Fonts)
+CSS · JS 모두 `index.html` 안에 인라인. 외부 의존성 (모두 `<head>`에서 논블로킹 로드):
+- `@supabase/supabase-js@2` · `chart.js` (CDN, `defer` — 파싱 비차단. 둘 다 `window.onload` 이후에만 사용하므로 안전)
+- Pretendard (jsdelivr `<link>`) / Noto Sans KR (Google Fonts) — ⚠️ Pretendard를 CSS `@import`로 되돌리면 직렬·렌더블로킹이 됨(금지)
+- `cdn.jsdelivr.net`·`fonts.gstatic.com` `preconnect`로 연결 핸드셰이크 선점
+- 숫자 포맷 `comma()`는 `Intl.NumberFormat` 인스턴스 1회 캐시 재사용(렌더당 수백 회 호출 — 매 호출 `toLocaleString` 금지)
 
 웹 아이콘도 인라인: `<head>`에 SVG 파비콘(data URI) + `apple-touch-icon`(180×180 PNG base64, 헤드리스 Chrome 캔버스로 생성) + `theme-color`·standalone 메타. 별도 이미지 파일 없음 — 아이콘 교체 시 data URI를 다시 생성해 갈아끼울 것.
 재생성법: canvas에 그린 뒤 `toDataURL()`을 `document.body.textContent`로 출력하는 임시 HTML을 Write 도구로 만들고 `chrome --headless=new --dump-dom --virtual-time-budget=4000 file:///<절대경로>`로 덤프해서 추출 (Node에 이미지 라이브러리 불필요).
