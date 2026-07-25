@@ -1854,7 +1854,7 @@ function taxCalc(member){
   const salary = manual || autoSalary;
 
   const C=ytd.credit, D=ytd.check+ytd.cash, S=C+D;
-  const projK={credit:proj(ytd.credit), check:proj(ytd.check), cash:proj(ytd.cash)};
+  const projK={credit:proj(ytd.credit), check:proj(ytd.check), cash:proj(ytd.cash), none:proj(ytd.none)};
   const Cp=projK.credit, Dp=projK.check+projK.cash, Sp=Cp+Dp;
 
   // 남은 기간 시나리오 — 현재 페이스로 계속 쓴다고 보고, 그 돈을 어디로 돌릴지만 바꿔본다
@@ -1866,7 +1866,9 @@ function taxCalc(member){
     dedNow:tyDeduct(C,D,salary),           // 지금까지 확정분
     remain, pace, future,
     scCredit:tyDeduct(C+future, D, salary),      // 남은 기간 전부 신용
-    scCheck :tyDeduct(C, D+future, salary)       // 남은 기간 전부 체크·현금
+    scCheck :tyDeduct(C, D+future, salary),      // 남은 기간 전부 체크·현금
+    // '제외'로 둔 금액을 공제 대상(30%)으로 봤다면 얼마였을지 — 제외가 결정적인지 보여주는 대조군
+    dedIfNone:tyDeduct(Cp, Dp+proj(ytd.none), salary)
   };
 }
 
@@ -1888,6 +1890,17 @@ function tyAdvice(t){
     b:`문턱(${won(Math.round(t.th))})까지는 공제율과 무관하게 그냥 소진돼요. 그러니 그 구간은 혜택 좋은 신용카드로 채우고, 넘어선 뒤부터 체크·현금(30%)으로 갈아타는 게 최적이에요.`};
   return {ic:"✅",tone:"good",t:"지금부터는 체크·현금이 2배 유리해요",
     b:`신용 사용액이 이미 문턱(${won(Math.round(t.th))})을 넘겼어요. 여기서부터 신용은 15%, 체크·현금영수증은 30% 공제라 같은 금액을 써도 공제가 두 배예요.`};
+}
+
+/* 조언 아래 덧붙는 보조 진단 — 결론을 뒤집을 만한 요인을 놓치지 않게 */
+function tyNotes(t){
+  const out=[], R=Math.round;
+  // '제외' 금액이 크면 공제액이 낮은 진짜 원인이 소비 습관이 아니라 매핑일 수 있다
+  if(t.ytd.none>0 && t.ded<t.limit-1 && t.dedIfNone>t.ded){
+    out.push({ic:"🚫",tone:"info",t:`'제외'로 둔 ${won(t.ytd.none)}이 결과를 좌우하고 있어요`,
+      b:`이 금액을 공제 대상으로 보면 연말 공제액이 ${won(R(t.ded))} → ${won(R(t.dedIfNone))}으로 바뀝니다. 이체·계좌출금은 원래 대상이 아니지만, 그중 현금영수증을 발행했거나 실제 카드 결제인 항목이 섞여 있다면 매핑을 고쳐주세요.`});
+  }
+  return out;
 }
 
 let _tyStash=null;   // 차트용 데이터 보관 (viewTaxYear → drawTaxChart)
@@ -1973,8 +1986,8 @@ function viewTaxYear(){
 
   // 3) 핵심 조언 + 연말 예상 공제액
   h+=`<div class="panel"><div class="p-t">🧭 앞으로 뭘 쓸까<span class="p-sub">현 추세 기준</span></div>
-    <div class="ins ${adv.tone}"><div class="ins-ic">${adv.ic}</div>
-      <div class="ins-bd"><div class="ins-t">${esc(adv.t)}</div><div class="ins-b">${esc(adv.b)}</div></div></div>`;
+    ${[adv,...tyNotes(t)].map(x=>`<div class="ins ${x.tone}"><div class="ins-ic">${x.ic}</div>
+      <div class="ins-bd"><div class="ins-t">${esc(x.t)}</div><div class="ins-b">${esc(x.b)}</div></div></div>`).join("")}`;
   if(t.salary>0){
     h+=`<div class="ty-facts" style="margin-top:13px">
       <div class="ty-fact"><div class="ty-fact-l">연말 예상 공제액</div><div class="ty-fact-v" style="color:var(--g)">${won(R(t.ded))}</div></div>
@@ -2001,7 +2014,11 @@ function viewTaxYear(){
       <div style="font-size:.78rem;color:var(--t2);margin-top:13px;line-height:1.7;padding-top:12px;border-top:1px solid var(--bd)">
         ${gap>0
           ? `체크·현금으로 돌리면 공제가 <b style="color:var(--g)">${won(gap)}</b> 더 늘어요.`
-          : `지금 상황에선 어느 쪽을 써도 공제 차이가 없어요 ${t.ded>=t.limit-1?'(한도 도달)':'(문턱 미달)'}.`}
+          : `지금 상황에선 어느 쪽을 써도 공제 차이가 없어요 — ${
+              t.ded>=t.limit-1 ? '이미 공제 한도를 채우기 때문'
+              : t.Sp<=t.th     ? '연말까지 써도 25% 문턱에 못 미치기 때문'
+              /* 신용이 문턱 아래면 추가 지출은 어디에 쓰든 문턱을 밀어낼 뿐이라 한계 공제율이 30%로 같다 */
+              : `신용 사용액이 문턱(${won(Math.round(t.th))}) 아래라 어디에 써도 한계 공제율이 30%로 같기 때문`}.`}
       </div></div>`;
   }
 
