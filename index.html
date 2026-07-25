@@ -696,6 +696,11 @@ body.sheet-open{overflow:hidden}
 .tym-sel{flex-shrink:0;background:var(--bg3);border:1px solid var(--bd);color:var(--t1);
   border-radius:10px;padding:8px 9px;font-size:.76rem;font-weight:700;font-family:inherit}
 .tym-sel.un{border-color:rgba(232,150,30,.45);color:var(--amber)}
+.tym-tag{font-size:.58rem;font-weight:800;color:var(--amber);background:var(--amberg);
+  border:1px solid rgba(232,150,30,.28);padding:1px 6px;border-radius:20px;vertical-align:middle}
+.tym-grp{font-size:.68rem;font-weight:700;color:var(--amber);padding:14px 0 4px;border-top:1px solid var(--bd);margin-top:6px}
+/* 설정 탭 마스터 행에 붙는 구분 셀렉트 (연말정산 매핑과 동일한 값) */
+.m-item .tym-sel{padding:6px 7px;font-size:.72rem}
 
 /* ── 진입 모션 (한 번, staggered) ── */
 @keyframes riseIn{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:translateY(0)}}
@@ -837,10 +842,23 @@ const GAS_BACKUP_SECRET = "ourbudget-backup-2026";  // GAS 코드의 SECRET과 �
 const CAT_ICON     = {생활비:"🛒",고정비:"🏠",월급:"💵",이자:"📈",데이트:"❤️",식비:"🍽️",교통:"🚌",의료:"💊",쇼핑:"👜",문화:"🎬",교육:"📚",통신:"📱",보험:"🛡️",기타:"📌","계좌간 이동":"🔄"};
 /* 연말정산 — 결제수단별 소득공제 구분.
    공제율은 체크·현금영수증이 동일(30%)하지만, 사용 추이를 따로 보려고 화면에선 셋을 분리한다. */
-const TY_KINDS = {credit:"신용", check:"체크", cash:"현금", none:"제외"};
+const TY_KINDS     = {credit:"신용", check:"체크", cash:"현금", none:"제외"};   // 지출: 결제수단별 공제 구분
+const TY_CAT_KINDS = {income:"소득", none:"제외"};                              // 소득: 카테고리별 총급여 산입 여부
 const TY_RATE  = {credit:.15, check:.30, cash:.30, none:0};
 const TY_COLOR = {credit:"#F05470", check:"#2EC890", cash:"#E8961E"};
-const SALARY_RE = /월급|급여|상여|보너스/;   // 총급여 자동 추정에 쓸 입금 카테고리
+const SALARY_RE = /월급|급여|상여|보너스/;   // 소득 카테고리 '추천'에만 사용 — 집계는 CTMAP(사용자 매핑)만 따른다
+// 앱에서 DDL을 실행할 권한이 없어(anon key), 테이블이 없으면 화면에 이 SQL을 띄워 직접 실행하게 한다
+const TAX_MAP_DDL = `create table tax_map (
+  member text references members(name) on delete cascade,
+  type   text not null check (type in ('method','category')),
+  value  text not null default '',
+  kind   text not null,
+  primary key (member, type, value),
+  check ( (type='method'   and kind in ('credit','check','cash','none'))
+       or (type='category' and kind in ('income','none')) )
+);
+alter table tax_map enable row level security;
+create policy "all" on tax_map for all using (true) with check (true);`;
 // 탭 아이콘 — Lucide 스타일 인라인 SVG (이모지는 OS별 렌더가 제각각이라 구조 아이콘엔 미사용)
 const NI = p => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
 const TABS = [
@@ -863,7 +881,9 @@ let DEVICE_USER    = null;  // 이 기기의 기본 사용자 (localStorage)
 let USER_ICONS     = {};    // {카테고리: 이모지} — app_settings의 cat_icon_* (전 멤버 공통)
 let WARN_TH        = 80;    // 한도 경고 임계값(%) — app_settings.warn_threshold
 let AN_PERIODS     = 3;     // 분석·분류 탭 표시 주기 수 — app_settings.analysis_periods
-let MTMAP          = {};    // {멤버: {결제수단: kind}} — method_tax_map
+let MTMAP          = {};    // {멤버: {결제수단: kind}} — tax_map(type='method')
+let CTMAP          = {};    // {멤버: {카테고리: kind}} — tax_map(type='category'), 소득 판정
+let TAX_READY      = false; // tax_map 테이블 존재 여부 — false면 연말정산이 설정 안내를 띄운다
 let TY_SALARY      = {};    // {멤버: 총급여 수동값} — app_settings의 ty_salary_*
 
 let tab          = "list";
@@ -985,7 +1005,7 @@ async function loadAll(){
     sb.from("category_limits").select("*"),
     sb.from("master_data").select("*"),
     sb.from("app_settings").select("*"),
-    sb.from("method_tax_map").select("*")
+    sb.from("tax_map").select("*")
   ]);
 
   if(mem.error) throw new Error("멤버 로드 오류: "+mem.error.message);
@@ -1018,13 +1038,15 @@ async function loadAll(){
   });
   MEMBERS.forEach(m => { if(!MASTER[m].categories.length) MASTER[m].categories=[...DEFAULT_CATS]; });
 
-  // MTMAP: {멤버: {결제수단: kind}} — 연말정산 공제 구분 매핑
-  // 테이블이 아직 없으면 error로 떨어지는데, 그땐 빈 맵으로 두고 앱의 나머지는 그대로 동작시킨다
-  MTMAP = {};
-  MEMBERS.forEach(m => MTMAP[m] = {});
+  // 연말정산 매핑 — MTMAP(결제수단→공제구분) / CTMAP(카테고리→소득여부)
+  // 테이블이 아직 없으면 error로 떨어진다. 그땐 빈 맵으로 두고 앱의 나머지는 그대로 동작시키되,
+  // TAX_READY=false로 연말정산 화면이 '집계 0원'을 침묵하지 않고 설정 안내를 띄우게 한다
+  MTMAP = {}; CTMAP = {}; TAX_READY = !mtm.error;
+  MEMBERS.forEach(m => { MTMAP[m] = {}; CTMAP[m] = {}; });
   if(!mtm.error)(mtm.data||[]).forEach(row => {
-    if(!MTMAP[row.member]) MTMAP[row.member] = {};
-    MTMAP[row.member][row.method||""] = row.kind;
+    const bag = row.type==="category" ? CTMAP : MTMAP;
+    if(!bag[row.member]) bag[row.member] = {};
+    bag[row.member][row.value||""] = row.kind;
   });
 
   // app_settings: 전역 fallback → 멤버별 override + 앱 설정·카테고리 아이콘
@@ -1769,14 +1791,25 @@ function tyDeduct(credit, thirty, salary){
   return Math.min(d, TY_LIMIT(salary));
 }
 
-/* 매핑 대상 결제수단 = master_data 설정 ∪ 실제 거래에 등장한 값.
-   실사용 값을 넣지 않으면 마스터에 없는 수단(예: '제일은행카드')의 지출이 통째로 집계에서 빠진다. */
-function tyMethods(member){
-  const set=new Set((MASTER[member]||{}).methods||[]);
-  ROWS.forEach(r=>{ if(r.member===member && r.type==="지출" && !isTransfer(r)) set.add(r.method||""); });
-  return [...set].sort((a,b)=>String(a).localeCompare(String(b),"ko"));
+/* 매핑 대상 목록. 설정(master_data)에 등록된 항목이 기준이고,
+   거래엔 있는데 설정엔 없는 값은 '미등록'으로 따로 모아 매핑을 유도한다 —
+   미등록을 빼면 '제일은행카드'(1,140만) 같은 실사용 값이 통째로 집계에서 빠진다. */
+function tyItems(member, kind){
+  const isCat = kind==="category";
+  const reg = new Set((MASTER[member]||{})[isCat?"categories":"methods"]||[]);
+  const used = new Set();
+  ROWS.forEach(r=>{
+    if(r.member!==member || isTransfer(r)) return;
+    if(isCat){ if(r.type==="입금") used.add(r.category||""); }
+    else     { if(r.type==="지출") used.add(r.method||""); }
+  });
+  const bag = (isCat?CTMAP:MTMAP)[member]||{};
+  // 미등록 = 실제 쓰였거나 이미 매핑된 값 중 설정에 없는 것
+  const extra = [...new Set([...used, ...Object.keys(bag)])].filter(v=>!reg.has(v));
+  const srt = a => [...a].sort((x,y)=>String(x).localeCompare(String(y),"ko"));
+  return {registered: srt(reg), unregistered: srt(extra)};
 }
-/* 이름 규칙으로 공제 구분 추천 — 순서 중요 ('우리 체크카드'는 체크가 먼저 걸려야 함) */
+/* 이름 규칙 추천 — 순서 중요 ('우리 체크카드'는 체크가 '카드'보다 먼저 걸려야 함) */
 function suggestKind(method){
   const s=String(method||"").replace(/\s/g,"");
   if(!s) return "none";
@@ -1786,20 +1819,25 @@ function suggestKind(method){
   if(/현금/.test(s))                       return "cash";
   return "none";
 }
+const suggestCatKind = cat => SALARY_RE.test(String(cat||"")) ? "income" : "none";
 
 function taxCalc(member){
   const now=new Date(), year=now.getFullYear(), m=now.getMonth()+1;
-  const map=MTMAP[member]||{};
+  const map=MTMAP[member]||{}, cmap=CTMAP[member]||{};
   const ytd={credit:0,check:0,cash:0,none:0,unmapped:0};
   const byMonth={credit:Array(12).fill(0), check:Array(12).fill(0), cash:Array(12).fill(0)};
-  const unmapped={};            // {결제수단: 금액} — 경고 목록
-  let salaryRaw=0, salaryCnt=0;
+  const unmapped={};            // {결제수단: 금액} — 지출 미매핑 경고 목록
+  const incUnmapped={};         // {카테고리: 금액} — 소득 미매핑 경고 목록
+  let salaryRaw=0, salaryCnt=0, incUnmappedTot=0;
 
   ROWS.forEach(r=>{
     if(r.member!==member || String(r.date).slice(0,4)!==String(year)) return;
     if(isTransfer(r)) return;
     if(r.type==="입금"){
-      if(SALARY_RE.test(r.category||"")){ salaryRaw+=r.amount; salaryCnt++; }
+      // 소득 판정은 오직 사용자 매핑(CTMAP)만 따른다 — 이름 규칙은 추천 UI에서만 쓴다
+      const cat=r.category||"", ck=cmap[cat];
+      if(ck==="income"){ salaryRaw+=r.amount; salaryCnt++; }
+      else if(!ck){ incUnmapped[cat]=(incUnmapped[cat]||0)+r.amount; incUnmappedTot+=r.amount; }
       return;
     }
     if(r.type!=="지출") return;
@@ -1822,7 +1860,7 @@ function taxCalc(member){
   // 남은 기간 시나리오 — 현재 페이스로 계속 쓴다고 보고, 그 돈을 어디로 돌릴지만 바꿔본다
   const remain=Math.max(0,12-m), pace=m?S/m:0, future=pace*remain;
   return {
-    year, m, ytd, byMonth, unmapped, salary, manual, autoSalary, salaryCnt,
+    year, m, ytd, byMonth, unmapped, incUnmapped, incUnmappedTot, salary, manual, autoSalary, salaryCnt,
     th:salary*.25, limit:TY_LIMIT(salary), C, D, S, projK, Cp, Dp, Sp,
     ded:tyDeduct(Cp,Dp,salary),            // 현 추세 유지 시 연말 공제액
     dedNow:tyDeduct(C,D,salary),           // 지금까지 확정분
@@ -1836,10 +1874,12 @@ function taxCalc(member){
 function tyAdvice(t){
   // 매핑이 안 된 지출이 매핑된 것보다 많으면 어떤 결론도 신뢰할 수 없다 —
   // '공제 0원'이라고 단정하면 덜 쓴 탓으로 오해하게 되므로 매핑부터 안내한다
+  if(!TAX_READY) return {ic:"🛠️",tone:"warn",t:"연말정산 설정 테이블이 아직 없어요",
+    b:"Supabase에 tax_map 테이블을 만들어야 매핑을 저장할 수 있어요. 아래 '설치 안내'의 SQL을 실행해주세요. 그전까지는 모든 집계가 0원으로 나옵니다."};
   if(t.ytd.unmapped>0 && t.ytd.unmapped>=t.S) return {ic:"🗂️",tone:"warn",t:"먼저 결제수단을 매핑해주세요",
-    b:`올해 지출 ${won(t.ytd.unmapped)}이 아직 공제 구분 없이 남아 있어 계산에 반영되지 않았어요. 맨 아래 '결제수단 매핑'에서 지정하면 (또는 추천값 일괄 적용) 바로 결과가 나옵니다.`};
-  if(t.salary<=0) return {ic:"⚙️",tone:"warn",t:"총급여를 먼저 설정해주세요",
-    b:"올해 '월급' 입금이 없어 자동 추정이 안 됐어요. 위 카드에 연봉(총급여)을 입력하면 25% 문턱과 공제액을 계산해드릴게요."};
+    b:`올해 지출 ${won(t.ytd.unmapped)}이 아직 공제 구분 없이 남아 있어 계산에 반영되지 않았어요. 아래 '결제수단 매핑'에서 지정하면 (또는 추천값 일괄 적용) 바로 결과가 나옵니다.`};
+  if(t.salary<=0) return {ic:"⚙️",tone:"warn",t:"소득 카테고리를 지정해주세요",
+    b:`어떤 입금을 급여로 볼지 정해야 총급여가 잡혀요. 아래 '소득 카테고리 매핑'에서 '월급' 같은 항목을 소득으로 지정하거나, 총급여를 직접 입력해주세요.${t.incUnmappedTot>0?` 올해 미지정 입금이 ${won(t.incUnmappedTot)} 있어요.`:``}`};
   if(t.Sp<=t.th) return {ic:"💳",tone:"info",t:`아직 공제 0원 — 문턱까지 ${won(Math.round(t.th-t.Sp))}`,
     b:`총급여의 25%(${won(Math.round(t.th))})를 넘게 써야 공제가 시작돼요. 지금 추세면 연말 ${won(Math.round(t.Sp))}라 문턱에 못 미칩니다. 어차피 공제가 안 되니 할인·적립 혜택이 좋은 신용카드를 쓰는 게 유리해요.`};
   if(t.ded>=t.limit-1) return {ic:"🏁",tone:"good",t:"공제 한도에 도달했어요",
@@ -1862,6 +1902,20 @@ function viewTaxYear(){
   let h=`<div class="sec">`;
   h+=`<div class="ty-cap">${t.year}년 1월~12월(역년) 기준 · 현재 ${t.m}월까지의 실적을 <b style="color:var(--t2)">연환산</b>해 연말을 예측합니다. 결제주기와 무관해요.</div>`;
 
+  // 0) 테이블 미설치 안내 — 이게 없으면 매핑이 저장되지 않아 모든 집계가 0원이 된다
+  if(!TAX_READY){
+    h+=`<div class="m-section" style="border-color:rgba(240,84,112,.3)">
+      <div class="m-title">🛠️ 설치 안내 <span style="font-size:.66rem;color:var(--r);font-weight:700">필수</span></div>
+      <div style="font-size:.8rem;color:var(--t2);line-height:1.75;margin-bottom:12px">
+        <b style="color:var(--r)">tax_map 테이블이 없어 매핑을 저장할 수 없습니다.</b> 그래서 지금은 모든 집계가 0원으로 나와요.<br>
+        Supabase 대시보드 → SQL Editor에서 아래를 한 번 실행해주세요.
+      </div>
+      <pre style="background:var(--bg3);border:1px solid var(--bd);border-radius:11px;padding:12px;overflow-x:auto;font-size:.68rem;line-height:1.6;color:var(--t2)">${esc(TAX_MAP_DDL)}</pre>
+      <button class="m-save" style="width:100%;margin-top:10px;padding:11px" onclick="copyTaxDDL()">📋 SQL 복사</button>
+    </div></div>`;
+    return h;   // 설정 전에는 0원짜리 계산 화면을 보여주지 않는다 (오해의 소지)
+  }
+
   // 1) 총급여 — 자동 추정이 기본, 어긋나면 수동 입력이 우선
   h+=`<div class="m-section">
     <div class="m-title">💰 총급여 (연봉)</div>
@@ -1871,8 +1925,8 @@ function viewTaxYear(){
     </div>
     <div style="font-size:.74rem;color:var(--t3);line-height:1.7;margin-bottom:12px">
       ${t.salaryCnt
-        ? `올해 '월급·급여·상여' 입금 <b style="color:var(--t2)">${t.salaryCnt}건 ${won(R(t.autoSalary/12*t.m))}</b>을 ${t.m}개월로 나눠 ×12 → 추정 ${won(t.autoSalary)}`
-        : `올해 '월급·급여·상여' 카테고리 입금이 없어 자동 추정이 불가능해요.`}
+        ? `소득으로 지정한 카테고리의 올해 입금 <b style="color:var(--t2)">${t.salaryCnt}건 ${won(R(t.autoSalary/12*t.m))}</b>을 ${t.m}개월로 나눠 ×12 → 추정 ${won(t.autoSalary)}`
+        : `소득으로 지정된 카테고리가 없어 자동 추정이 불가능해요. 아래 '소득 카테고리 매핑'에서 지정해주세요.`}
       ${t.manual?`<br>수동값 <b style="color:var(--ac)">${won(t.manual)}</b>이 적용 중입니다.`:``}
     </div>
     ${!t.manual&&t.salaryCnt>0&&t.salaryCnt<t.m
@@ -1967,42 +2021,68 @@ function viewTaxYear(){
     </div>`;
   } else { _tyStash=null; }
 
-  // 6) 결제수단 매핑
-  const map=MTMAP[tyMember]||{};
-  const methods=tyMethods(tyMember);
-  const usedAmt={};
-  ROWS.forEach(r=>{ if(r.member===tyMember&&r.type==="지출"&&!isTransfer(r)&&String(r.date).slice(0,4)===String(t.year))
-    usedAmt[r.method||""]=(usedAmt[r.method||""]||0)+r.amount; });
-  h+=`<div class="m-section"><div class="m-title">🗂️ 결제수단 매핑 <span style="font-size:.66rem;color:var(--t3);font-weight:600">${esc(tyMember)}</span></div>
+  // 6) 소득 카테고리 매핑 · 7) 결제수단 매핑 (설정 탭과 동일한 컨트롤, 여기선 미등록 항목까지 포함)
+  h+=taxMapSection(tyMember,"category",t)+taxMapSection(tyMember,"method",t);
+
+  return h+`</div>`;
+}
+
+/* 매핑 섹션 빌더 — 소득(카테고리)·지출(결제수단) 공용.
+   설정에 등록된 항목이 기준이고, 거래에만 있는 값은 '미등록'으로 분리해 매핑을 유도한다. */
+function taxMapSection(member, kind, t){
+  const isCat = kind==="category";
+  let {registered, unregistered} = tyItems(member, kind);
+  const bag  = (isCat?CTMAP:MTMAP)[member]||{};
+  const opts = isCat ? TY_CAT_KINDS : TY_KINDS;
+
+  // 올해 금액 (소득=입금, 지출=지출)
+  const amt={};
+  ROWS.forEach(r=>{
+    if(r.member!==member || isTransfer(r) || String(r.date).slice(0,4)!==String(t.year)) return;
+    if(isCat){ if(r.type==="입금") amt[r.category||""]=(amt[r.category||""]||0)+r.amount; }
+    else     { if(r.type==="지출") amt[r.method||""]  =(amt[r.method||""]  ||0)+r.amount; }
+  });
+  // 카테고리는 대부분 지출용이라 전부 늘어놓으면 소득과 무관한 행이 대다수가 된다
+  // → 입금이 있었거나 이미 지정된 것만. (결제수단은 전부 분류 대상이라 그대로 둔다)
+  if(isCat) registered = registered.filter(v=>(amt[v]||0)>0 || bag[v]);
+  const nUnmapped = [...registered,...unregistered].filter(v=>!bag[v] && (amt[v]||0)>0).length;
+
+  const row = (v,isReg) => {
+    const cur=bag[v]||"", a=amt[v]||0;
+    const o = k=>`<option value="${k}"${cur===k?' selected':''}>${opts[k]}</option>`;
+    return `<div class="tym">
+      <div class="tym-bd">
+        <div class="tym-nm">${v?esc(v):'<span style="color:var(--t3)">(미지정)</span>'}${isReg?'':' <span class="tym-tag">미등록</span>'}</div>
+        <div class="tym-a">올해 ${a?won(a):(isCat?'입금 없음':'사용 없음')}${!cur&&a?' · 집계 제외 중':''}</div>
+      </div>
+      <select class="tym-sel${cur?'':' un'}" onchange="setTaxMap('${jsq(member)}','${kind}','${jsq(v)}',this.value)">
+        <option value=""${cur?'':' selected'}>미분류</option>
+        ${Object.keys(opts).map(o).join("")}
+      </select></div>`;
+  };
+
+  let h=`<div class="m-section">
+    <div class="m-title">${isCat?'💵 소득 카테고리 매핑':'🗂️ 결제수단 매핑'} <span style="font-size:.66rem;color:var(--t3);font-weight:600">${esc(member)}</span></div>
     <div style="font-size:.75rem;color:var(--t2);line-height:1.75;margin-bottom:12px">
-      '~~카드'만으로는 신용인지 체크인지 알 수 없어서, 수단마다 공제 구분을 지정해야 집계됩니다.
-      <b style="color:var(--ac)">현금</b>은 현금영수증을 발행한 금액만 공제 대상이에요.
+      ${isCat
+        ? `어떤 입금을 <b style="color:var(--ac)">급여(총급여)</b>로 볼지 지정합니다. 여기서 소득으로 지정한 카테고리만 25% 문턱 계산에 들어가요.`
+        : `'~~카드'만으로는 신용인지 체크인지 알 수 없어서, 수단마다 공제 구분을 지정해야 집계됩니다. <b style="color:var(--ac)">현금</b>은 현금영수증을 발행한 금액만 공제 대상이에요.`}
+      <br><span style="color:var(--t3)">설정 탭 → ${isCat?'카테고리':'결제수단'} 관리에서도 같은 값을 바꿀 수 있어요.</span>
     </div>`;
-  if(unmapArr.length){
-    h+=`<button class="m-save" style="width:100%;padding:11px;margin-bottom:12px" onclick="applyTySuggest('${jsq(tyMember)}')">✨ 미분류 ${unmapArr.length}개 추천값으로 일괄 분류</button>`;
+  if(nUnmapped){
+    h+=`<button class="m-save" style="width:100%;padding:11px;margin-bottom:12px" onclick="applyTaxSuggest('${jsq(member)}','${kind}')">✨ 미분류 ${nUnmapped}개 추천값으로 일괄 분류</button>`;
   }
-  if(!methods.length){
-    h+=`<div class="m-empty">결제수단이 없어요. 설정 탭에서 추가하거나 거래를 입력해주세요.</div>`;
+  if(!registered.length && !unregistered.length){
+    h+=`<div class="m-empty">${isCat?'입금 카테고리가 없어요.':'결제수단이 없어요. 설정 탭에서 추가해주세요.'}</div>`;
   } else {
     h+=`<div class="m-list" style="background:none;border:none;padding:0">`;
-    methods.forEach(v=>{
-      const cur=map[v]||"", amt=usedAmt[v]||0;
-      const opt=k=>`<option value="${k}"${cur===k?' selected':''}>${TY_KINDS[k]}</option>`;
-      h+=`<div class="tym">
-        <div class="tym-bd">
-          <div class="tym-nm">${v?esc(v):'<span style="color:var(--t3)">(미지정)</span>'}</div>
-          <div class="tym-a">올해 ${amt?won(amt):'사용 없음'}${!cur&&amt?' · 집계 제외 중':''}</div>
-        </div>
-        <select class="tym-sel${cur?'':' un'}" onchange="setMethodKind('${jsq(tyMember)}','${jsq(v)}',this.value)">
-          <option value=""${cur?'':' selected'}>미분류</option>
-          ${opt("credit")}${opt("check")}${opt("cash")}${opt("none")}
-        </select>
-      </div>`;
-    });
+    h+=registered.map(v=>row(v,true)).join("");
+    if(unregistered.length){
+      h+=`<div class="tym-grp">⚠️ 설정에 없는 ${isCat?'카테고리':'결제수단'} — 거래엔 쓰였어요</div>`;
+      h+=unregistered.map(v=>row(v,false)).join("");
+    }
     h+=`</div>`;
   }
-  h+=`</div>`;
-
   return h+`</div>`;
 }
 
@@ -2028,22 +2108,42 @@ function drawTaxChart(){
 }
 
 /* ── 연말정산 설정 CRUD ── */
-async function setMethodKind(member, method, kind){
+/* type: 'category'(소득) | 'method'(지출). kind 빈값이면 매핑 해제(삭제). */
+async function setTaxMap(member, type, value, kind){
+  if(!TAX_READY){ toast("tax_map 테이블을 먼저 만들어주세요 (연말정산 탭 설치 안내)"); return; }
   const res = kind
-    ? await sb.from("method_tax_map").upsert({member,method,kind},{onConflict:"member,method"})
-    : await sb.from("method_tax_map").delete().eq("member",member).eq("method",method);
+    ? await sb.from("tax_map").upsert({member,type,value,kind},{onConflict:"member,type,value"})
+    : await sb.from("tax_map").delete().eq("member",member).eq("type",type).eq("value",value);
   if(dbErr(res,"매핑 저장 오류")) return;
   await reloadAndRender();
 }
-/* 미분류 수단만 이름 규칙 추천값으로 일괄 저장 — 추천값을 몰래 집계에 쓰지 않고, 저장된 것만 반영한다 */
-async function applyTySuggest(member){
-  const map=MTMAP[member]||{};
-  const rows=tyMethods(member).filter(v=>!map[v]).map(v=>({member,method:v,kind:suggestKind(v)}));
-  if(!rows.length){ toast("미분류 결제수단이 없어요"); return; }
-  const res=await sb.from("method_tax_map").upsert(rows,{onConflict:"member,method"});
+/* 미분류 항목만 이름 규칙 추천값으로 일괄 저장 —
+   추천값을 몰래 집계에 쓰지 않고 저장된 것만 반영한다(근거 없이 숫자가 움직이면 안 되므로) */
+async function applyTaxSuggest(member, type){
+  if(!TAX_READY){ toast("tax_map 테이블을 먼저 만들어주세요 (연말정산 탭 설치 안내)"); return; }
+  const isCat=type==="category";
+  const bag=(isCat?CTMAP:MTMAP)[member]||{};
+  const {registered,unregistered}=tyItems(member,type);
+  // 올해 실제 활동이 있는 항목만 — 활동 없는 카테고리까지 'none'으로 저장하면
+  // 그게 '매핑됨'이 되어 소득 목록에 도로 나타난다(화면 노이즈 복귀)
+  const year=new Date().getFullYear(), amt={};
+  ROWS.forEach(r=>{
+    if(r.member!==member || isTransfer(r) || String(r.date).slice(0,4)!==String(year)) return;
+    if(isCat){ if(r.type==="입금") amt[r.category||""]=(amt[r.category||""]||0)+r.amount; }
+    else     { if(r.type==="지출") amt[r.method||""]  =(amt[r.method||""]  ||0)+r.amount; }
+  });
+  const rows=[...registered,...unregistered].filter(v=>!bag[v] && (amt[v]||0)>0)
+    .map(v=>({member,type,value:v,kind:isCat?suggestCatKind(v):suggestKind(v)}));
+  if(!rows.length){ toast("미분류 항목이 없어요"); return; }
+  const res=await sb.from("tax_map").upsert(rows,{onConflict:"member,type,value"});
   if(dbErr(res,"매핑 저장 오류")) return;
-  toast(`${rows.length}개 결제수단을 분류했어요`);
+  toast(`${rows.length}개 항목을 분류했어요`);
   await reloadAndRender();
+}
+function copyTaxDDL(){
+  const done=()=>toast("SQL을 복사했어요 — Supabase SQL Editor에 붙여넣기");
+  if(navigator.clipboard?.writeText) navigator.clipboard.writeText(TAX_MAP_DDL).then(done,()=>toast("복사 실패 — 화면의 SQL을 직접 선택해 복사해주세요"));
+  else toast("복사 실패 — 화면의 SQL을 직접 선택해 복사해주세요");
 }
 async function saveTySalary(member){
   const v=amtVal("ty_sal");
@@ -2187,12 +2287,25 @@ function viewMaster(){
   // 카테고리 / 결제수단 / 계좌 관리 (카테고리는 아이콘 편집 지원)
   Object.entries(MASTER_KEYS).forEach(([key,label])=>{
     const items=mdata[key]||[];
+    // 연말정산 매핑을 여기서도 관리 (categories=소득 여부, methods=공제 구분)
+    const tKind = key==="categories" ? "category" : key==="methods" ? "method" : null;
+    const tBag  = tKind ? ((tKind==="category"?CTMAP:MTMAP)[masterMember]||{}) : {};
+    const tOpts = tKind==="category" ? TY_CAT_KINDS : TY_KINDS;
     h+=`<div class="m-section"><div class="m-title">${icons[key]} ${label} 관리</div>`;
-    if(key==="categories") h+=`<div style="font-size:.72rem;color:var(--t3);margin:-6px 0 8px;line-height:1.6">💡 아이콘을 누르면 이모지를 바꿀 수 있어요 (모든 멤버 공통 적용)</div>`;
+    if(key==="categories") h+=`<div style="font-size:.72rem;color:var(--t3);margin:-6px 0 8px;line-height:1.6">💡 아이콘을 누르면 이모지를 바꿀 수 있어요 (모든 멤버 공통 적용)<br>💵 오른쪽 선택은 <b style="color:var(--t2)">연말정산에서 이 카테고리 입금을 소득으로 볼지</b>입니다</div>`;
+    if(key==="methods")    h+=`<div style="font-size:.72rem;color:var(--t3);margin:-6px 0 8px;line-height:1.6">💳 오른쪽 선택은 <b style="color:var(--t2)">연말정산 공제 구분</b>입니다 (신용 15% · 체크/현금 30% · 제외)</div>`;
     h+=`<div class="m-list">`;
     if(items.length) items.forEach(v=>{
       const ico=key==="categories"?`<button class="m-ico" onclick="openIconPicker('${jsq(v)}')" aria-label="아이콘 변경">${icon(v)}</button>`:"";
-      h+=`<div class="m-item"><div style="display:flex;align-items:center;gap:10px;min-width:0">${ico}<span class="m-nm">${esc(v)}</span></div><button class="m-del" onclick="delMaster('${key}','${jsq(v)}')">삭제</button></div>`;
+      let sel="";
+      if(tKind){
+        const cur=tBag[v]||"";
+        sel=`<select class="tym-sel${cur?'':' un'}" onchange="setTaxMap('${jsq(masterMember)}','${tKind}','${jsq(v)}',this.value)">
+          <option value=""${cur?'':' selected'}>미분류</option>
+          ${Object.keys(tOpts).map(k=>`<option value="${k}"${cur===k?' selected':''}>${tOpts[k]}</option>`).join("")}
+        </select>`;
+      }
+      h+=`<div class="m-item"><div style="display:flex;align-items:center;gap:10px;min-width:0">${ico}<span class="m-nm">${esc(v)}</span></div><div style="display:flex;align-items:center;gap:8px;flex-shrink:0">${sel}<button class="m-del" onclick="delMaster('${key}','${jsq(v)}')">삭제</button></div></div>`;
     });
     else h+=`<div class="m-empty">아래에서 항목을 추가해주세요.</div>`;
     h+=`</div><div class="m-add"><input id="m_input_${key}" placeholder="${label} 추가" onkeydown="if(event.key==='Enter')addMaster('${key}')"><button onclick="addMaster('${key}')">추가</button></div></div>`;

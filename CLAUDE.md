@@ -102,18 +102,24 @@ value  text
 unique (member, type, value)
 ```
 
-### method_tax_map
+### tax_map
 ```sql
 member text references members(name) on delete cascade
-method text
-kind   text not null check (kind in ('credit','check','cash','none'))
-primary key (member, method)
+type   text not null check (type in ('method','category'))
+value  text not null default ''
+kind   text not null
+primary key (member, type, value)
+check ( (type='method'   and kind in ('credit','check','cash','none'))
+     or (type='category' and kind in ('income','none')) )
 ```
-> 연말정산용 결제수단 → 공제 구분 매핑. `credit`=신용 15% / `check`=체크 30% / `cash`=현금영수증 30% / `none`=공제제외(이체 등).
-> 체크·현금은 공제율이 같지만 사용 추이를 따로 보려고 화면에서만 분리한다.
-> ⚠️ 매핑 대상 목록은 **master_data ∪ 실제 거래에 등장한 method** 합집합(`tyMethods()`). 마스터에만 의존하면 마스터에 없는 실사용 값(`제일은행카드` 등 수천만원대)이 통째로 집계에서 빠진다.
-> ⚠️ 저장된 매핑만 집계에 반영한다. 추천값(`suggestKind()`)은 UI 제안일 뿐 몰래 적용하지 않는다 — 근거 없이 숫자가 움직이면 안 되므로.
-> ⚠️ 이 테이블이 없어도 앱은 정상 동작해야 한다(`loadAll`이 `mtm.error`를 무시하고 `MTMAP={}`). 신규 환경에서 마이그레이션 전에 흰 화면이 되지 않게 하는 안전장치.
+> 연말정산 매핑 2종을 한 테이블에. `master_data`의 (member, type, value) 형태를 그대로 따랐다.
+> - `type='method'` → **지출 매핑**: `credit`=신용 15% / `check`=체크 30% / `cash`=현금영수증 30% / `none`=공제제외(이체 등). 체크·현금은 공제율이 같지만 사용 추이를 따로 보려고 화면에서만 분리
+> - `type='category'` → **소득 매핑**: `income`=총급여에 산입 / `none`=제외. **총급여 판정은 오직 이 매핑만 따른다** (`SALARY_RE`는 추천 UI 전용 — 하드코딩 regex로 집계하지 말 것)
+>
+> ⚠️ 매핑 대상은 **설정(master_data)이 기준**, 거래엔 있는데 설정엔 없는 값은 `tyItems()`가 `unregistered`로 분리해 '미등록' 배지로 노출한다. 미등록을 빼면 `제일은행카드`(1,140만) 같은 실사용 값이 통째로 집계에서 빠진다.
+> ⚠️ 저장된 매핑만 집계에 반영한다. 추천값(`suggestKind`/`suggestCatKind`)은 UI 제안일 뿐 몰래 적용하지 않는다 — 근거 없이 숫자가 움직이면 안 되므로.
+> ⚠️ 일괄 분류(`applyTaxSuggest`)는 **올해 활동(금액>0)이 있는 항목만** 저장한다. 활동 없는 카테고리까지 `none`으로 저장하면 그게 '매핑됨'이 되어 소득 목록에 도로 나타난다.
+> ⚠️ 테이블이 없어도 앱은 정상 동작한다(`loadAll`이 error를 무시하고 `MTMAP/CTMAP={}`). 다만 `TAX_READY=false`가 되어 연말정산 화면은 계산 대신 **설치 안내(DDL + 복사 버튼)** 를 띄운다 — 예전엔 조용히 전 항목 0원으로 보여 버그로 오인됐다.
 
 ### app_settings
 ```sql
@@ -148,7 +154,9 @@ DEVICE_USER    // 이 기기의 기본 사용자 (localStorage, 없으면 null)
 USER_ICONS     // { 카테고리: 이모지 } — app_settings의 cat_icon_* (icon() 헬퍼가 CAT_ICON보다 우선 사용)
 WARN_TH        // 한도 경고 임계값 % (app_settings.warn_threshold, 기본 80)
 AN_PERIODS     // 분석·분류 탭 표시 주기 수 (app_settings.analysis_periods, 기본 3)
-MTMAP          // { 멤버: { 결제수단: kind } } — method_tax_map (테이블 없으면 {})
+MTMAP          // { 멤버: { 결제수단: kind } } — tax_map(type='method')
+CTMAP          // { 멤버: { 카테고리: kind } } — tax_map(type='category'), 소득 판정
+TAX_READY      // tax_map 테이블 존재 여부. false면 연말정산이 설치 안내를 띄움
 TY_SALARY      // { 멤버: 총급여 수동값 } — app_settings의 ty_salary_*
 
 tab          // 현재 탭: list | cat | limit | analysis | acct | master
@@ -198,8 +206,10 @@ memberVal    // 입력 시트의 '누가' 선택값
 | `viewAnalysis() / buildInsights() / bigSpends(rows)` | 분석 탭 렌더 + 스마트 진단·절약팁 + 일회성 이상치(카테고리 중앙값 대비 ≥2.5배·표본≥3) |
 | `taxCalc(member) / tyDeduct(credit,thirty,salary)` | 연말정산 집계(역년·연환산) / 소득공제액 — **최저사용금액(총급여 25%)은 공제율 낮은 신용부터 소진**되므로 신용<문턱이면 초과분 전체가 30% |
 | `tyAdvice(t) / viewTaxYear() / drawTaxChart()` | 상태별 핵심 조언 분기 / 연말정산 화면 / 월별 스택막대+월 적정페이스 점선 |
-| `tyMethods(m) / suggestKind(method)` | 매핑 대상 결제수단 합집합 / 이름 규칙 추천 (`체크\|직불\|선불` → check를 `카드`보다 먼저 검사할 것 — '우리 체크카드'가 credit으로 새는 것 방지) |
-| `setMethodKind / applyTySuggest / saveTySalary / resetTySalary` | 매핑 단건 저장(빈값=삭제) / 미분류 일괄 추천 적용 / 총급여 수동값 저장(0이면 삭제=추정 복귀) |
+| `tyItems(m,kind)` | 매핑 대상을 `{registered, unregistered}`로 분리 — 설정 등록분 / 거래에만 있는 값 |
+| `suggestKind(method) / suggestCatKind(cat)` | 이름 규칙 추천. `체크\|직불\|선불` → check를 `카드`보다 **먼저** 검사할 것 ('우리 체크카드'가 credit으로 새는 것 방지) |
+| `taxMapSection(m,kind,t)` | 소득·지출 매핑 UI 공용 빌더 (연말정산 화면용). 소득은 입금 있는 카테고리로 좁힘 |
+| `setTaxMap / applyTaxSuggest / saveTySalary / resetTySalary / copyTaxDDL` | 매핑 단건 저장(빈값=삭제) / 미분류 일괄 추천 / 총급여 수동값(0이면 삭제=추정 복귀) / 설치 SQL 복사 |
 | `drawAnalysisCharts() / destroyCharts()` | 도넛 + 주기별 스택막대(지출=카테고리·왼축, 수입=오른 보조축) + 추이 라인 / 인스턴스 일괄 파괴 |
 | `expOf(rs) / incOf(rs) / catColor(c)` | 지출·수입 합계 헬퍼(이동 제외), 카테고리 색 — **처음 등장 순서대로 팔레트 배정**(`_catOrder`). ⚠️이름해시 금지: 한글 카테고리가 한 칸에 몰려 전부 초록으로 보였음 |
 | `isTransfer(r)` | 계좌간 이동 거래 판별(`r.category===TRANSFER_CAT`) — 통계 제외 필터에 공통 사용 |
@@ -242,11 +252,15 @@ memberVal    // 입력 시트의 '누가' 선택값
 목적은 **세금 계산기가 아니라 "앞으로 신용/체크/현금 중 뭘 쓸까" 판단 도구**.
 과세표준·근로소득공제표·한계세율·지방소득세·예상환급금은 **의도적으로 계산하지 않는다** — 부양가족·의료비 등을 모르면 구간이 어긋나는데, 그 부정확함이 판단에 필요하지도 않기 때문. `공제액`까지만 낸다.
 
+**매핑 2종** (둘 다 `tax_map`, 같은 값을 두 곳에서 편집 — 설정 탭이 본체, 연말정산 화면은 미등록 항목까지 포함):
+1. **소득 매핑 = 카테고리 기준** — 어떤 입금을 총급여로 볼지. 설정 탭 → 카테고리 관리 / 연말정산 화면 → 소득 카테고리 매핑
+2. **지출 매핑 = 결제수단 기준** — 신용/체크/현금/제외. 설정 탭 → 결제수단 관리 / 연말정산 화면 → 결제수단 매핑
+
 - **기간은 역년(1/1~12/31)**. 결제주기(`billingPeriod`)와 무관 — 연말정산 자체가 역년 단위. 새 집계 추가 시 `inPeriod` 쓰지 말 것
 - 12월 전이면 `x / 현재월 * 12`로 연환산해 연말을 예측
 - 공제한도: 총급여 7천만 이하 300만 / 초과 250만 (`TY_LIMIT`)
 - **최적 전략 = 신용으로 문턱(총급여 25%)까지만 채우고 나머지는 체크·현금.** 문턱 구간은 공제율과 무관하게 소진되므로 혜택 좋은 신용카드로 쓰는 게 이득
-- `tyAdvice()` 분기 순서 주의: **미분류 경고가 최우선**. 전부 미분류일 때 '공제 0원'이라고 하면 덜 쓴 탓으로 오해함
+- `tyAdvice()` 분기 순서 주의: **테이블 미설치 → 지출 미분류 → 소득 미지정 → 계산 결과** 순. 전부 미분류일 때 '공제 0원'이라고 하면 덜 쓴 탓으로 오해함
 - 총급여 자동추정은 월급 입금 건수가 경과 월수보다 적으면 경고를 띄운다(지현처럼 급여를 앱에 안 적는 멤버는 추정이 크게 낮게 잡힘)
 - 진행 바 눈금 최대치는 `max(Sp*1.06, th*1.3)` — 사용액 0일 때 문턱 마커가 100%에 붙어 라벨이 잘리는 것 방지
 
