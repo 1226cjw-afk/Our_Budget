@@ -656,6 +656,47 @@ body.sheet-open{overflow:hidden}
 .anom-s{font-size:.71rem;color:var(--t2);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .anom-v{font-size:.9rem;font-weight:900;color:var(--r);white-space:nowrap;letter-spacing:-.3px}
 
+/* ── 연말정산 (분석 탭 세그먼트) ── */
+.ty-cap{font-size:.72rem;color:var(--t3);line-height:1.7;margin:-4px 0 14px}
+.ty-sal{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;margin-bottom:10px}
+.ty-sal-v{font-size:1.28rem;font-weight:900;letter-spacing:-.6px;color:var(--ac)}
+.ty-bdg{font-size:.6rem;font-weight:800;padding:2px 8px;border-radius:20px;letter-spacing:.3px}
+.ty-bdg.auto{color:var(--t2);background:var(--bg3);border:1px solid var(--bd)}
+.ty-bdg.man{color:var(--ac);background:var(--acg);border:1px solid rgba(201,147,58,.28)}
+.ty-facts{display:flex;gap:8px;margin-top:12px}
+.ty-fact{flex:1;background:var(--bg3);border:1px solid var(--bd);border-radius:11px;padding:9px 10px}
+.ty-fact-l{font-size:.62rem;font-weight:700;color:var(--t3);letter-spacing:.3px;margin-bottom:4px}
+.ty-fact-v{font-size:.83rem;font-weight:800;letter-spacing:-.3px}
+/* 사용액 진행 바 — 신용/체크/현금 3색 스택 + 문턱 마커 */
+.tybar-o{position:relative;margin:4px 0 9px;padding-top:9px}
+.tybar-w{height:15px;background:var(--bg3);border-radius:8px;overflow:hidden;display:flex;border:1px solid var(--bd)}
+.tybar-s{height:100%;transition:width .5s cubic-bezier(.4,0,.2,1)}
+.tymk{position:absolute;top:3px;bottom:-3px;width:2px;background:var(--t1);border-radius:2px}
+.tymk::after{content:attr(data-l);position:absolute;top:-11px;left:50%;transform:translateX(-50%);
+  font-size:.58rem;font-weight:800;color:var(--t1);white-space:nowrap}
+.tylg{display:flex;flex-wrap:wrap;gap:10px 14px}
+.tylg-i{display:flex;align-items:center;gap:6px;font-size:.72rem;color:var(--t2)}
+.tylg-d{width:9px;height:9px;border-radius:3px;flex-shrink:0}
+.tylg-v{font-weight:800;color:var(--t1)}
+/* 남은 기간 시나리오 비교 */
+.tysc{margin-top:2px}
+.tysc-r{margin-bottom:13px}
+.tysc-r:last-child{margin-bottom:0}
+.tysc-t{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:.77rem;margin-bottom:6px}
+.tysc-n{font-weight:700}
+.tysc-v{font-weight:900;letter-spacing:-.3px;white-space:nowrap}
+.tysc-bw{height:10px;background:var(--bg3);border-radius:5px;overflow:hidden}
+.tysc-b{height:100%;border-radius:5px;transition:width .5s cubic-bezier(.4,0,.2,1)}
+/* 결제수단 매핑 */
+.tym{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--bd)}
+.tym:last-child{border:none;padding-bottom:0}
+.tym-bd{flex:1;min-width:0}
+.tym-nm{font-size:.82rem;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tym-a{font-size:.68rem;color:var(--t3);margin-top:2px}
+.tym-sel{flex-shrink:0;background:var(--bg3);border:1px solid var(--bd);color:var(--t1);
+  border-radius:10px;padding:8px 9px;font-size:.76rem;font-weight:700;font-family:inherit}
+.tym-sel.un{border-color:rgba(232,150,30,.45);color:var(--amber)}
+
 /* ── 진입 모션 (한 번, staggered) ── */
 @keyframes riseIn{from{opacity:0;transform:translateY(9px)}to{opacity:1;transform:translateY(0)}}
 .panel,.cards .card,.astat .am,.acct-tot,.acct-grid .am,.m-section,.lcard{
@@ -794,6 +835,12 @@ const DEVICE_USER_KEY = "ourbudget.deviceUser";  // localStorage: 이 기기의 
 const GAS_BACKUP_URL    = "https://script.google.com/macros/s/AKfycbweq9PLy5VDBa68VN-76aWL8wUW6nvLZOlVaktn5oZE-HMkwg_iuXNGP6dBfcqjH56G/exec";  // Apps Script 웹앱
 const GAS_BACKUP_SECRET = "ourbudget-backup-2026";  // GAS 코드의 SECRET과 동일하게
 const CAT_ICON     = {생활비:"🛒",고정비:"🏠",월급:"💵",이자:"📈",데이트:"❤️",식비:"🍽️",교통:"🚌",의료:"💊",쇼핑:"👜",문화:"🎬",교육:"📚",통신:"📱",보험:"🛡️",기타:"📌","계좌간 이동":"🔄"};
+/* 연말정산 — 결제수단별 소득공제 구분.
+   공제율은 체크·현금영수증이 동일(30%)하지만, 사용 추이를 따로 보려고 화면에선 셋을 분리한다. */
+const TY_KINDS = {credit:"신용", check:"체크", cash:"현금", none:"제외"};
+const TY_RATE  = {credit:.15, check:.30, cash:.30, none:0};
+const TY_COLOR = {credit:"#F05470", check:"#2EC890", cash:"#E8961E"};
+const SALARY_RE = /월급|급여|상여|보너스/;   // 총급여 자동 추정에 쓸 입금 카테고리
 // 탭 아이콘 — Lucide 스타일 인라인 SVG (이모지는 OS별 렌더가 제각각이라 구조 아이콘엔 미사용)
 const NI = p => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
 const TABS = [
@@ -816,6 +863,8 @@ let DEVICE_USER    = null;  // 이 기기의 기본 사용자 (localStorage)
 let USER_ICONS     = {};    // {카테고리: 이모지} — app_settings의 cat_icon_* (전 멤버 공통)
 let WARN_TH        = 80;    // 한도 경고 임계값(%) — app_settings.warn_threshold
 let AN_PERIODS     = 3;     // 분석·분류 탭 표시 주기 수 — app_settings.analysis_periods
+let MTMAP          = {};    // {멤버: {결제수단: kind}} — method_tax_map
+let TY_SALARY      = {};    // {멤버: 총급여 수동값} — app_settings의 ty_salary_*
 
 let tab          = "list";
 let scope        = "current";
@@ -825,6 +874,8 @@ let searchQ      = "";      // 내역 탭 검색어
 let catBy        = "category"; // 분류 탭 집계 기준: 'category' | 'method'
 let limitMember  = null;    // 한도 탭 전용
 let masterMember = null;    // 설정 탭 전용
+let anView       = "spend"; // 분석 탭 세그먼트: spend(지출분석) | tax(연말정산)
+let tyMember     = null;    // 연말정산 전용 멤버 ('전체' 없음 — 연말정산은 개인 단위)
 let typeVal      = "지출";
 let memberVal    = null;    // 입력 시트
 let editId       = null;
@@ -928,12 +979,13 @@ window.onload = async () => {
 /* ── 데이터 로드 ── */
 async function loadAll(){
   loadError = null;
-  const [mem, tx, lim, mst, cfg] = await Promise.all([
+  const [mem, tx, lim, mst, cfg, mtm] = await Promise.all([
     sb.from("members").select("name").order("id"),
     sb.from("transactions").select("*").order("date",{ascending:false}).order("id"),  // id 2차 정렬: 같은 날짜 내 순서가 리로드마다 안 뒤섞이게
     sb.from("category_limits").select("*"),
     sb.from("master_data").select("*"),
-    sb.from("app_settings").select("*")
+    sb.from("app_settings").select("*"),
+    sb.from("method_tax_map").select("*")
   ]);
 
   if(mem.error) throw new Error("멤버 로드 오류: "+mem.error.message);
@@ -943,6 +995,7 @@ async function loadAll(){
   if(!MEMBERS.includes(limitMember))  limitMember  = defMember();
   if(!MEMBERS.includes(masterMember)) masterMember = defMember();
   if(!MEMBERS.includes(memberVal))    memberVal    = defMember();
+  if(!MEMBERS.includes(tyMember))     tyMember     = defMember();
 
   if(tx.error) throw new Error(tx.error.message||"거래내역 로드 오류");
   ROWS = tx.data||[];
@@ -965,8 +1018,17 @@ async function loadAll(){
   });
   MEMBERS.forEach(m => { if(!MASTER[m].categories.length) MASTER[m].categories=[...DEFAULT_CATS]; });
 
+  // MTMAP: {멤버: {결제수단: kind}} — 연말정산 공제 구분 매핑
+  // 테이블이 아직 없으면 error로 떨어지는데, 그땐 빈 맵으로 두고 앱의 나머지는 그대로 동작시킨다
+  MTMAP = {};
+  MEMBERS.forEach(m => MTMAP[m] = {});
+  if(!mtm.error)(mtm.data||[]).forEach(row => {
+    if(!MTMAP[row.member]) MTMAP[row.member] = {};
+    MTMAP[row.member][row.method||""] = row.kind;
+  });
+
   // app_settings: 전역 fallback → 멤버별 override + 앱 설정·카테고리 아이콘
-  BILLING_STARTS={}; USER_ICONS={}; WARN_TH=80; AN_PERIODS=3;
+  BILLING_STARTS={}; USER_ICONS={}; WARN_TH=80; AN_PERIODS=3; TY_SALARY={};
   let _globalBS=25;
   if(!cfg.error)(cfg.data||[]).forEach(row=>{
     if(row.key==='billing_start_day'){const v=Number(row.value);if(v>=1&&v<=28)_globalBS=v;}
@@ -976,6 +1038,10 @@ async function loadAll(){
     }
     if(row.key==='warn_threshold'){const v=Number(row.value);if(v>=50&&v<=99)WARN_TH=v;}
     if(row.key==='analysis_periods'){const v=Number(row.value);if(v>=2&&v<=6)AN_PERIODS=v;}
+    if(row.key.startsWith('ty_salary_')){
+      const mem=row.key.slice('ty_salary_'.length);
+      const v=Number(row.value); if(MEMBERS.includes(mem)&&v>0)TY_SALARY[mem]=v;
+    }
     if(row.key.startsWith('cat_icon_')&&row.value)USER_ICONS[row.key.slice('cat_icon_'.length)]=row.value;
   });
   MEMBERS.forEach(m=>{if(!(m in BILLING_STARTS))BILLING_STARTS[m]=_globalBS;});
@@ -1220,6 +1286,8 @@ function setMemberFilter(m){ memberFilter=m; render(); }
 function setCatBy(v){ catBy=v; render(); }
 function setLimitMember(m){ limitMember=m; render(); }
 function setMasterMember(m){ masterMember=m; render(); }
+function setAnView(v){ anView=v; render(); }
+function setTyMember(m){ tyMember=m; render(); }
 
 /* ── 기기 기본 사용자 (localStorage) ── */
 function openDeviceUser(){
@@ -1272,7 +1340,12 @@ function render(){
   if(tab==="list")     m.innerHTML = filterBar() + viewList();
   else if(tab==="cat") m.innerHTML = filterBar() + viewCategory();
   else if(tab==="limit")    m.innerHTML = viewLimit();
-  else if(tab==="analysis"){ m.innerHTML = memberFilterPills() + viewAnalysis(); drawAnalysisCharts(); }
+  else if(tab==="analysis"){
+    const seg = pills([["spend","📊 지출분석"],["tax","🧾 연말정산"]], anView, "setAnView");
+    // 연말정산은 개인 단위라 '전체' 없는 멤버 바를 쓴다 (합산하면 각자의 25% 문턱이 뒤섞임)
+    if(anView==="tax"){ m.innerHTML = seg + memberBar(tyMember,"setTyMember") + viewTaxYear(); drawTaxChart(); }
+    else { m.innerHTML = seg + memberFilterPills() + viewAnalysis(); drawAnalysisCharts(); }
+  }
   else if(tab==="acct")     m.innerHTML = viewAccount();
   else if(tab==="master")   m.innerHTML = viewMaster();
 }
@@ -1679,6 +1752,313 @@ function drawAnalysisCharts(){
       label:t.cat,data:t.data,borderColor:catColor(t.cat),backgroundColor:catColor(t.cat),tension:.35,borderWidth:2,pointRadius:3,pointHoverRadius:5,fill:false}))},
       options:{responsive:true,interaction:{mode:"index",intersect:false},plugins:{legend:{labels:{color:tickC,font:{size:10},boxWidth:8,padding:8}},tooltip:{callbacks:{label:ctx=>` ${ctx.dataset.label}: ${won(ctx.parsed.y)}`}}},scales:axes}}));
   }
+}
+
+/* ── 연말정산: 신용/체크/현금 사용 전략 ──
+   세금 계산기가 아니라 "앞으로 뭘 쓸까" 판단용. 과세표준·세율·환급금은 계산하지 않고 소득공제액까지만 낸다.
+   결제주기가 아닌 역년(1/1~12/31) 기준 — 연말정산 자체가 역년 단위라서. */
+const TY_LIMIT = t => t<=70000000 ? 3000000 : 2500000;   // 공제한도: 총급여 7천만 이하 300만 / 초과 250만
+
+/* 소득공제액. 최저사용금액(총급여 25%)은 공제율이 낮은 신용카드부터 소진된다 —
+   그래서 신용 사용액이 문턱보다 적으면 초과분 전체가 30%를 받는다. */
+function tyDeduct(credit, thirty, salary){
+  const th=salary*.25, s=credit+thirty;
+  if(salary<=0 || s<=th) return 0;
+  const d = credit>=th ? (credit-th)*TY_RATE.credit + thirty*TY_RATE.check
+                       : (s-th)*TY_RATE.check;
+  return Math.min(d, TY_LIMIT(salary));
+}
+
+/* 매핑 대상 결제수단 = master_data 설정 ∪ 실제 거래에 등장한 값.
+   실사용 값을 넣지 않으면 마스터에 없는 수단(예: '제일은행카드')의 지출이 통째로 집계에서 빠진다. */
+function tyMethods(member){
+  const set=new Set((MASTER[member]||{}).methods||[]);
+  ROWS.forEach(r=>{ if(r.member===member && r.type==="지출" && !isTransfer(r)) set.add(r.method||""); });
+  return [...set].sort((a,b)=>String(a).localeCompare(String(b),"ko"));
+}
+/* 이름 규칙으로 공제 구분 추천 — 순서 중요 ('우리 체크카드'는 체크가 먼저 걸려야 함) */
+function suggestKind(method){
+  const s=String(method||"").replace(/\s/g,"");
+  if(!s) return "none";
+  if(/체크|직불|선불/.test(s))            return "check";
+  if(/현금영수증/.test(s))                 return "cash";
+  if(/신용|카드/.test(s))                  return "credit";
+  if(/현금/.test(s))                       return "cash";
+  return "none";
+}
+
+function taxCalc(member){
+  const now=new Date(), year=now.getFullYear(), m=now.getMonth()+1;
+  const map=MTMAP[member]||{};
+  const ytd={credit:0,check:0,cash:0,none:0,unmapped:0};
+  const byMonth={credit:Array(12).fill(0), check:Array(12).fill(0), cash:Array(12).fill(0)};
+  const unmapped={};            // {결제수단: 금액} — 경고 목록
+  let salaryRaw=0, salaryCnt=0;
+
+  ROWS.forEach(r=>{
+    if(r.member!==member || String(r.date).slice(0,4)!==String(year)) return;
+    if(isTransfer(r)) return;
+    if(r.type==="입금"){
+      if(SALARY_RE.test(r.category||"")){ salaryRaw+=r.amount; salaryCnt++; }
+      return;
+    }
+    if(r.type!=="지출") return;
+    const meth=r.method||"", k=map[meth];
+    if(!k){ ytd.unmapped+=r.amount; unmapped[meth]=(unmapped[meth]||0)+r.amount; return; }
+    ytd[k]=(ytd[k]||0)+r.amount;
+    if(byMonth[k]){ const mi=Number(String(r.date).slice(5,7))-1; if(mi>=0&&mi<12) byMonth[k][mi]+=r.amount; }
+  });
+
+  // 12월 전이면 현재 월로 나눠 ×12 — '이 추세로 가면 연말에 얼마'
+  const proj = x => m>=12 ? x : x/m*12;
+  const autoSalary = Math.round(proj(salaryRaw));
+  const manual = TY_SALARY[member]||0;
+  const salary = manual || autoSalary;
+
+  const C=ytd.credit, D=ytd.check+ytd.cash, S=C+D;
+  const projK={credit:proj(ytd.credit), check:proj(ytd.check), cash:proj(ytd.cash)};
+  const Cp=projK.credit, Dp=projK.check+projK.cash, Sp=Cp+Dp;
+
+  // 남은 기간 시나리오 — 현재 페이스로 계속 쓴다고 보고, 그 돈을 어디로 돌릴지만 바꿔본다
+  const remain=Math.max(0,12-m), pace=m?S/m:0, future=pace*remain;
+  return {
+    year, m, ytd, byMonth, unmapped, salary, manual, autoSalary, salaryCnt,
+    th:salary*.25, limit:TY_LIMIT(salary), C, D, S, projK, Cp, Dp, Sp,
+    ded:tyDeduct(Cp,Dp,salary),            // 현 추세 유지 시 연말 공제액
+    dedNow:tyDeduct(C,D,salary),           // 지금까지 확정분
+    remain, pace, future,
+    scCredit:tyDeduct(C+future, D, salary),      // 남은 기간 전부 신용
+    scCheck :tyDeduct(C, D+future, salary)       // 남은 기간 전부 체크·현금
+  };
+}
+
+/* 상태별 핵심 조언 — 이 탭의 결론에 해당하는 한 문장 */
+function tyAdvice(t){
+  // 매핑이 안 된 지출이 매핑된 것보다 많으면 어떤 결론도 신뢰할 수 없다 —
+  // '공제 0원'이라고 단정하면 덜 쓴 탓으로 오해하게 되므로 매핑부터 안내한다
+  if(t.ytd.unmapped>0 && t.ytd.unmapped>=t.S) return {ic:"🗂️",tone:"warn",t:"먼저 결제수단을 매핑해주세요",
+    b:`올해 지출 ${won(t.ytd.unmapped)}이 아직 공제 구분 없이 남아 있어 계산에 반영되지 않았어요. 맨 아래 '결제수단 매핑'에서 지정하면 (또는 추천값 일괄 적용) 바로 결과가 나옵니다.`};
+  if(t.salary<=0) return {ic:"⚙️",tone:"warn",t:"총급여를 먼저 설정해주세요",
+    b:"올해 '월급' 입금이 없어 자동 추정이 안 됐어요. 위 카드에 연봉(총급여)을 입력하면 25% 문턱과 공제액을 계산해드릴게요."};
+  if(t.Sp<=t.th) return {ic:"💳",tone:"info",t:`아직 공제 0원 — 문턱까지 ${won(Math.round(t.th-t.Sp))}`,
+    b:`총급여의 25%(${won(Math.round(t.th))})를 넘게 써야 공제가 시작돼요. 지금 추세면 연말 ${won(Math.round(t.Sp))}라 문턱에 못 미칩니다. 어차피 공제가 안 되니 할인·적립 혜택이 좋은 신용카드를 쓰는 게 유리해요.`};
+  if(t.ded>=t.limit-1) return {ic:"🏁",tone:"good",t:"공제 한도에 도달했어요",
+    b:`이미 한도 ${won(t.limit)}를 채울 추세라, 앞으로 어떤 수단을 써도 공제는 더 늘지 않아요. 남은 기간은 혜택 좋은 신용카드를 마음 편히 쓰세요.`};
+  if(t.C<t.th) return {ic:"💳",tone:"tip",t:`신용카드로 ${won(Math.round(t.th-t.C))} 더 채운 뒤 체크·현금으로`,
+    b:`문턱(${won(Math.round(t.th))})까지는 공제율과 무관하게 그냥 소진돼요. 그러니 그 구간은 혜택 좋은 신용카드로 채우고, 넘어선 뒤부터 체크·현금(30%)으로 갈아타는 게 최적이에요.`};
+  return {ic:"✅",tone:"good",t:"지금부터는 체크·현금이 2배 유리해요",
+    b:`신용 사용액이 이미 문턱(${won(Math.round(t.th))})을 넘겼어요. 여기서부터 신용은 15%, 체크·현금영수증은 30% 공제라 같은 금액을 써도 공제가 두 배예요.`};
+}
+
+let _tyStash=null;   // 차트용 데이터 보관 (viewTaxYear → drawTaxChart)
+
+function viewTaxYear(){
+  if(!tyMember) return `<div class="sec">${empty("👥","설정에서 멤버를 추가해주세요.")}</div>`;
+  const t=taxCalc(tyMember);
+  const adv=tyAdvice(t);
+  const unmapArr=Object.entries(t.unmapped).sort((a,b)=>b[1]-a[1]);
+  const R=Math.round;
+
+  let h=`<div class="sec">`;
+  h+=`<div class="ty-cap">${t.year}년 1월~12월(역년) 기준 · 현재 ${t.m}월까지의 실적을 <b style="color:var(--t2)">연환산</b>해 연말을 예측합니다. 결제주기와 무관해요.</div>`;
+
+  // 1) 총급여 — 자동 추정이 기본, 어긋나면 수동 입력이 우선
+  h+=`<div class="m-section">
+    <div class="m-title">💰 총급여 (연봉)</div>
+    <div class="ty-sal">
+      <span class="ty-sal-v">${t.salary>0?won(t.salary):"미설정"}</span>
+      <span class="ty-bdg ${t.manual?'man':'auto'}">${t.manual?'수동 입력':'자동 추정'}</span>
+    </div>
+    <div style="font-size:.74rem;color:var(--t3);line-height:1.7;margin-bottom:12px">
+      ${t.salaryCnt
+        ? `올해 '월급·급여·상여' 입금 <b style="color:var(--t2)">${t.salaryCnt}건 ${won(R(t.autoSalary/12*t.m))}</b>을 ${t.m}개월로 나눠 ×12 → 추정 ${won(t.autoSalary)}`
+        : `올해 '월급·급여·상여' 카테고리 입금이 없어 자동 추정이 불가능해요.`}
+      ${t.manual?`<br>수동값 <b style="color:var(--ac)">${won(t.manual)}</b>이 적용 중입니다.`:``}
+    </div>
+    ${!t.manual&&t.salaryCnt>0&&t.salaryCnt<t.m
+      ? `<div class="alert" style="margin-bottom:12px">⚠️ 월급 입금이 ${t.salaryCnt}건뿐이라 ${t.m}개월치를 다 반영하지 못했어요. 추정이 실제보다 낮을 수 있으니 연봉을 직접 입력해주세요.</div>`
+      : ``}
+    <div class="m-add">
+      <input id="ty_sal" inputmode="numeric" placeholder="총급여 직접 입력 (비우면 추정값)"
+        value="${t.manual?comma(t.manual):''}" oninput="fmtNum(this)">
+      <button onclick="saveTySalary('${jsq(tyMember)}')">저장</button>
+    </div>
+    ${t.manual?`<button class="m-save" style="width:100%;margin-top:9px;padding:9px" onclick="resetTySalary('${jsq(tyMember)}')">↩︎ 자동 추정값으로 되돌리기</button>`:``}`;
+  if(t.salary>0){
+    h+=`<div class="ty-facts">
+      <div class="ty-fact"><div class="ty-fact-l">25% 문턱</div><div class="ty-fact-v" style="color:var(--amber)">${won(R(t.th))}</div></div>
+      <div class="ty-fact"><div class="ty-fact-l">공제 한도</div><div class="ty-fact-v">${won(t.limit)}</div></div>
+    </div>`;
+  }
+  h+=`</div>`;
+
+  // 2) 사용액 진행 — 3색 스택 + 문턱 마커
+  // 문턱 마커 라벨이 오른쪽 끝에서 잘리지 않도록 눈금 최대치에 여유를 둔다 (사용액 0일 때 마커가 100%로 붙음)
+  const scaleMax=Math.max(t.Sp*1.06, t.th*1.3, 1);
+  const wpc=x=>Math.max(0,x/scaleMax*100);
+  const lg=(k,lb)=>`<div class="tylg-i"><span class="tylg-d" style="background:${TY_COLOR[k]}"></span>${lb}
+    <span class="tylg-v">${wonShort(t.ytd[k])}</span><span style="color:var(--t3)">→ ${wonShort(R(t.projK[k]))}</span></div>`;
+  h+=`<div class="panel">
+    <div class="p-t">📈 올해 사용액<span class="p-sub">${t.m}월까지 → 연환산</span></div>
+    <div class="tybar-o">
+      <div class="tybar-w">
+        <div class="tybar-s" style="width:${wpc(t.projK.credit)}%;background:${TY_COLOR.credit}"></div>
+        <div class="tybar-s" style="width:${wpc(t.projK.check)}%;background:${TY_COLOR.check}"></div>
+        <div class="tybar-s" style="width:${wpc(t.projK.cash)}%;background:${TY_COLOR.cash}"></div>
+      </div>
+      ${t.th>0&&t.th<scaleMax?`<div class="tymk" style="left:${t.th/scaleMax*100}%" data-l="25% 문턱"></div>`:``}
+    </div>
+    <div class="tylg">${lg("credit","신용")}${lg("check","체크")}${lg("cash","현금")}</div>
+    <div style="font-size:.7rem;color:var(--t3);margin-top:11px;line-height:1.65">
+      막대는 연환산 기준 · 왼쪽 값은 지금까지 실제 사용액${t.ytd.none>0?` · 공제 제외 ${wonShort(t.ytd.none)}`:``}
+    </div>`;
+  if(unmapArr.length){
+    h+=`<div class="alert" style="margin-top:12px">⚠️ 미분류 결제수단 <b>${won(t.ytd.unmapped)}</b> (${unmapArr.length}종) — 아래에서 매핑해야 집계에 반영됩니다.</div>`;
+  }
+  h+=`</div>`;
+
+  // 3) 핵심 조언 + 연말 예상 공제액
+  h+=`<div class="panel"><div class="p-t">🧭 앞으로 뭘 쓸까<span class="p-sub">현 추세 기준</span></div>
+    <div class="ins ${adv.tone}"><div class="ins-ic">${adv.ic}</div>
+      <div class="ins-bd"><div class="ins-t">${esc(adv.t)}</div><div class="ins-b">${esc(adv.b)}</div></div></div>`;
+  if(t.salary>0){
+    h+=`<div class="ty-facts" style="margin-top:13px">
+      <div class="ty-fact"><div class="ty-fact-l">연말 예상 공제액</div><div class="ty-fact-v" style="color:var(--g)">${won(R(t.ded))}</div></div>
+      <div class="ty-fact"><div class="ty-fact-l">지금까지 확정</div><div class="ty-fact-v">${won(R(t.dedNow))}</div></div>
+    </div>`;
+  }
+  h+=`</div>`;
+
+  // 4) 남은 기간 시나리오 비교 — 이 탭의 '비교 분석' 본체
+  if(t.salary>0 && t.remain>0 && t.future>0){
+    const mx=Math.max(t.scCredit,t.scCheck,1);
+    const gap=R(t.scCheck-t.scCredit);
+    const bar=(nm,v,col)=>`<div class="tysc-r">
+      <div class="tysc-t"><span class="tysc-n">${nm}</span><span class="tysc-v" style="color:${col}">${won(R(v))}</span></div>
+      <div class="tysc-bw"><div class="tysc-b" style="width:${Math.max(2,v/mx*100)}%;background:${col}"></div></div></div>`;
+    h+=`<div class="panel"><div class="p-t">⚖️ 남은 ${t.remain}개월 비교<span class="p-sub">연말 공제액</span></div>
+      <div style="font-size:.75rem;color:var(--t3);line-height:1.7;margin:-4px 0 13px">
+        지금 페이스(월 ${wonShort(R(t.pace))})로 남은 ${t.remain}개월에 ${won(R(t.future))}를 더 쓴다고 볼 때
+      </div>
+      <div class="tysc">
+        ${bar("전부 체크·현금으로", t.scCheck, TY_COLOR.check)}
+        ${bar("전부 신용카드로", t.scCredit, TY_COLOR.credit)}
+      </div>
+      <div style="font-size:.78rem;color:var(--t2);margin-top:13px;line-height:1.7;padding-top:12px;border-top:1px solid var(--bd)">
+        ${gap>0
+          ? `체크·현금으로 돌리면 공제가 <b style="color:var(--g)">${won(gap)}</b> 더 늘어요.`
+          : `지금 상황에선 어느 쪽을 써도 공제 차이가 없어요 ${t.ded>=t.limit-1?'(한도 도달)':'(문턱 미달)'}.`}
+      </div></div>`;
+  }
+
+  // 5) 월별 사용 추이
+  const hasSpend=t.ytd.credit+t.ytd.check+t.ytd.cash>0;
+  if(hasSpend){
+    _tyStash={
+      labels:Array.from({length:t.m},(_,i)=>`${i+1}월`),
+      credit:t.byMonth.credit.slice(0,t.m),
+      check :t.byMonth.check.slice(0,t.m),
+      cash  :t.byMonth.cash.slice(0,t.m),
+      pace  :t.salary>0 ? t.th/12 : 0
+    };
+    h+=`<div class="panel"><div class="p-t">📊 월별 사용 추이<span class="p-sub">신용·체크·현금</span></div>
+      <canvas id="chartTyMonth" height="200"></canvas>
+      ${t.salary>0?`<div style="font-size:.7rem;color:var(--t3);margin-top:10px;line-height:1.6">점선 = 문턱을 12개월로 나눈 월 적정 페이스 ${won(R(t.th/12))}</div>`:``}
+    </div>`;
+  } else { _tyStash=null; }
+
+  // 6) 결제수단 매핑
+  const map=MTMAP[tyMember]||{};
+  const methods=tyMethods(tyMember);
+  const usedAmt={};
+  ROWS.forEach(r=>{ if(r.member===tyMember&&r.type==="지출"&&!isTransfer(r)&&String(r.date).slice(0,4)===String(t.year))
+    usedAmt[r.method||""]=(usedAmt[r.method||""]||0)+r.amount; });
+  h+=`<div class="m-section"><div class="m-title">🗂️ 결제수단 매핑 <span style="font-size:.66rem;color:var(--t3);font-weight:600">${esc(tyMember)}</span></div>
+    <div style="font-size:.75rem;color:var(--t2);line-height:1.75;margin-bottom:12px">
+      '~~카드'만으로는 신용인지 체크인지 알 수 없어서, 수단마다 공제 구분을 지정해야 집계됩니다.
+      <b style="color:var(--ac)">현금</b>은 현금영수증을 발행한 금액만 공제 대상이에요.
+    </div>`;
+  if(unmapArr.length){
+    h+=`<button class="m-save" style="width:100%;padding:11px;margin-bottom:12px" onclick="applyTySuggest('${jsq(tyMember)}')">✨ 미분류 ${unmapArr.length}개 추천값으로 일괄 분류</button>`;
+  }
+  if(!methods.length){
+    h+=`<div class="m-empty">결제수단이 없어요. 설정 탭에서 추가하거나 거래를 입력해주세요.</div>`;
+  } else {
+    h+=`<div class="m-list" style="background:none;border:none;padding:0">`;
+    methods.forEach(v=>{
+      const cur=map[v]||"", amt=usedAmt[v]||0;
+      const opt=k=>`<option value="${k}"${cur===k?' selected':''}>${TY_KINDS[k]}</option>`;
+      h+=`<div class="tym">
+        <div class="tym-bd">
+          <div class="tym-nm">${v?esc(v):'<span style="color:var(--t3)">(미지정)</span>'}</div>
+          <div class="tym-a">올해 ${amt?won(amt):'사용 없음'}${!cur&&amt?' · 집계 제외 중':''}</div>
+        </div>
+        <select class="tym-sel${cur?'':' un'}" onchange="setMethodKind('${jsq(tyMember)}','${jsq(v)}',this.value)">
+          <option value=""${cur?'':' selected'}>미분류</option>
+          ${opt("credit")}${opt("check")}${opt("cash")}${opt("none")}
+        </select>
+      </div>`;
+    });
+    h+=`</div>`;
+  }
+  h+=`</div>`;
+
+  return h+`</div>`;
+}
+
+/* 월별 스택 막대 + 월 적정 페이스 점선 */
+function drawTaxChart(){
+  if(!_tyStash || typeof Chart==="undefined") return;
+  destroyCharts();
+  const c=$("chartTyMonth"); if(!c) return;
+  const tickC="#6E6C8A", gridC="#12141F", subC="#32304E";
+  const ds=[["credit","신용"],["check","체크"],["cash","현금"]].map(([k,lb])=>({
+    type:"bar", label:lb, data:_tyStash[k], backgroundColor:TY_COLOR[k],
+    stack:"use", borderRadius:3, borderSkipped:false, maxBarThickness:30
+  }));
+  if(_tyStash.pace>0) ds.push({type:"line", label:"월 적정 페이스",
+    data:_tyStash.labels.map(()=>_tyStash.pace), borderColor:"#EDE8F8", borderDash:[5,4],
+    borderWidth:1.5, pointRadius:0, fill:false});
+  _charts.push(new Chart(c,{type:"bar",data:{labels:_tyStash.labels,datasets:ds},
+    options:{responsive:true,interaction:{mode:"index",intersect:false},
+      plugins:{legend:{labels:{color:tickC,font:{size:10},boxWidth:8,padding:6}},
+        tooltip:{callbacks:{label:ctx=>` ${ctx.dataset.label}: ${won(Math.round(ctx.parsed.y))}`}}},
+      scales:{x:{ticks:{color:tickC,font:{size:10}},grid:{display:false},stacked:true},
+        y:{beginAtZero:true,stacked:true,ticks:{color:subC,font:{size:10},callback:v=>wonShort(v)},grid:{color:gridC}}}}}));
+}
+
+/* ── 연말정산 설정 CRUD ── */
+async function setMethodKind(member, method, kind){
+  const res = kind
+    ? await sb.from("method_tax_map").upsert({member,method,kind},{onConflict:"member,method"})
+    : await sb.from("method_tax_map").delete().eq("member",member).eq("method",method);
+  if(dbErr(res,"매핑 저장 오류")) return;
+  await reloadAndRender();
+}
+/* 미분류 수단만 이름 규칙 추천값으로 일괄 저장 — 추천값을 몰래 집계에 쓰지 않고, 저장된 것만 반영한다 */
+async function applyTySuggest(member){
+  const map=MTMAP[member]||{};
+  const rows=tyMethods(member).filter(v=>!map[v]).map(v=>({member,method:v,kind:suggestKind(v)}));
+  if(!rows.length){ toast("미분류 결제수단이 없어요"); return; }
+  const res=await sb.from("method_tax_map").upsert(rows,{onConflict:"member,method"});
+  if(dbErr(res,"매핑 저장 오류")) return;
+  toast(`${rows.length}개 결제수단을 분류했어요`);
+  await reloadAndRender();
+}
+async function saveTySalary(member){
+  const v=amtVal("ty_sal");
+  const key=`ty_salary_${member}`;
+  const res = v>0 ? await sb.from("app_settings").upsert({key,value:String(v)},{onConflict:"key"})
+                  : await sb.from("app_settings").delete().eq("key",key);
+  if(dbErr(res,"총급여 저장 오류")) return;
+  toast(v>0?`총급여 ${won(v)}로 저장했어요`:"자동 추정값으로 되돌렸어요");
+  await reloadAndRender();
+}
+async function resetTySalary(member){
+  const res=await sb.from("app_settings").delete().eq("key",`ty_salary_${member}`);
+  if(dbErr(res,"총급여 초기화 오류")) return;
+  toast("자동 추정값으로 되돌렸어요");
+  await reloadAndRender();
 }
 
 /* ── 계좌 탭 (멤버 필터 적용) ── */

@@ -102,6 +102,19 @@ value  text
 unique (member, type, value)
 ```
 
+### method_tax_map
+```sql
+member text references members(name) on delete cascade
+method text
+kind   text not null check (kind in ('credit','check','cash','none'))
+primary key (member, method)
+```
+> 연말정산용 결제수단 → 공제 구분 매핑. `credit`=신용 15% / `check`=체크 30% / `cash`=현금영수증 30% / `none`=공제제외(이체 등).
+> 체크·현금은 공제율이 같지만 사용 추이를 따로 보려고 화면에서만 분리한다.
+> ⚠️ 매핑 대상 목록은 **master_data ∪ 실제 거래에 등장한 method** 합집합(`tyMethods()`). 마스터에만 의존하면 마스터에 없는 실사용 값(`제일은행카드` 등 수천만원대)이 통째로 집계에서 빠진다.
+> ⚠️ 저장된 매핑만 집계에 반영한다. 추천값(`suggestKind()`)은 UI 제안일 뿐 몰래 적용하지 않는다 — 근거 없이 숫자가 움직이면 안 되므로.
+> ⚠️ 이 테이블이 없어도 앱은 정상 동작해야 한다(`loadAll`이 `mtm.error`를 무시하고 `MTMAP={}`). 신규 환경에서 마이그레이션 전에 흰 화면이 되지 않게 하는 안전장치.
+
 ### app_settings
 ```sql
 key   text primary key
@@ -112,6 +125,7 @@ value text
 > - `billing_start_<멤버명>` : 멤버별 시작일 override (예: `billing_start_지현` = `21`)
 > - `warn_threshold` : 한도 경고 임계값 % (50~99, 기본 80) — 한도 탭 warn 상태·분석 '한도 임박' 공통
 > - `analysis_periods` : 분석·분류 탭 표시 주기 수 (2~6, 기본 3)
+> - `ty_salary_<멤버명>` : 연말정산 총급여 수동값. 없으면 올해 '월급·급여·상여' 입금의 연환산 추정을 쓴다(수동값이 항상 우선)
 > - `cat_icon_<카테고리명>` : 카테고리 이모지 아이콘 (전 멤버 공통). master_data에 icon 컬럼을 두지 않은 이유: 신규 멤버는 카테고리가 DB 없이 DEFAULT_CATS fallback으로 돌아 행이 없을 수 있음
 
 ### RLS 정책 (모든 테이블 공통)
@@ -134,6 +148,8 @@ DEVICE_USER    // 이 기기의 기본 사용자 (localStorage, 없으면 null)
 USER_ICONS     // { 카테고리: 이모지 } — app_settings의 cat_icon_* (icon() 헬퍼가 CAT_ICON보다 우선 사용)
 WARN_TH        // 한도 경고 임계값 % (app_settings.warn_threshold, 기본 80)
 AN_PERIODS     // 분석·분류 탭 표시 주기 수 (app_settings.analysis_periods, 기본 3)
+MTMAP          // { 멤버: { 결제수단: kind } } — method_tax_map (테이블 없으면 {})
+TY_SALARY      // { 멤버: 총급여 수동값 } — app_settings의 ty_salary_*
 
 tab          // 현재 탭: list | cat | limit | analysis | acct | master
 scope        // 'current' | 'all'
@@ -143,6 +159,8 @@ searchQ      // 내역 탭 검색어 (메모·카테고리·계좌·결제수단
 catBy        // 분류 탭 집계 기준: 'category' | 'method' — aggCat(rs, field)가 키 필드로 사용, 빈 결제수단은 '미지정'
 limitMember  // 한도 탭 전용 멤버 선택 (null 없음)
 masterMember // 설정 탭 전용 멤버 선택
+anView       // 분석 탭 세그먼트: 'spend'(지출분석) | 'tax'(연말정산)
+tyMember     // 연말정산 전용 멤버 ('전체' 없음 — 각자 총급여·25% 문턱이 달라 합산이 무의미)
 memberVal    // 입력 시트의 '누가' 선택값
 ```
 
@@ -178,6 +196,10 @@ memberVal    // 입력 시트의 '누가' 선택값
 | `refreshCatList()` | 입력 시트 select 옵션 갱신 |
 | `openPicker(sel,title) / pickOptIdx(i) / updateSelBtn(sel)` | 커스텀 하단 시트 피커 열기·선택·버튼 표시 갱신 |
 | `viewAnalysis() / buildInsights() / bigSpends(rows)` | 분석 탭 렌더 + 스마트 진단·절약팁 + 일회성 이상치(카테고리 중앙값 대비 ≥2.5배·표본≥3) |
+| `taxCalc(member) / tyDeduct(credit,thirty,salary)` | 연말정산 집계(역년·연환산) / 소득공제액 — **최저사용금액(총급여 25%)은 공제율 낮은 신용부터 소진**되므로 신용<문턱이면 초과분 전체가 30% |
+| `tyAdvice(t) / viewTaxYear() / drawTaxChart()` | 상태별 핵심 조언 분기 / 연말정산 화면 / 월별 스택막대+월 적정페이스 점선 |
+| `tyMethods(m) / suggestKind(method)` | 매핑 대상 결제수단 합집합 / 이름 규칙 추천 (`체크\|직불\|선불` → check를 `카드`보다 먼저 검사할 것 — '우리 체크카드'가 credit으로 새는 것 방지) |
+| `setMethodKind / applyTySuggest / saveTySalary / resetTySalary` | 매핑 단건 저장(빈값=삭제) / 미분류 일괄 추천 적용 / 총급여 수동값 저장(0이면 삭제=추정 복귀) |
 | `drawAnalysisCharts() / destroyCharts()` | 도넛 + 주기별 스택막대(지출=카테고리·왼축, 수입=오른 보조축) + 추이 라인 / 인스턴스 일괄 파괴 |
 | `expOf(rs) / incOf(rs) / catColor(c)` | 지출·수입 합계 헬퍼(이동 제외), 카테고리 색 — **처음 등장 순서대로 팔레트 배정**(`_catOrder`). ⚠️이름해시 금지: 한글 카테고리가 한 칸에 몰려 전부 초록으로 보였음 |
 | `isTransfer(r)` | 계좌간 이동 거래 판별(`r.category===TRANSFER_CAT`) — 통계 제외 필터에 공통 사용 |
@@ -198,7 +220,7 @@ memberVal    // 입력 시트의 '누가' 선택값
 | 내역 (list) | 날짜별 거래 목록, 주기(◀▶ 과거 주기 탐색)/멤버 필터 + 검색바(searchQ)·건수 표시 |
 | 분류 (cat) | 카테고리별/결제수단별 집계(catBy 토글 필), 주기(◀▶)/멤버 필터, 카드 클릭 시 내역 드릴다운 |
 | 한도 (limit) | 멤버별 한도 설정 및 진행률 (warn 임계값=WARN_TH) + 상단 '전체 한도 요약' 카드 |
-| 분석 (analysis) | 최근 AN_PERIODS주기 차트·반복지출·요약 |
+| 분석 (analysis) | 상단 세그먼트 2개(`anView`) — **지출분석**: 최근 AN_PERIODS주기 차트·반복지출·요약 / **연말정산**: 아래 참조 |
 | 계좌 (acct) | 계좌별 잔액(이동 포함), 총수입·지출(이동 제외), 멤버 필터 |
 | 설정 (master) | 멤버·기기사용자·앱설정(임계값·주기수)·CSV 내보내기·결제주기·카테고리(아이콘 포함)·결제수단·계좌 관리 |
 
@@ -214,6 +236,19 @@ memberVal    // 입력 시트의 '누가' 선택값
 > ⚠️ 한도 탭(`viewLimit`) 카테고리 목록은 `MASTER[멤버].categories`(master_data DB) 기준 + 기존 저장 한도. 지출 발생 카테고리(`spent`)로 만들면 '계좌간 이동'처럼 설정에 없는 항목까지 한도 UI가 떠서 안 됨.
 
 ---
+
+## 연말정산 세그먼트 (분석 탭)
+
+목적은 **세금 계산기가 아니라 "앞으로 신용/체크/현금 중 뭘 쓸까" 판단 도구**.
+과세표준·근로소득공제표·한계세율·지방소득세·예상환급금은 **의도적으로 계산하지 않는다** — 부양가족·의료비 등을 모르면 구간이 어긋나는데, 그 부정확함이 판단에 필요하지도 않기 때문. `공제액`까지만 낸다.
+
+- **기간은 역년(1/1~12/31)**. 결제주기(`billingPeriod`)와 무관 — 연말정산 자체가 역년 단위. 새 집계 추가 시 `inPeriod` 쓰지 말 것
+- 12월 전이면 `x / 현재월 * 12`로 연환산해 연말을 예측
+- 공제한도: 총급여 7천만 이하 300만 / 초과 250만 (`TY_LIMIT`)
+- **최적 전략 = 신용으로 문턱(총급여 25%)까지만 채우고 나머지는 체크·현금.** 문턱 구간은 공제율과 무관하게 소진되므로 혜택 좋은 신용카드로 쓰는 게 이득
+- `tyAdvice()` 분기 순서 주의: **미분류 경고가 최우선**. 전부 미분류일 때 '공제 0원'이라고 하면 덜 쓴 탓으로 오해함
+- 총급여 자동추정은 월급 입금 건수가 경과 월수보다 적으면 경고를 띄운다(지현처럼 급여를 앱에 안 적는 멤버는 추정이 크게 낮게 잡힘)
+- 진행 바 눈금 최대치는 `max(Sp*1.06, th*1.3)` — 사용액 0일 때 문턱 마커가 100%에 붙어 라벨이 잘리는 것 방지
 
 ## 구글 시트 백업 (단방향)
 
@@ -251,7 +286,10 @@ git push
 브라우저 없이 인라인 JS를 확인하는 법: 마지막 `<script>` 블록을 추출 → `new Function`/`Module._compile`에 stub(supabase·Chart·document·localStorage) 주입해 파싱/순수함수 단위테스트. `node`로 실행.
 - 빠른 문법 검사(복붙용): `node -e "const fs=require('fs');const c=[...fs.readFileSync('index.html','utf8').matchAll(/<script>([\s\S]*?)<\/script>/g)].pop()[1];try{new Function(c);console.log('JS OK')}catch(e){console.error(e.message);process.exit(1)}"`
 - 순수함수 단위테스트: 대상 헬퍼(`expOf`·`isTransfer` 등)를 `node -e`에 그대로 복사해 입력/기대값 비교 (이번 세션 이동 제외·짝 매칭 검증에 사용)
-- 차트·UI 시각 확인(헤드리스 Chrome): index.html 복사본의 supabase CDN 뒤에 mock(`window.supabase.createClient`→체이너블 thenable `{data,error}`)+`localStorage` 기기사용자 주입, `goTab()`로 탭 강제 후 `chrome --headless=new --screenshot=<절대경로>.png --window-size=480,H --force-device-scale-factor=2 --virtual-time-budget=6000`(탭 강제 setTimeout이 돌 시간 확보 — 없으면 탭 전환 전에 찍힘). `--screenshot`은 절대경로 필수(상대경로면 "액세스 거부(0x5)"로 파일 미생성). CDN(Chart.js·폰트)은 헤드리스에서도 로드됨. Chrome 경로: `C:\Program Files\Google\Chrome\Application\chrome.exe`
+- 차트·UI 시각 확인(헤드리스 Chrome): index.html 복사본에 mock(`window.supabase.createClient`→체이너블 thenable `{data,error}`)+`localStorage` 기기사용자 주입, `goTab()`로 탭 강제 후 `chrome --headless=new --screenshot=<절대경로>.png --force-device-scale-factor=2 --virtual-time-budget=8000`(탭 강제 setTimeout이 돌 시간 확보 — 없으면 탭 전환 전에 찍힘). `--screenshot`은 절대경로 필수(상대경로면 "액세스 거부(0x5)"로 파일 미생성). Chrome 경로: `C:\Program Files\Google\Chrome\Application\chrome.exe`
+  - ⚠️ **mock은 `window.addEventListener('load', …)` 안에서 주입할 것.** supabase CDN이 `<script defer>`라 인라인 mock보다 **나중에** 실행돼 `window.supabase`를 덮어쓴다 → CDN 태그 뒤에 인라인으로 두면 mock이 무시되고 조용히 실서비스 DB를 조회한다(스크린샷은 그럴듯하게 나와서 알아채기 어려움). 앱의 `window.onload` 대입보다 먼저 등록되므로 load 리스너가 먼저 돈다
+  - ⚠️ **`--window-size`가 뷰포트에 안 먹는다**(clientWidth가 485로 고정). 그 폭으로 스크린샷을 찍으면 오른쪽이 잘려 나가 오버플로 버그처럼 보인다. 특정 폰 폭 검증은 `<iframe src="mock.html" width="360">`로 감싼 래퍼를 찍을 것
+  - 오버플로 실측은 `document.documentElement.scrollWidth` vs `clientWidth` + 넘치는 엘리먼트 목록을 `document.title`에 넣고 `--dump-dom | grep '<title>'`로 회수 (헤드리스는 콘솔이 안 보임)
 - ⚠️ `node -e '...'`에 작은따옴표 든 JS(예: `goTab('analysis')`)는 bash 따옴표와 충돌해 조용히 no-op. **heredoc도 금지**: 인용 heredoc(`<<'EOF'`)조차 백슬래시 `\\`가 소실돼 정규식/이스케이프 든 JS가 깨짐 → 스크립트 파일은 Write 도구로 생성 후 `node <절대경로>`로 실행. node에 경로는 인자로 전달(`-e` 문자열 속 `/tmp`는 `C:\tmp`로 오인됨)
 ⚠️ 차트 재렌더 시 이전 인스턴스 `destroyCharts()` 필수 (누수 방지) — `render()` 첫 줄에서 항상 호출됨(분석 탭 이탈 시 해제 포함). `viewX()`는 HTML만 반환, 캔버스는 `drawX()`에서.
 
