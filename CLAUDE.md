@@ -25,6 +25,12 @@ branch: main
 - ⚠️ **반드시 `Our_Budget` 폴더에서 claude를 열어야 연결됨.** 다른 폴더(예: 홈)에서 열면 MCP 안 붙음
 - 바탕화면 "가계부 Claude" 바로가기 또는 PowerShell `budget` 명령으로 열면 자동 연결
 - **연결 안 될 경우**: Claude Code 완전 재시작
+- ⚠️ 토큰 만료 시 모든 `mcp__supabase__*`가 `Unauthorized`로 실패한다(재시작해도 안 됨).
+  이때 **anon key REST가 완전한 폴백** — RLS가 `using(true)`라 읽기·쓰기 모두 가능.
+  단 **DDL은 불가** → 테이블 생성은 사용자에게 SQL을 주고 대시보드에서 실행 요청.
+  `Invoke-RestMethod -Uri '<URL>/rest/v1/<table>?select=*' -Headers @{apikey=$k;Authorization="Bearer $k"}`
+  REST가 `404`면 그 테이블이 없는 것(JS 클라이언트에선 `PGRST205`).
+- BOM 회피: PowerShell 대신 node `https.get`으로 받아 파일로 쓰면 `U+FEFF` 제거가 아예 불필요
 - ⚠️ `.mcp.json`에 Supabase access token이 평문 저장됨 → git에 커밋 금지 (`.gitignore` 확인)
 - 연결되면 `mcp__supabase__*` 도구로 SQL 직접 실행 가능 (Supabase 대시보드 불필요)
 
@@ -288,6 +294,10 @@ Supabase MCP가 연결되어 있으면:
 "~~ SQL 실행해줘" → mcp__supabase__ 도구로 직접 실행
 ```
 연결 안 되어 있으면 사용자에게 Supabase 대시보드 → SQL Editor에서 실행 요청.
+실행됐다고 하면 **말만 믿지 말고 검증**: `select` 200 확인 + 임시 행 insert→delete로 RLS 쓰기까지 확인
+(정책을 빠뜨리면 읽기는 되고 저장만 조용히 실패한다).
+앱은 새 테이블이 없어도 죽지 않게 짜되(`if(!res.error)`), **없는 상태를 화면에 명시**할 것 —
+이번에 조용히 전 항목 0원으로 보여 사용자가 버그로 오인했다.
 
 ### 배포
 ```bash
@@ -302,6 +312,9 @@ git push
 브라우저 없이 인라인 JS를 확인하는 법: 마지막 `<script>` 블록을 추출 → `new Function`/`Module._compile`에 stub(supabase·Chart·document·localStorage) 주입해 파싱/순수함수 단위테스트. `node`로 실행.
 - 빠른 문법 검사(복붙용): `node -e "const fs=require('fs');const c=[...fs.readFileSync('index.html','utf8').matchAll(/<script>([\s\S]*?)<\/script>/g)].pop()[1];try{new Function(c);console.log('JS OK')}catch(e){console.error(e.message);process.exit(1)}"`
 - 순수함수 단위테스트: 대상 헬퍼(`expOf`·`isTransfer` 등)를 `node -e`에 그대로 복사해 입력/기대값 비교 (이번 세션 이동 제외·짝 매칭 검증에 사용)
+- **실 DB 검증**: 복사본에 mock 없이 `localStorage` 기기사용자 + `goTab()`만 주입하면 실제 Supabase로 렌더된다. 목은 "숫자가 나온다"까지만 보장 — 실제 매핑·데이터로 띄워야 결론이 맞는지 알 수 있다
+- **화면 숫자가 의심스러우면**: REST로 실데이터 스냅샷을 받아 순수함수를 복사한 재현 스크립트로 대조. 이번에 시나리오 비교의 잘못된 사유 문구와, 공제액을 좌우하던 '제외' 금액을 이 방법으로 발견
+- 헤드리스 chrome은 **Bash 툴로 실행**할 것. PowerShell에서 `& $chrome ... 2>$null`로 돌리면 파일은 생성되는데 출력이 사라져 실패로 오인함
 - 차트·UI 시각 확인(헤드리스 Chrome): index.html 복사본에 mock(`window.supabase.createClient`→체이너블 thenable `{data,error}`)+`localStorage` 기기사용자 주입, `goTab()`로 탭 강제 후 `chrome --headless=new --screenshot=<절대경로>.png --force-device-scale-factor=2 --virtual-time-budget=8000`(탭 강제 setTimeout이 돌 시간 확보 — 없으면 탭 전환 전에 찍힘). `--screenshot`은 절대경로 필수(상대경로면 "액세스 거부(0x5)"로 파일 미생성). Chrome 경로: `C:\Program Files\Google\Chrome\Application\chrome.exe`
   - ⚠️ **mock은 `window.addEventListener('load', …)` 안에서 주입할 것.** supabase CDN이 `<script defer>`라 인라인 mock보다 **나중에** 실행돼 `window.supabase`를 덮어쓴다 → CDN 태그 뒤에 인라인으로 두면 mock이 무시되고 조용히 실서비스 DB를 조회한다(스크린샷은 그럴듯하게 나와서 알아채기 어려움). 앱의 `window.onload` 대입보다 먼저 등록되므로 load 리스너가 먼저 돈다
   - ⚠️ **`--window-size`가 뷰포트에 안 먹는다**(clientWidth가 485로 고정). 그 폭으로 스크린샷을 찍으면 오른쪽이 잘려 나가 오버플로 버그처럼 보인다. 특정 폰 폭 검증은 `<iframe src="mock.html" width="360">`로 감싼 래퍼를 찍을 것
