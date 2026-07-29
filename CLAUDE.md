@@ -31,6 +31,11 @@ branch: main
   `Invoke-RestMethod -Uri '<URL>/rest/v1/<table>?select=*' -Headers @{apikey=$k;Authorization="Bearer $k"}`
   REST가 `404`면 그 테이블이 없는 것(JS 클라이언트에선 `PGRST205`).
 - BOM 회피: PowerShell 대신 node `https.get`으로 받아 파일로 쓰면 `U+FEFF` 제거가 아예 불필요
+  - ⚠️ 단 **응답을 문자열로 누적하지 말 것**(`let b=''; r.on('data',d=>b+=d)`). 청크 경계에서 한글 UTF-8 3바이트가 쪼개져 `U+FFFD`로 깨진다.
+    `const bufs=[]; r.on('data',d=>bufs.push(d))` → `Buffer.concat(bufs).toString('utf8')` (또는 `r.setEncoding('utf8')`)로 받을 것.
+    깨진 값은 `정우`→`정��`처럼 **일부 행만** 조용히 망가지고 매 요청마다 깨지는 행이 달라진다 →
+    같은 DB인데 스냅샷마다 집계가 달라져 "DB가 실시간으로 변한다"고 오진하기 쉬움. 실제로 이번에 그렇게 헤맸다.
+    검증법: 같은 쿼리를 2회 받아 파일이 바이트 동일한지 + `/�/` 미포함인지 확인.
 - ⚠️ `.mcp.json`에 Supabase access token이 평문 저장됨 → git에 커밋 금지 (`.gitignore` 확인)
 - 연결되면 `mcp__supabase__*` 도구로 SQL 직접 실행 가능 (Supabase 대시보드 불필요)
 
@@ -212,6 +217,8 @@ memberVal    // 입력 시트의 '누가' 선택값
 | `viewAnalysis() / buildInsights() / bigSpends(rows)` | 분석 탭 렌더 + 스마트 진단·절약팁 + 일회성 이상치(카테고리 중앙값 대비 ≥2.5배·표본≥3) |
 | `taxCalc(member) / tyDeduct(credit,thirty,salary)` | 연말정산 집계(역년·연환산) / 소득공제액 — **최저사용금액(총급여 25%)은 공제율 낮은 신용부터 소진**되므로 신용<문턱이면 초과분 전체가 30% |
 | `tyAdvice(t) / viewTaxYear() / drawTaxChart()` | 상태별 핵심 조언 분기 / 연말정산 화면 / 월별 스택막대+월 적정페이스 점선 |
+| `tyNeed(kind,C,D,salary)` | 공제 한도를 채우는 데 **앞으로 더 써야 할 금액**(수단별). 문턱·한도 경계에서 케이스가 갈려 닫힌 식은 틀리기 쉬움 → 단조 증가 함수 이분탐색으로 통일 |
+| `tyMarginal(C,D,salary)` | **다음 1원의 한계 공제율** + 사유 4상태: `limit`(한도소진) `below`(문턱미달) `same`(신용<문턱→둘 다 30%) `split`(신용>문턱→15% vs 30%) |
 | `tyItems(m,kind)` | 매핑 대상을 `{registered, unregistered}`로 분리 — 설정 등록분 / 거래에만 있는 값 |
 | `suggestKind(method) / suggestCatKind(cat)` | 이름 규칙 추천. `체크\|직불\|선불` → check를 `카드`보다 **먼저** 검사할 것 ('우리 체크카드'가 credit으로 새는 것 방지) |
 | `taxMapSection(m,kind,t)` | 소득·지출 매핑 UI 공용 빌더 (연말정산 화면용). 소득은 입금 있는 카테고리로 좁힘 |
@@ -270,7 +277,16 @@ memberVal    // 입력 시트의 '누가' 선택값
 - 총급여 자동추정은 월급 입금 건수가 경과 월수보다 적으면 경고를 띄운다(지현처럼 급여를 앱에 안 적는 멤버는 추정이 크게 낮게 잡힘)
 - 진행 바 눈금 최대치는 `max(Sp*1.06, th*1.3)` — 사용액 0일 때 문턱 마커가 100%에 붙어 라벨이 잘리는 것 방지
 - **신용<문턱이면 신용·체크의 한계 공제율이 30%로 같다** (`(S-th)*30%` 구간이라 어디에 써도 S만 늘림). 시나리오 차이가 0일 때 사유를 '문턱 미달'로 뭉뚱그리면 틀린다 — 한도 도달 / 문턱 미달 / 신용이 문턱 아래 3가지를 구분할 것
-- `tyNotes()`: '제외(none)' 금액이 커서 공제액을 좌우할 때 `dedIfNone`(제외를 30%로 봤을 때)과 대조해 보여준다. 정우 실데이터에서 이체·제일은행카드 2,921만이 제외라 공제액이 3.6만 → 대상으로 보면 250만(한도)
+- `tyNotes()`: '제외(none)' 금액이 커서 공제액을 좌우할 때 `dedIfNone`(제외를 30%로 봤을 때)과 대조해 보여준다. 정우 실데이터에서 이체·제일은행카드 3,039만이 제외라 공제액이 9.4만 → 대상으로 보면 250만(한도)
+
+### '남은 공제 여력' 패널 (2026-07 추가)
+"연말에 얼마?"(예측)가 아니라 **"지금부터 뭘, 얼마나 더?"**(행동)에 답하는 패널. 이 탭의 실질적 결론.
+- **문턱·한도는 연환산 총급여로 정하되, '앞으로 얼마'는 오늘까지의 실적(C·D·S)에서 잰다.** 여기에 연환산을 섞으면 "이미 쓴 셈 친 돈"만큼 필요액이 과소평가된다
+- `tyNeed()`는 이분탐색 — 문턱·한도 경계에서 케이스가 갈려(신용이 문턱을 넘느냐, 30%로 채우다 한도에 걸리느냐) 닫힌 식으로 쓰면 한쪽 케이스가 조용히 틀린다
+- **'한도 소진'과 '문턱 미달'은 조언이 정반대**다. 둘 다 한계 공제율은 0%지만 한도 소진은 "더 써도 소용없음", 문턱 미달은 "더 쓰면 곧 공제 시작". 뭉뚱그리지 말 것
+- `tyAdvice()`는 `dedNow>=limit`(확정으로 한도 달성)과 `ded>=limit`(추세상 달성)을 분리한다 — 전자는 "이제 신용 혜택 챙기세요", 후자는 "체크·현금 N원만 더"
+- 신용카드엔 '유리' 배지가 붙을 수 없다(공제율이 체크·현금보다 높은 경우가 없음). 신용을 권하는 상황(문턱 미달·한도 소진)은 배지 대신 하단 설명문이 담당
+- ⚠️ 이 패널은 **의도적으로 미다루는 항목**이 있다: 전통시장·대중교통 추가공제(각 한도 100만, 공제율 40%↑)와 도서·공연 30%. 결제수단 축만으로는 분류가 불가능해서다. 실제 공제액은 이 앱 계산보다 클 수 있음
 
 ## 구글 시트 백업 (단방향)
 
@@ -317,7 +333,9 @@ git push
 - 헤드리스 chrome은 **Bash 툴로 실행**할 것. PowerShell에서 `& $chrome ... 2>$null`로 돌리면 파일은 생성되는데 출력이 사라져 실패로 오인함
 - 차트·UI 시각 확인(헤드리스 Chrome): index.html 복사본에 mock(`window.supabase.createClient`→체이너블 thenable `{data,error}`)+`localStorage` 기기사용자 주입, `goTab()`로 탭 강제 후 `chrome --headless=new --screenshot=<절대경로>.png --force-device-scale-factor=2 --virtual-time-budget=8000`(탭 강제 setTimeout이 돌 시간 확보 — 없으면 탭 전환 전에 찍힘). `--screenshot`은 절대경로 필수(상대경로면 "액세스 거부(0x5)"로 파일 미생성). Chrome 경로: `C:\Program Files\Google\Chrome\Application\chrome.exe`
   - ⚠️ **mock은 `window.addEventListener('load', …)` 안에서 주입할 것.** supabase CDN이 `<script defer>`라 인라인 mock보다 **나중에** 실행돼 `window.supabase`를 덮어쓴다 → CDN 태그 뒤에 인라인으로 두면 mock이 무시되고 조용히 실서비스 DB를 조회한다(스크린샷은 그럴듯하게 나와서 알아채기 어려움). 앱의 `window.onload` 대입보다 먼저 등록되므로 load 리스너가 먼저 돈다
-  - ⚠️ **`--window-size`가 뷰포트에 안 먹는다**(clientWidth가 485로 고정). 그 폭으로 스크린샷을 찍으면 오른쪽이 잘려 나가 오버플로 버그처럼 보인다. 특정 폰 폭 검증은 `<iframe src="mock.html" width="360">`로 감싼 래퍼를 찍을 것
+  - ⚠️ **`--window-size`가 뷰포트 *폭*엔 안 먹는다**(clientWidth가 485로 고정). 그 폭으로 스크린샷을 찍으면 오른쪽이 잘려 나가 오버플로 버그처럼 보인다. 특정 폰 폭 검증은 `<iframe src="mock.html" width="360">`로 감싼 래퍼를 찍을 것
+  - **높이는 먹는다** → 긴 화면 한 장에 담기: 래퍼에 `<iframe width="360" height="1500">` + `--window-size=400,1520`. 스크린샷은 뷰포트만 찍히므로 window 높이를 늘리는 게 유일한 방법(`--screenshot`엔 full-page 옵션 없음)
+  - 오버플로 실측·수치 회수는 **iframe 안쪽 문서**에서 해야 한다(래퍼를 재면 360이 아니라 래퍼 폭이 나옴). 안쪽에서 `document.title`에 넣고 `--dump-dom | grep '<title>'`, 또는 `<pre id="DUMP">`에 JSON을 찍어 회수
   - 오버플로 실측은 `document.documentElement.scrollWidth` vs `clientWidth` + 넘치는 엘리먼트 목록을 `document.title`에 넣고 `--dump-dom | grep '<title>'`로 회수 (헤드리스는 콘솔이 안 보임)
 - ⚠️ `node -e '...'`에 작은따옴표 든 JS(예: `goTab('analysis')`)는 bash 따옴표와 충돌해 조용히 no-op. **heredoc도 금지**: 인용 heredoc(`<<'EOF'`)조차 백슬래시 `\\`가 소실돼 정규식/이스케이프 든 JS가 깨짐 → 스크립트 파일은 Write 도구로 생성 후 `node <절대경로>`로 실행. node에 경로는 인자로 전달(`-e` 문자열 속 `/tmp`는 `C:\tmp`로 오인됨)
 ⚠️ 차트 재렌더 시 이전 인스턴스 `destroyCharts()` 필수 (누수 방지) — `render()` 첫 줄에서 항상 호출됨(분석 탭 이탈 시 해제 포함). `viewX()`는 HTML만 반환, 캔버스는 `drawX()`에서.
