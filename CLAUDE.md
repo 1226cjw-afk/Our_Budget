@@ -329,16 +329,16 @@ git push
 ### JS 검증 (테스트 프레임워크 없음)
 브라우저 없이 인라인 JS를 확인하는 법: 마지막 `<script>` 블록을 추출 → `new Function`/`Module._compile`에 stub(supabase·Chart·document·localStorage) 주입해 파싱/순수함수 단위테스트. `node`로 실행.
 - 빠른 문법 검사(복붙용): `node -e "const fs=require('fs');const c=[...fs.readFileSync('index.html','utf8').matchAll(/<script>([\s\S]*?)<\/script>/g)].pop()[1];try{new Function(c);console.log('JS OK')}catch(e){console.error(e.message);process.exit(1)}"`
-- 순수함수 단위테스트: 대상 헬퍼(`expOf`·`isTransfer` 등)를 `node -e`에 그대로 복사해 입력/기대값 비교 (이번 세션 이동 제외·짝 매칭 검증에 사용)
+- 순수함수 단위테스트: 헬퍼를 **손으로 복사하지 말고** index.html에서 정규식으로 뽑아 `new Function(code+'return {…}')`으로 실행 — 복사본은 원본이 바뀌어도 옛 코드를 검증한다. 상태 매트릭스(경계값 9종)로 불변식을 돌리는 게 값 1~2개 대조보다 훨씬 잘 잡힌다(`tyNeed` 검증에 사용)
 - **실 DB 검증**: 복사본에 mock 없이 `localStorage` 기기사용자 + `goTab()`만 주입하면 실제 Supabase로 렌더된다. 목은 "숫자가 나온다"까지만 보장 — 실제 매핑·데이터로 띄워야 결론이 맞는지 알 수 있다
+  - ⚠️ **이 모드에서 `dispatchEvent`로 onchange/onclick을 발화시키면 실서비스 DB에 그대로 쓴다** (테스트 DB 없음 — 가족 실데이터다). 배선만 확인할 땐 load 리스너에서 `window.setTaxMap=(...a)=>calls.push(a)`처럼 **변경 함수를 스텁으로 덮은 뒤** 이벤트를 쏘고 인자만 회수할 것 (설정 탭 미등록 8행 셀렉트를 이렇게 무해하게 검증 — 인자 이스케이프·기존값 선택까지 확인)
 - **화면 숫자가 의심스러우면**: REST로 실데이터 스냅샷을 받아 순수함수를 복사한 재현 스크립트로 대조. 이번에 시나리오 비교의 잘못된 사유 문구와, 공제액을 좌우하던 '제외' 금액을 이 방법으로 발견
 - 헤드리스 chrome은 **Bash 툴로 실행**할 것. PowerShell에서 `& $chrome ... 2>$null`로 돌리면 파일은 생성되는데 출력이 사라져 실패로 오인함
 - 차트·UI 시각 확인(헤드리스 Chrome): index.html 복사본에 mock(`window.supabase.createClient`→체이너블 thenable `{data,error}`)+`localStorage` 기기사용자 주입, `goTab()`로 탭 강제 후 `chrome --headless=new --screenshot=<절대경로>.png --force-device-scale-factor=2 --virtual-time-budget=8000`(탭 강제 setTimeout이 돌 시간 확보 — 없으면 탭 전환 전에 찍힘). `--screenshot`은 절대경로 필수(상대경로면 "액세스 거부(0x5)"로 파일 미생성). Chrome 경로: `C:\Program Files\Google\Chrome\Application\chrome.exe`
   - ⚠️ **mock은 `window.addEventListener('load', …)` 안에서 주입할 것.** supabase CDN이 `<script defer>`라 인라인 mock보다 **나중에** 실행돼 `window.supabase`를 덮어쓴다 → CDN 태그 뒤에 인라인으로 두면 mock이 무시되고 조용히 실서비스 DB를 조회한다(스크린샷은 그럴듯하게 나와서 알아채기 어려움). 앱의 `window.onload` 대입보다 먼저 등록되므로 load 리스너가 먼저 돈다
   - ⚠️ **`--window-size`가 뷰포트 *폭*엔 안 먹는다**(clientWidth가 485로 고정). 그 폭으로 스크린샷을 찍으면 오른쪽이 잘려 나가 오버플로 버그처럼 보인다. 특정 폰 폭 검증은 `<iframe src="mock.html" width="360">`로 감싼 래퍼를 찍을 것
   - **높이는 먹는다** → 긴 화면 한 장에 담기: 래퍼에 `<iframe width="360" height="1500">` + `--window-size=400,1520`. 스크린샷은 뷰포트만 찍히므로 window 높이를 늘리는 게 유일한 방법(`--screenshot`엔 full-page 옵션 없음)
-  - 오버플로 실측·수치 회수는 **iframe 안쪽 문서**에서 해야 한다(래퍼를 재면 360이 아니라 래퍼 폭이 나옴). 안쪽에서 `document.title`에 넣고 `--dump-dom | grep '<title>'`, 또는 `<pre id="DUMP">`에 JSON을 찍어 회수
-  - 오버플로 실측은 `document.documentElement.scrollWidth` vs `clientWidth` + 넘치는 엘리먼트 목록을 `document.title`에 넣고 `--dump-dom | grep '<title>'`로 회수 (헤드리스는 콘솔이 안 보임)
+  - 실측·수치 회수는 **iframe 안쪽 문서**에서(래퍼를 재면 래퍼 폭이 나옴). 헤드리스는 콘솔이 안 보이므로 `document.title` 또는 `<pre id="DUMP">`에 JSON을 찍고 `--dump-dom | grep`으로 회수. 오버플로는 `documentElement.scrollWidth` vs `clientWidth` + 넘치는 엘리먼트 목록
 - ⚠️ `node -e '...'`에 작은따옴표 든 JS(예: `goTab('analysis')`)는 bash 따옴표와 충돌해 조용히 no-op. **heredoc도 금지**: 인용 heredoc(`<<'EOF'`)조차 백슬래시 `\\`가 소실돼 정규식/이스케이프 든 JS가 깨짐 → 스크립트 파일은 Write 도구로 생성 후 `node <절대경로>`로 실행. node에 경로는 인자로 전달(`-e` 문자열 속 `/tmp`는 `C:\tmp`로 오인됨)
 ⚠️ 차트 재렌더 시 이전 인스턴스 `destroyCharts()` 필수 (누수 방지) — `render()` 첫 줄에서 항상 호출됨(분석 탭 이탈 시 해제 포함). `viewX()`는 HTML만 반환, 캔버스는 `drawX()`에서.
 
