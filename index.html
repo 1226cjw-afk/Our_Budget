@@ -1857,6 +1857,18 @@ function tyItems(member, kind){
   const srt = a => [...a].sort((x,y)=>String(x).localeCompare(String(y),"ko"));
   return {registered: srt(reg), unregistered: srt(extra)};
 }
+/* 올해 금액 집계 {값: 금액} — 소득=입금 카테고리별 / 지출=결제수단별.
+   연말정산 화면과 설정 탭이 같은 숫자를 보여야 하므로 공용 (역년 기준, 이동 제외). */
+function tyAmounts(member, kind){
+  const isCat=kind==="category", year=new Date().getFullYear(), amt={};
+  ROWS.forEach(r=>{
+    if(r.member!==member || isTransfer(r) || String(r.date).slice(0,4)!==String(year)) return;
+    if(isCat){ if(r.type==="입금") amt[r.category||""]=(amt[r.category||""]||0)+r.amount; }
+    else     { if(r.type==="지출") amt[r.method||""]  =(amt[r.method||""]  ||0)+r.amount; }
+  });
+  return amt;
+}
+
 /* 이름 규칙 추천 — 순서 중요 ('우리 체크카드'는 체크가 '카드'보다 먼저 걸려야 함) */
 function suggestKind(method){
   const s=String(method||"").replace(/\s/g,"");
@@ -2157,13 +2169,7 @@ function taxMapSection(member, kind, t){
   const bag  = (isCat?CTMAP:MTMAP)[member]||{};
   const opts = isCat ? TY_CAT_KINDS : TY_KINDS;
 
-  // 올해 금액 (소득=입금, 지출=지출)
-  const amt={};
-  ROWS.forEach(r=>{
-    if(r.member!==member || isTransfer(r) || String(r.date).slice(0,4)!==String(t.year)) return;
-    if(isCat){ if(r.type==="입금") amt[r.category||""]=(amt[r.category||""]||0)+r.amount; }
-    else     { if(r.type==="지출") amt[r.method||""]  =(amt[r.method||""]  ||0)+r.amount; }
-  });
+  const amt=tyAmounts(member, kind);   // 올해 금액 (소득=입금, 지출=지출)
   // 카테고리는 대부분 지출용이라 전부 늘어놓으면 소득과 무관한 행이 대다수가 된다
   // → 입금이 있었거나 이미 지정된 것만. (결제수단은 전부 분류 대상이라 그대로 둔다)
   if(isCat) registered = registered.filter(v=>(amt[v]||0)>0 || bag[v]);
@@ -2430,7 +2436,38 @@ function viewMaster(){
       h+=`<div class="m-item"><div style="display:flex;align-items:center;gap:10px;min-width:0">${ico}<span class="m-nm">${esc(v)}</span></div><div style="display:flex;align-items:center;gap:8px;flex-shrink:0">${sel}<button class="m-del" onclick="delMaster('${key}','${jsq(v)}')">삭제</button></div></div>`;
     });
     else h+=`<div class="m-empty">아래에서 항목을 추가해주세요.</div>`;
-    h+=`</div><div class="m-add"><input id="m_input_${key}" placeholder="${label} 추가" onkeydown="if(event.key==='Enter')addMaster('${key}')"><button onclick="addMaster('${key}')">추가</button></div></div>`;
+    h+=`</div>`;
+
+    /* 설정 목록엔 없는데 거래엔 쓰인 값 — 여기 안 띄우면 매핑할 방법이 연말정산 화면뿐이라
+       `제일은행카드`(1,140만)처럼 금액이 큰 항목이 설정에서 통째로 안 보인다.
+       master_data 행이 없으니 삭제 버튼은 없고, 매핑 셀렉트만 연말정산 화면과 동일하게 준다. */
+    if(tKind){
+      const unreg = tyItems(masterMember, tKind).unregistered;
+      if(unreg.length){
+        const tAmt = tyAmounts(masterMember, tKind);
+        h+=`<div class="tym-grp">⚠️ 설정 목록엔 없지만 거래에 쓰인 ${label}</div>
+          <div style="font-size:.72rem;color:var(--t3);margin:6px 0 4px;line-height:1.6">
+            아래에서 바로 구분을 지정할 수 있어요. 계속 쓸 항목이면 이름 그대로 위에 추가해두면 목록이 정리됩니다.</div>
+          <div class="m-list">`;
+        unreg.forEach(v=>{
+          const cur=tBag[v]||"", a=tAmt[v]||0;
+          h+=`<div class="m-item">
+            <div style="min-width:0">
+              <div style="display:flex;align-items:center;gap:6px;min-width:0">
+                <span class="m-nm" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${v?esc(v):'(미지정)'}</span>
+                <span class="tym-tag">미등록</span>
+              </div>
+              <div class="tym-a">올해 ${a?won(a):(tKind==="category"?'입금 없음':'사용 없음')}${!cur&&a?' · 집계 제외 중':''}</div>
+            </div>
+            <select class="tym-sel${cur?'':' un'}" onchange="setTaxMap('${jsq(masterMember)}','${tKind}','${jsq(v)}',this.value)">
+              <option value=""${cur?'':' selected'}>미분류</option>
+              ${Object.keys(tOpts).map(k=>`<option value="${k}"${cur===k?' selected':''}>${tOpts[k]}</option>`).join("")}
+            </select></div>`;
+        });
+        h+=`</div>`;
+      }
+    }
+    h+=`<div class="m-add"><input id="m_input_${key}" placeholder="${label} 추가" onkeydown="if(event.key==='Enter')addMaster('${key}')"><button onclick="addMaster('${key}')">추가</button></div></div>`;
   });
 
   return h+`</div>`;
