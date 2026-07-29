@@ -128,6 +128,7 @@ check ( (type='method'   and kind in ('credit','check','cash','none'))
 > - `type='category'` → **소득 매핑**: `income`=총급여에 산입 / `none`=제외. **총급여 판정은 오직 이 매핑만 따른다** (`SALARY_RE`는 추천 UI 전용 — 하드코딩 regex로 집계하지 말 것)
 >
 > ⚠️ 매핑 대상은 **설정(master_data)이 기준**, 거래엔 있는데 설정엔 없는 값은 `tyItems()`가 `unregistered`로 분리해 '미등록' 배지로 노출한다. 미등록을 빼면 `제일은행카드`(1,140만) 같은 실사용 값이 통째로 집계에서 빠진다.
+> **미등록 그룹은 연말정산 화면과 설정 탭(카테고리·결제수단 관리) 양쪽에 모두 띄운다** — 설정 탭이 `MASTER` 등록분만 순회하던 시절엔 미등록 항목을 설정에서 볼 수도 고칠 수도 없었다. 금액은 `tyAmounts()`로 공용 집계(두 화면이 다른 숫자를 보이면 안 됨). master_data 행이 없으므로 미등록 행엔 삭제 버튼을 두지 않는다.
 > ⚠️ 저장된 매핑만 집계에 반영한다. 추천값(`suggestKind`/`suggestCatKind`)은 UI 제안일 뿐 몰래 적용하지 않는다 — 근거 없이 숫자가 움직이면 안 되므로.
 > ⚠️ 일괄 분류(`applyTaxSuggest`)는 **올해 활동(금액>0)이 있는 항목만** 저장한다. 활동 없는 카테고리까지 `none`으로 저장하면 그게 '매핑됨'이 되어 소득 목록에 도로 나타난다.
 > ⚠️ 테이블이 없어도 앱은 정상 동작한다(`loadAll`이 error를 무시하고 `MTMAP/CTMAP={}`). 다만 `TAX_READY=false`가 되어 연말정산 화면은 계산 대신 **설치 안내(DDL + 복사 버튼)** 를 띄운다 — 예전엔 조용히 전 항목 0원으로 보여 버그로 오인됐다.
@@ -220,6 +221,7 @@ memberVal    // 입력 시트의 '누가' 선택값
 | `tyNeed(kind,C,D,salary)` | 공제 한도를 채우는 데 **앞으로 더 써야 할 금액**(수단별). 문턱·한도 경계에서 케이스가 갈려 닫힌 식은 틀리기 쉬움 → 단조 증가 함수 이분탐색으로 통일 |
 | `tyMarginal(C,D,salary)` | **다음 1원의 한계 공제율** + 사유 4상태: `limit`(한도소진) `below`(문턱미달) `same`(신용<문턱→둘 다 30%) `split`(신용>문턱→15% vs 30%) |
 | `tyItems(m,kind)` | 매핑 대상을 `{registered, unregistered}`로 분리 — 설정 등록분 / 거래에만 있는 값 |
+| `tyAmounts(m,kind)` | 올해 금액 `{값: 금액}` (역년·이동 제외) — 연말정산 화면·설정 탭 공용 |
 | `suggestKind(method) / suggestCatKind(cat)` | 이름 규칙 추천. `체크\|직불\|선불` → check를 `카드`보다 **먼저** 검사할 것 ('우리 체크카드'가 credit으로 새는 것 방지) |
 | `taxMapSection(m,kind,t)` | 소득·지출 매핑 UI 공용 빌더 (연말정산 화면용). 소득은 입금 있는 카테고리로 좁힘 |
 | `setTaxMap / applyTaxSuggest / saveTySalary / resetTySalary / copyTaxDDL` | 매핑 단건 저장(빈값=삭제) / 미분류 일괄 추천 / 총급여 수동값(0이면 삭제=추정 복귀) / 설치 SQL 복사 |
