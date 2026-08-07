@@ -4,3 +4,6 @@
 # 로컬 보조 스크립트 / 메모 (배포 산출물 아님)
 PROGRESS.md
 insert_master.ps1
+
+# 변경 전 데이터 덤프 — 리포에도 배포본에도 들어가면 안 됨
+_backup/
