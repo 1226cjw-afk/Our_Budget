@@ -1,0 +1,23 @@
+// Cloudflare Workers 배포 설정.
+// 지금까지는 Cloudflare가 빌드 때 자동 생성해(cloudflare/workers-autoconfig 브랜치에만 존재)
+// 리포에서 동작이 안 보였다. main에 고정해 공개 범위를 리포에서 읽을 수 있게 한다.
+//
+// ⚠️ directory 를 "." 로 두면 리포 루트가 통째로 서빙된다 — 실제로 /CLAUDE.md(키 포함)와
+//    /.git/config 까지 공개돼 있었다. .assetsignore 로 빼려 했으나 이 wrangler(4.120)에서는
+//    적용되지 않는다(전부 제외 '*' 를 넣어도 파일 수가 그대로였다).
+//    → 배포할 것만 public/ 에 두고 디렉터리 자체를 좁힌다. 빠뜨리면 앱이 404로 즉시 티가 나므로
+//      "조용히 새는" 실패 모드가 없다. 새 배포 파일은 public/ 안에 넣을 것.
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "ourbudget",
+  "compatibility_date": "2026-07-19",
+  "observability": {
+    "enabled": true
+  },
+  "assets": {
+    "directory": "./public"
+  },
+  "compatibility_flags": [
+    "nodejs_compat"
+  ]
+}

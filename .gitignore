@@ -7,3 +7,6 @@ insert_master.ps1
 
 # 변경 전 데이터 덤프 — 리포에도 배포본에도 들어가면 안 됨
 _backup/
+
+# wrangler 로컬 캐시
+.wrangler/
