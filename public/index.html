@@ -24,6 +24,9 @@
 <script>
 const SUPABASE_URL  = "https://hqyvkyflakhuvethrstw.supabase.co";
 const SUPABASE_ANON = "sb_publishable_phZGH7odPTBoB4z8FQF_4A_mO2ltQ6J";
+// 가족 공용 계정. 비밀번호는 앱에 저장하지 않는다 — 사용자가 입력해 Supabase가 검증한다.
+// 위 publishable key는 공개돼도 무해하다: RLS가 to authenticated라 세션 없이는 한 행도 안 온다.
+const FAMILY_EMAIL  = "1226cjw@gmail.com";
 </script>
 <style>
 /* Pretendard는 위 <head>의 <link>로 로드 (여기서 @import 하면 직렬·렌더블로킹) */
@@ -650,6 +653,31 @@ body.sheet-open{overflow:hidden}
 .picker-opt.on{color:var(--ac);background:var(--acg2)}
 .picker-opt:active{background:var(--bg3)}
 
+/* ── 로그인 게이트 ── */
+/* .picker-ov(고정 오버레이·백드롭)를 재사용하되 하단 시트가 아니라 중앙 카드.
+   ESC 핸들러에 authOv를 넣지 않았으므로 닫히지 않는다 — 닫을 수 있으면 게이트가 아니다 */
+.auth-ov{align-items:center;padding:20px}
+.auth-card{
+  width:100%;max-width:360px;background:var(--bg2);
+  border:1px solid var(--bd2);border-radius:22px;padding:28px 22px;text-align:center;
+  transform:translateY(10px);opacity:0;
+  transition:transform .28s ease,opacity .28s ease;
+}
+.picker-ov.open .auth-card{transform:translateY(0);opacity:1}
+.auth-ic{font-size:2rem;margin-bottom:10px}
+.auth-t{font-size:1.05rem;font-weight:900;color:var(--t1);margin-bottom:6px}
+.auth-d{font-size:.8rem;color:var(--t2);line-height:1.7;margin-bottom:18px}
+.auth-pw{
+  width:100%;padding:13px 15px;background:var(--bg3);border:1px solid var(--bd2);
+  border-radius:13px;color:var(--t1);font-size:.95rem;text-align:center;
+}
+.auth-msg{min-height:18px;margin-top:9px;font-size:.78rem;color:var(--r)}
+.auth-btn{
+  width:100%;margin-top:10px;padding:13px;background:var(--ac);color:#1a1206;
+  border:none;border-radius:13px;font-weight:800;font-size:.9rem;
+}
+.auth-btn:disabled{opacity:.6}
+
 /* ── 분석 패널 보강 ── */
 .p-t{display:flex;align-items:center;gap:8px}
 .p-t::before{content:'';width:3px;height:14px;border-radius:3px;background:linear-gradient(var(--ac),var(--ac2));flex-shrink:0}
@@ -796,6 +824,25 @@ body.sheet-open{overflow:hidden}
       선택하면 이 기기에서 <b style="color:var(--ac)">입력·필터의 기본 사용자</b>가 그 사람으로 맞춰집니다. (설정 탭에서 언제든 변경)
     </div>
     <div class="picker-opts" id="duOpts"></div>
+  </div>
+</div>
+
+<!-- 로그인 게이트. 세션이 없으면 여기서 막히고 데이터는 한 건도 불러오지 않는다.
+     숨김 username은 display:none이 아니라 화면 밖으로 — display:none이면 비밀번호 관리자가
+     폼을 인식하지 못해 '기기당 1회 입력'이 매번 입력으로 바뀐다 -->
+<div class="picker-ov auth-ov" id="authOv">
+  <div class="auth-card">
+    <div class="auth-ic">🔒</div>
+    <div class="auth-t">우리집 가계부</div>
+    <div class="auth-d">가족 공용 비밀번호를 입력해주세요.<br>이 기기에서는 한 번만 입력하면 됩니다.</div>
+    <form onsubmit="return doLogin(event)">
+      <input type="text" name="username" autocomplete="username" value="우리집 가계부" readonly
+             style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0" tabindex="-1" aria-hidden="true">
+      <input class="auth-pw" id="authPw" type="password" autocomplete="current-password"
+             placeholder="비밀번호" enterkeyhint="go" aria-label="가족 공용 비밀번호">
+      <div class="auth-msg" id="authMsg"></div>
+      <button class="auth-btn" id="authBtn" type="submit">로그인</button>
+    </form>
   </div>
 </div>
 
@@ -1046,10 +1093,27 @@ window.onload = async () => {
     loadError="라이브러리(CDN) 로드 실패 — 인터넷 연결을 확인한 뒤 새로고침해주세요";
     buildNav(); render(); return;
   }
-  sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON);
+  sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON, {
+    auth:{ persistSession:true, autoRefreshToken:true, storageKey:"ourbudget.auth" }
+  });
   try { DEVICE_USER = localStorage.getItem(DEVICE_USER_KEY) || null; } catch(e){ DEVICE_USER = null; }
   buildNav();
-  try { await loadAll(); } catch(e) { loadError=e.message; console.error("초기화 오류:",e); }
+  // 세션 만료·비밀번호 변경 시 로그인 화면으로 되돌린다.
+  // 이게 없으면 빨간 '데이터 연결 오류' 카드가 떠서 원인을 오도한다(RLS 문제로 오인)
+  sb.auth.onAuthStateChange(ev => { if(ev==="SIGNED_OUT") showAuth(); });
+  const { data:{ session } } = await sb.auth.getSession();
+  if(!session){ showAuth(); return; }   // 로그인 전엔 loadAll을 호출하지 않는다
+  await startApp();
+};
+
+// 세션이 확보된 뒤의 시작 절차 — 기존 onload 후반부 그대로
+async function startApp(){
+  hideAuth();
+  try { await loadAll(); }
+  catch(e) {
+    if(isAuthErr(e)){ showAuth(); return; }   // 인증 문제면 에러 카드가 아니라 로그인 화면
+    loadError=e.message; console.error("초기화 오류:",e);
+  }
   // 기기 사용자가 멤버에 없으면(삭제·개명) 무효화
   if(DEVICE_USER && !MEMBERS.includes(DEVICE_USER)){ DEVICE_USER=null; try{localStorage.removeItem(DEVICE_USER_KEY);}catch(e){} }
   // 기기 사용자가 정해져 있으면 각 필터의 기본값을 그 사람으로
@@ -1058,7 +1122,50 @@ window.onload = async () => {
   render();
   // 최초 1회: 이 기기의 사용자를 아직 안 정했으면 선택 모달
   if(!DEVICE_USER && MEMBERS.length && !loadError) openDeviceUser();
-};
+}
+
+/* ── 로그인 게이트 ── */
+// PostgREST는 세션 문제를 401/PGRST301로 알린다. 일반 로드 오류와 섞으면 안내가 틀어진다
+const isAuthErr = e => !!e && (e.status===401 || /JWT|jwt expired|PGRST301|Invalid Refresh Token/i.test(e.message||""));
+
+function showAuth(){
+  // 뒤 화면을 비운다 — 초기 스피너가 영원히 돌지 않게, 그리고 세션이 끊겼을 때
+  // 이미 렌더된 금액이 반투명 오버레이 뒤에 남아 보이지 않게
+  const m=$("main"); if(m) m.innerHTML="";
+  destroyCharts();
+  $("authOv").classList.add("open");
+  document.body.classList.add("sheet-open");
+  setTimeout(()=>{ const p=$("authPw"); if(p) p.focus(); }, 80);
+}
+function hideAuth(){
+  $("authOv").classList.remove("open");
+  document.body.classList.remove("sheet-open");
+}
+async function doLogin(ev){
+  if(ev) ev.preventDefault();
+  const pw = $("authPw").value;
+  if(!pw) return false;
+  const btn=$("authBtn"), msg=$("authMsg");
+  btn.disabled=true; btn.textContent="확인 중…"; msg.textContent="";
+  const { error } = await sb.auth.signInWithPassword({ email:FAMILY_EMAIL, password:pw });
+  btn.disabled=false; btn.textContent="로그인";
+  if(error){
+    // Supabase는 계정 존재 여부를 구분해 알려주지 않는다(의도된 동작) → 문구도 뭉뚱그린다
+    msg.textContent = /rate|Too many/i.test(error.message||"")
+      ? "시도가 너무 잦아요. 잠시 후 다시 해주세요."
+      : "비밀번호가 맞지 않아요.";
+    $("authPw").select();
+    return false;
+  }
+  $("authPw").value="";
+  await startApp();
+  return false;
+}
+async function doLogout(){
+  if(!confirm("로그아웃할까요?\n다시 보려면 비밀번호를 입력해야 해요.")) return;
+  await sb.auth.signOut();
+  location.reload();   // 전역 상태를 확실히 비운다
+}
 
 /* ── 데이터 로드 ── */
 // 거래내역 전량 수신. PostgREST에 `max-rows` 상한이 걸려 있으면 응답이 **에러 없이 잘려서** 오고,
@@ -1354,7 +1461,10 @@ function exportCSV(){
 async function refreshData(){
   const b=$("hdRefresh"); if(b)b.classList.add("rot");
   try{ await loadAll(); loadError=null; render(); toast("최신 데이터로 갱신했어요"); }
-  catch(e){ loadError=e.message; render(); }
+  catch(e){
+    if(isAuthErr(e)){ showAuth(); return; }   // 세션이 그새 끊겼으면 에러 카드가 아니라 로그인 화면
+    loadError=e.message; render();
+  }
   finally{ if(b)b.classList.remove("rot"); }
 }
 
@@ -1491,7 +1601,11 @@ function warnBanner(){
 
 async function retryLoad(){
   $("main").innerHTML='<div class="spin"></div>';
-  try{ await loadAll(); }catch(e){ loadError=e.message; }
+  try{ await loadAll(); loadError=null; }
+  catch(e){
+    if(isAuthErr(e)){ showAuth(); return; }   // 위와 같은 이유
+    loadError=e.message;
+  }
   render();
 }
 
@@ -2456,6 +2570,10 @@ function viewMaster(){
     <div class="seg">
       ${segBtns(MEMBERS, DEVICE_USER, "setDeviceUser")}
       <button class="${!DEVICE_USER?'on':''}" onclick="setDeviceUser('')">공용</button>
+    </div>
+    <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--bd);display:flex;justify-content:space-between;align-items:center">
+      <span style="font-size:.78rem;color:var(--t3)">가족 공용 계정으로 로그인됨</span>
+      <button class="m-del" onclick="doLogout()">로그아웃</button>
     </div>
   </div>`;
 
