@@ -2,7 +2,8 @@
 
 ## 프로젝트 개요
 
-가족 공용 가계부 웹앱. 단일 HTML 파일(`index.html`)로 배포, Cloudflare Workers로 서빙, Supabase를 백엔드로 사용.
+가족 공용 가계부 웹앱. 단일 HTML 파일(`public/index.html`)로 배포, Cloudflare Workers로 서빙, Supabase를 백엔드로 사용.
+**가족 공용 계정 1개로 로그인해야 데이터가 보인다** (2026-08-07~). 세션이 없으면 앱은 한 행도 불러오지 않고, DB 쪽도 anon을 차단한다.
 
 - **배포 URL**: `https://ourbudget.1226cjw.workers.dev/` (Cloudflare Workers)
 - **GitHub**: `https://github.com/1226cjw-afk/Our_Budget`
@@ -17,7 +18,7 @@
 remote: https://github.com/1226cjw-afk/Our_Budget.git
 branch: main
 ```
-작업 후 항상 `git add index.html && git commit && git push` — Cloudflare Workers가 GitHub `main`을 감지해 자동 배포됨.
+작업 후 항상 `git add public/index.html && git commit && git push` — Cloudflare Workers가 GitHub `main`을 감지해 자동 배포됨.
 > Cloudflare가 GitHub 연결 시 자동 생성한 `cloudflare/workers-autoconfig` 원격 브랜치가 연동 증거. 배포 설정은 저장소가 아니라 Cloudflare 대시보드에 있음.
 
 ### Supabase MCP (SQL 직접 실행)
@@ -26,10 +27,11 @@ branch: main
 - 바탕화면 "가계부 Claude" 바로가기 또는 PowerShell `budget` 명령으로 열면 자동 연결
 - **연결 안 될 경우**: Claude Code 완전 재시작
 - ⚠️ 토큰 만료 시 모든 `mcp__supabase__*`가 `Unauthorized`로 실패한다(재시작해도 안 됨).
-  이때 **anon key REST가 완전한 폴백** — RLS가 `using(true)`라 읽기·쓰기 모두 가능.
+  이때 REST가 폴백이지만 **anon key만으로는 더 이상 안 된다**(2026-08-07 RLS 축소로 전부 `401`).
+  공용 계정 로그인으로 access_token을 받아야 한다 → `scripts/lib_auth.js`의 `login()` 재사용,
+  비밀번호는 `BUDGET_PW` 환경변수로만 전달(`$env:BUDGET_PW='...'; node scripts\dump.js`).
   단 **DDL은 불가** → 테이블 생성은 사용자에게 SQL을 주고 대시보드에서 실행 요청.
-  `Invoke-RestMethod -Uri '<URL>/rest/v1/<table>?select=*' -Headers @{apikey=$k;Authorization="Bearer $k"}`
-  REST가 `404`면 그 테이블이 없는 것(JS 클라이언트에선 `PGRST205`).
+  REST가 `404`면 그 테이블이 없는 것(JS 클라이언트에선 `PGRST205`), `401`이면 **인증 문제**(테이블은 있을 수 있음) — 둘을 섞어 읽지 말 것.
 - BOM 회피: PowerShell 대신 node `https.get`으로 받아 파일로 쓰면 `U+FEFF` 제거가 아예 불필요
   - ⚠️ 단 **응답을 문자열로 누적하지 말 것**(`let b=''; r.on('data',d=>b+=d)`). 청크 경계에서 한글 UTF-8 3바이트가 쪼개져 `U+FFFD`로 깨진다.
     `const bufs=[]; r.on('data',d=>bufs.push(d))` → `Buffer.concat(bufs).toString('utf8')` (또는 `r.setEncoding('utf8')`)로 받을 것.
@@ -43,8 +45,13 @@ branch: main
 ```
 Project Ref : hqyvkyflakhuvethrstw
 URL         : https://hqyvkyflakhuvethrstw.supabase.co
-Anon Key    : sb_publishable_phZGH7odPTBoB4z8FQF_4A_mO2ltQ6J
+Anon Key    : sb_publishable_phZGH7odPTBoB4z8FQF_4A_mO2ltQ6J   # 공개돼도 무해 — RLS가 to authenticated
+공용 계정   : 1226cjw@gmail.com  (비밀번호는 코드·문서·커밋 어디에도 두지 않는다)
 ```
+⚠️ **이 Supabase 프로젝트는 휴양림 프로젝트와 공유한다.** `forests`·`rules`·`favorites`·`policy_snapshots`가
+그쪽 테이블이고 **anon으로 열려 있어야 정상**이다(그 앱엔 로그인이 없음).
+가계부 쪽 DB 작업은 대상 6개 테이블 + 뷰 3개로 범위를 명시해서 할 것 — `public` 스키마 전체를 훑는
+`do $$ ... pg_policies ...$$` 류를 조건 없이 돌리면 남의 앱을 잠근다.
 
 ---
 
@@ -52,13 +59,30 @@ Anon Key    : sb_publishable_phZGH7odPTBoB4z8FQF_4A_mO2ltQ6J
 
 ```
 Our_Budget/
-├── index.html           # 앱 전체 (HTML + CSS + JS 단일 파일) — 유일한 배포 산출물
+├── public/
+│   └── index.html       # 앱 전체 (HTML + CSS + JS 단일 파일) — 유일한 배포 산출물
+├── wrangler.jsonc       # 배포 설정. assets.directory = "./public" ← 배포 범위를 이 폴더로 한정
+├── scripts/             # 검증·운영 스크립트 (배포 안 됨)
+│   ├── lib_auth.js      #   공용 계정 로그인 헬퍼 (BUDGET_PW 환경변수)
+│   ├── dump.js          #   전량 덤프 → _backup/<날짜>.json
+│   ├── verify_rls.js    #   anon이 막혔는가 (외부에서)
+│   ├── verify_login.js  #   로그인 세션은 읽히는가 (반대편)
+│   ├── check_assets.js  #   배포본에 앱 외 파일이 서빙되는가
+│   ├── check_authgate.js#   로그인 게이트 배선이 소스에 들어갔는가
+│   ├── shot_auth.js     #   헤드리스 렌더 확인
+│   └── poll_deploy.js   #   배포 반영 폴링
+├── docs/superpowers/    # 스펙·플랜 (배포 안 됨)
 ├── backup_appscript.gs  # 구글 시트 백업용 GAS 코드 (참고용, 배포는 Apps Script에 수동 반영)
 └── CLAUDE.md            # 이 파일
-# (git 미추적 보조: PROGRESS.md, insert_master.ps1, .mcp.json — 커밋 대상 아님)
+# (git 미추적: PROGRESS.md, insert_master.ps1, .mcp.json, _backup/ — 커밋 대상 아님)
 ```
 
-CSS · JS 모두 `index.html` 안에 인라인. 외부 의존성 (모두 `<head>`에서 논블로킹 로드):
+⚠️ **배포되는 것은 `public/` 안뿐이다.** 예전엔 `assets.directory: "."`라 리포 루트가 통째로 서빙돼
+`/CLAUDE.md`(anon key·GAS URL 포함)와 `/.git/**`이 공개돼 있었다(2026-08-07 차단).
+새 파일을 추가할 땐 **공개돼도 되는가**를 먼저 판단하고, 앱 자산일 때만 `public/`에 둘 것.
+검증: `node scripts/check_assets.js` — 앱 외 경로가 404인지, `/`가 200인지 함께 본다.
+
+CSS · JS 모두 `public/index.html` 안에 인라인. 외부 의존성 (모두 `<head>`에서 논블로킹 로드):
 - `@supabase/supabase-js@2` · `chart.js` (CDN, `defer` — 파싱 비차단. 둘 다 `window.onload` 이후에만 사용하므로 안전)
 - Pretendard (jsdelivr `<link>`) / Noto Sans KR (Google Fonts) — ⚠️ Pretendard를 CSS `@import`로 되돌리면 직렬·렌더블로킹이 됨(금지)
 - `cdn.jsdelivr.net`·`fonts.gstatic.com` `preconnect`로 연결 핸드셰이크 선점
@@ -146,10 +170,30 @@ value text
 > - `ty_salary_<멤버명>` : 연말정산 총급여 수동값. 없으면 올해 '월급·급여·상여' 입금의 연환산 추정을 쓴다(수동값이 항상 우선)
 > - `cat_icon_<카테고리명>` : 카테고리 이모지 아이콘 (전 멤버 공통). master_data에 icon 컬럼을 두지 않은 이유: 신규 멤버는 카테고리가 DB 없이 DEFAULT_CATS fallback으로 돌아 행이 없을 수 있음
 
-### RLS 정책 (모든 테이블 공통)
+### RLS 정책 (가계부 6개 테이블 공통) — 2026-08-07 축소
 ```sql
-FOR ALL USING (true) WITH CHECK (true)
+create policy family_only on public.<table>
+  for all to authenticated using (true) with check (true);
+revoke all on public.<table> from anon;
 ```
+가족 안에서는 서로의 내역을 다 보므로 행 단위 분리는 하지 않는다. 경계는 **로그인 여부 하나**다.
+
+⚠️ **정책만 `to authenticated`로 바꾸고 `revoke`를 빠뜨리면 anon에게 `200 []`가 간다** — 빈 배열이라
+차단된 것처럼 보이지만 테이블 존재와 컬럼 구조는 그대로 새고, 정책이 하나만 느슨해져도 즉시 열린다.
+`scripts/verify_rls.js`가 이 경우를 성공으로 세지 않도록 명시적으로 실패 처리한다.
+
+⚠️ **뷰 3개(`v_account_balance`·`v_limit_usage`·`v_period_category`)도 함께 `revoke`했다.**
+`security_invoker=off` + owner=`postgres`라 **하위 테이블의 RLS를 우회**한다 —
+테이블만 잠갔을 때 anon이 이 뷰로 계좌 잔액과 카테고리별 지출을 그대로 읽는 것을 실측으로 확인했다(200).
+앱은 이 뷰를 쓰지 않는다(`public/index.html`에 참조 0건). **새 뷰를 만들면 `security_invoker=on`으로 만들 것.**
+
+검증 짝 (둘 다 통과해야 끝난 것):
+- `node scripts/verify_rls.js` — anon이 막혔는가 (기대: 가계부 401, 휴양림 200)
+- `$env:BUDGET_PW='...'; node scripts/verify_login.js` — 로그인 세션은 읽히는가 + 덤프 건수 대조
+- 비밀번호 없이 정책만 확인하려면 SQL에서 역할을 갈아끼운다(가장 빠른 판별):
+  `begin; set local role authenticated; select count(*) from transactions; rollback;`
+  ⚠️ 이때 **대조군을 반드시 같이 볼 것** — `postgres`는 RLS를 우회하므로 역할 전환이 실패해도 같은 숫자가 나온다.
+  `set local role anon`이 `42501 permission denied`를 내야 전환이 실효한 것이다.
 
 ---
 
@@ -157,6 +201,7 @@ FOR ALL USING (true) WITH CHECK (true)
 
 ### 전역 상태
 ```js
+FAMILY_EMAIL   // (상수) 가족 공용 계정 이메일. 비밀번호는 앱 어디에도 없다 — 사용자가 입력해 Supabase가 검증
 MEMBERS        // string[]  — DB에서 로드
 ROWS           // 거래내역 전체
 LIMITS         // { 멤버: { 카테고리: 금액 } }
@@ -186,11 +231,29 @@ memberVal    // 입력 시트의 '누가' 선택값
 ```
 
 ### 기기별 기본 사용자 (DEVICE_USER)
-인증 없이 기기마다 기본 사용자를 기억하는 방식. `localStorage["ourbudget.deviceUser"]`에 멤버명 저장.
+기기마다 기본 사용자를 기억하는 방식. `localStorage["ourbudget.deviceUser"]`에 멤버명 저장.
+> 로그인은 **가족 공용 계정 1개**라 '정우냐 지현이냐'를 인증이 구분해주지 않는다 —
+> 앱 안의 사람 구분은 예전 그대로 이 값이 맡는다. 로그인 게이트와 서로 대체 관계가 아니다.
 - 최초 접속 시 "이 기기는 누구의 폰인가요?" 모달 1회 표시
 - 설정 탭 → 📱 이 기기 사용자에서 변경 (멤버 / 공용)
 - 정해지면 입력 시트 '누가', `memberFilter`·`limitMember`·`masterMember` 기본값이 그 사람으로 맞춰짐 (`defMember()`)
 - '공용' 선택 시 기존처럼 `MEMBERS[0]` 기본 + `memberFilter='전체'`
+
+### 로그인 게이트 (2026-08-07)
+Supabase Auth 공유 계정 1개. Worker 프록시도, 자체 인증 코드도 만들지 않았다 —
+`supabase-js`가 세션·토큰 갱신을, Supabase가 레이트리밋을 처리한다. `sb.from(...)` 호출부는 그대로다.
+
+- **시작 흐름**: `window.onload`가 `getSession()`으로 분기 → 세션 없으면 `showAuth()`하고 **끝**(`loadAll()`을 호출하지 않는다),
+  있으면 `startApp()`이 기존 초기화(로드·렌더·기기사용자 모달)를 그대로 수행
+- 세션은 `localStorage["ourbudget.auth"]`에 유지(`persistSession`·`autoRefreshToken`) → 한 번 로그인하면 다시 안 묻는다
+- `onAuthStateChange`의 `SIGNED_OUT`에서 `showAuth()`로 복귀. **이게 없으면 세션 만료 시 빨간 '데이터 연결 오류' 카드가 떠서
+  원인을 RLS 문제로 오도한다** — 인증 실패는 로드 실패와 다른 화면이어야 한다. 같은 이유로 `loadAll` 실패는 `isAuthErr(e)`로 갈라 처리
+- 로그인 실패 문구는 뭉뚱그린다("비밀번호가 맞지 않아요"). Supabase가 계정 존재 여부를 구분해 알려주지 않는 것과 같은 이유
+- 비밀번호 변경은 **설정 탭 안에서** 가능(`openPwChange`) — 대시보드에 갈 일이 없다.
+  ⚠️ `updateUser` 전에 **현재 비밀번호를 `signInWithPassword`로 다시 확인**한다.
+  세션만으로 바꾸게 두면 폰을 주운 사람이 비밀번호를 바꿔 **가족 전체를 잠가버린다** — 데이터 열람보다 나쁜 결과다. 이 확인을 제거하지 말 것
+- 숨김 username input은 `display:none`이 아니라 화면 밖으로 보낸다 — `display:none`이면 비밀번호 관리자가 폼을 인식하지 못한다
+- 배선 검증: `node scripts/check_authgate.js` (소스에 조각이 실제로 들어갔는지 정규식 대조)
 
 ### 결제 주기
 멤버별 시작일 설정 (`BILLING_STARTS`, 기본 매월 25일~익월 24일). `billingPeriod(member, ref)`가 해당 멤버 주기 계산 — 종료일은 '다음 시작일 하루 전'으로 산출 (시작일=1이면 같은 달 말일. 과거엔 1일 설정 시 두 달짜리 주기가 되던 버그 → 2026-07 수정, 회귀 금지).
@@ -199,6 +262,11 @@ memberVal    // 입력 시트의 '누가' 선택값
 ### 주요 함수
 | 함수 | 역할 |
 |------|------|
+| `startApp()` | 세션 확보 뒤의 시작 절차 — `loadAll`·`renderMemberSeg`·`render`·기기사용자 모달. `onload`와 `doLogin` 양쪽에서 호출 |
+| `showAuth() / hideAuth()` | 로그인 오버레이 토글. `.picker-ov`를 재사용하되 ESC 핸들러에 넣지 않아 **닫히지 않는다** |
+| `doLogin(ev) / doLogout()` | 공용 계정 로그인 / 로그아웃(`signOut` 후 `location.reload()`로 전역 상태를 확실히 비움) |
+| `openPwChange() / doPwChange(ev)` | 설정 탭 비밀번호 변경. **현재 비밀번호를 재확인한 뒤** `updateUser` (위 '로그인 게이트' 절의 이유) |
+| `isAuthErr(e)` | 인증 실패를 일반 로드 오류와 구분 (`401`·`JWT`·`PGRST301`·`Invalid Refresh Token`) — 화면 분기의 기준 |
 | `loadAll()` | members·transactions·category_limits·master_data·app_settings 병렬 로드. 끝에서 `rebuildCatOrder()` |
 | `fetchTransactions()` | 거래 전량 수신 — `count:"exact"`의 전체 행 수와 실수신 건수를 대조해 모자라면 `.range()`로 이어 받는다. PostgREST `max-rows` 상한에 걸리면 **에러 없이 잘려** 모든 집계가 조용히 틀어지므로 (490행/2026-08 기준 미도달, 연 ~650건 페이스) |
 | `warnBanner()` | 부분 로드 실패(`loadWarn`) 배너 — `render()`가 모든 탭 본문 앞에 붙임 |
@@ -252,7 +320,7 @@ memberVal    // 입력 시트의 '누가' 선택값
 | 한도 (limit) | 멤버별 한도 설정 및 진행률 (warn 임계값=WARN_TH) + 상단 '전체 한도 요약' 카드 |
 | 분석 (analysis) | 상단 세그먼트 2개(`anView`) — **지출분석**: 최근 AN_PERIODS주기 차트·반복지출·요약 / **연말정산**: 아래 참조 |
 | 계좌 (acct) | 계좌별 잔액(이동 포함), 총수입·지출(이동 제외), 멤버 필터 |
-| 설정 (master) | 멤버·기기사용자·앱설정(임계값·주기수)·CSV 내보내기·결제주기·카테고리(아이콘 포함)·결제수단·계좌 관리 |
+| 설정 (master) | 멤버·기기사용자(+비밀번호 변경·로그아웃)·앱설정(임계값·주기수)·CSV 내보내기·결제주기·카테고리(아이콘 포함)·결제수단·계좌 관리 |
 
 > 헤더 우측: 기기사용자 칩(누르면 openDeviceUser) + 새로고침(refreshData). 칩의 이름 텍스트는 `#hdUserName` span을 render()에서 갱신 (칩 innerHTML을 통째로 덮으면 SVG 아이콘이 사라지므로 금지).
 
@@ -327,24 +395,31 @@ Supabase MCP가 연결되어 있으면:
 
 ### 배포
 ```bash
-git add index.html
+git add public/index.html
 git commit -m "..."
 git push
 # Cloudflare Workers 자동 배포 (1~2분 소요)
+node scripts/poll_deploy.js   # 반영 확인 (콘텐츠 마커로 판정)
 ```
 > GAS 백업 코드를 고쳤다면 `backup_appscript.gs`도 함께 커밋. (단 실제 반영은 Apps Script "새 버전" 재배포 필요)
 
+⚠️ **배포 도착 판정을 상태코드로 하지 말 것.** 옛 버전도 `200`을 주므로 `200`은 "떠 있다"는 뜻일 뿐
+"내 변경이 반영됐다"가 아니다 → 새로 넣은 문자열을 마커로 잡아 본문에서 찾는다(`poll_deploy.js`가 그렇게 한다).
+
 ### JS 검증 (테스트 프레임워크 없음)
 브라우저 없이 인라인 JS를 확인하는 법: 마지막 `<script>` 블록을 추출 → `new Function`/`Module._compile`에 stub(supabase·Chart·document·localStorage) 주입해 파싱/순수함수 단위테스트. `node`로 실행.
-- 빠른 문법 검사(복붙용): `node -e "const fs=require('fs');const c=[...fs.readFileSync('index.html','utf8').matchAll(/<script>([\s\S]*?)<\/script>/g)].pop()[1];try{new Function(c);console.log('JS OK')}catch(e){console.error(e.message);process.exit(1)}"`
-- 순수함수 단위테스트: 헬퍼를 **손으로 복사하지 말고** index.html에서 정규식으로 뽑아 `new Function(code+'return {…}')`으로 실행 — 복사본은 원본이 바뀌어도 옛 코드를 검증한다. 상태 매트릭스(경계값 9종)로 불변식을 돌리는 게 값 1~2개 대조보다 훨씬 잘 잡힌다(`tyNeed` 검증에 사용)
+- 빠른 문법 검사(복붙용): `node -e "const fs=require('fs');const c=[...fs.readFileSync('public/index.html','utf8').matchAll(/<script>([\s\S]*?)<\/script>/g)].pop()[1];try{new Function(c);console.log('JS OK')}catch(e){console.error(e.message);process.exit(1)}"`
+- 순수함수 단위테스트: 헬퍼를 **손으로 복사하지 말고** `public/index.html`에서 정규식으로 뽑아 `new Function(code+'return {…}')`으로 실행 — 복사본은 원본이 바뀌어도 옛 코드를 검증한다. 상태 매트릭스(경계값 9종)로 불변식을 돌리는 게 값 1~2개 대조보다 훨씬 잘 잡힌다(`tyNeed` 검증에 사용)
 - **실 DB 검증**: 복사본에 mock 없이 `localStorage` 기기사용자 + `goTab()`만 주입하면 실제 Supabase로 렌더된다. 목은 "숫자가 나온다"까지만 보장 — 실제 매핑·데이터로 띄워야 결론이 맞는지 알 수 있다
+  - ⚠️ **2026-08-07 이후로는 세션도 필요하다.** 로그인 게이트가 세션 없으면 `loadAll()`을 아예 호출하지 않으므로,
+    빈 프로필로 띄우면 로그인 카드만 나온다(빈 화면이 아니라 **로그인 화면**으로 보이는 게 정상). 실데이터로 띄우려면
+    `sb.auth.signInWithPassword`를 `<head>` 인라인으로 한 번 태우거나 `localStorage["ourbudget.auth"]`에 세션을 심을 것
   - ⚠️ **이 모드에서 `dispatchEvent`로 onchange/onclick을 발화시키면 실서비스 DB에 그대로 쓴다** (테스트 DB 없음 — 가족 실데이터다). 배선만 확인할 땐 load 리스너에서 `window.setTaxMap=(...a)=>calls.push(a)`처럼 **변경 함수를 스텁으로 덮은 뒤** 이벤트를 쏘고 인자만 회수할 것 (설정 탭 미등록 8행 셀렉트를 이렇게 무해하게 검증 — 인자 이스케이프·기존값 선택까지 확인)
 - **화면 숫자가 의심스러우면**: REST로 실데이터 스냅샷을 받아 순수함수를 복사한 재현 스크립트로 대조. 이번에 시나리오 비교의 잘못된 사유 문구와, 공제액을 좌우하던 '제외' 금액을 이 방법으로 발견
   - 이 대조는 **"앱이 데이터를 전량 받았다"의 증명**도 된다 — 렌더된 잔액·총수입·총지출이 REST 490행 직접 계산과 자릿수까지 일치하면 잘림이 없다는 뜻(`fetchTransactions` 검증에 사용). 건수만 세는 것보다 강한 증거
 - **차트가 실제로 그려졌는지**: 스크린샷을 눈으로 보는 대신 `getImageData`의 알파 채널에 0 아닌 픽셀이 있는지 세어 `document.title`에 `"CANVAS 3/3"`처럼 찍고 `--dump-dom | grep '<title>'`로 회수. 빈 캔버스가 배경색과 같아 '그려진 것처럼' 보이는 경우를 잡는다
 - 헤드리스 chrome은 **Bash 툴로 실행**할 것. PowerShell에서 `& $chrome ... 2>$null`로 돌리면 파일은 생성되는데 출력이 사라져 실패로 오인함
-- 차트·UI 시각 확인(헤드리스 Chrome): index.html 복사본에 mock(`window.supabase.createClient`→체이너블 thenable `{data,error}`)+`localStorage` 기기사용자 주입, `goTab()`로 탭 강제 후 `chrome --headless=new --screenshot=<절대경로>.png --force-device-scale-factor=2 --virtual-time-budget=8000`(탭 강제 setTimeout이 돌 시간 확보 — 없으면 탭 전환 전에 찍힘). `--screenshot`은 절대경로 필수(상대경로면 "액세스 거부(0x5)"로 파일 미생성). Chrome 경로: `C:\Program Files\Google\Chrome\Application\chrome.exe`
+- 차트·UI 시각 확인(헤드리스 Chrome): `public/index.html` 복사본에 mock(`window.supabase.createClient`→체이너블 thenable `{data,error}`)+`localStorage` 기기사용자 주입, `goTab()`로 탭 강제 후 `chrome --headless=new --screenshot=<절대경로>.png --force-device-scale-factor=2 --virtual-time-budget=8000`(탭 강제 setTimeout이 돌 시간 확보 — 없으면 탭 전환 전에 찍힘). `--screenshot`은 절대경로 필수(상대경로면 "액세스 거부(0x5)"로 파일 미생성). Chrome 경로: `C:\Program Files\Google\Chrome\Application\chrome.exe`
   - ⚠️ **mock은 `window.addEventListener('load', …)` 안에서 주입할 것.** supabase CDN이 `<script defer>`라 인라인 mock보다 **나중에** 실행돼 `window.supabase`를 덮어쓴다 → CDN 태그 뒤에 인라인으로 두면 mock이 무시되고 조용히 실서비스 DB를 조회한다(스크린샷은 그럴듯하게 나와서 알아채기 어려움). 앱의 `window.onload` 대입보다 먼저 등록되므로 load 리스너가 먼저 돈다
   - ⚠️ **`--window-size`가 뷰포트 *폭*엔 안 먹는다**(clientWidth가 485로 고정). 그 폭으로 스크린샷을 찍으면 오른쪽이 잘려 나가 오버플로 버그처럼 보인다. 특정 폰 폭 검증은 `<iframe src="mock.html" width="360">`로 감싼 래퍼를 찍을 것
   - **높이는 먹는다** → 긴 화면 한 장에 담기: 래퍼에 `<iframe width="360" height="1500">` + `--window-size=400,1520`. 스크린샷은 뷰포트만 찍히므로 window 높이를 늘리는 게 유일한 방법(`--screenshot`엔 full-page 옵션 없음)
@@ -371,8 +446,21 @@ git push
 - 입력 시트(`#overlay`) 열릴 때 `body.sheet-open{overflow:hidden}`으로 배경 스크롤 잠금 + `.overlay`에 `overscroll-behavior:contain` 필수 (안 하면 시트 스크롤이 뒤 내역 리스트로 전파돼 비침). `openSheet()`·`editEntry()`에서 클래스 추가, `closeSheet()`에서 제거
 
 ### 보안
-- `.mcp.json`엔 Supabase 연결정보 포함 → 커밋 금지. `.gitignore`에 `.mcp.json`·`PROGRESS.md`·`insert_master.ps1` 등록됨
-- 추적 파일은 `index.html`·`CLAUDE.md`·`backup_appscript.gs`·`.gitignore` 4개뿐
+경계는 **두 겹**이고, 둘 다 있어야 한다:
+1. **앱** — 세션이 없으면 `loadAll()`을 호출하지 않는다 (위 '로그인 게이트')
+2. **DB** — RLS가 `to authenticated` + anon `revoke`. 앱을 우회해 REST를 직접 때려도 `401` (위 'RLS 정책')
+
+⚠️ 1번만 있으면 **아무 의미 없다**. 배포된 HTML에 anon key가 들어 있으므로 그 키로 REST를 직접 호출하면
+로그인 화면을 통째로 건너뛴다. 게이트는 UI 편의고, 실제 차단은 2번이다.
+
+- `.mcp.json`엔 Supabase 연결정보 포함 → 커밋 금지. `.gitignore`에 `.mcp.json`·`PROGRESS.md`·`insert_master.ps1`·`_backup/` 등록됨
+- **비밀번호는 코드·문서·커밋·대화 어디에도 남기지 않는다.** 스크립트에 필요하면 `BUDGET_PW` 환경변수로만 (`scripts/lib_auth.js`)
+- 추적 파일: `public/index.html`·`wrangler.jsonc`·`scripts/*.js`·`docs/**`·`CLAUDE.md`·`backup_appscript.gs`·`.gitignore`.
+  ⚠️ **리포에 넣는 것과 배포되는 것은 다르다** — 배포는 `public/`만. 리포는 public이므로 새 파일은 *공개 저장소에 올라가도 되는가*를 따로 판단할 것
+- **잔여 위험(미해결)**: 구글 시트 백업 엔드포인트. `doPost`가 공유 시크릿(`BACKUP_SECRET`)을 검사하긴 하는데,
+  그 값이 `backup_appscript.gs`(public 리포)와 배포된 `public/index.html:941` 양쪽에 평문으로 있다 →
+  **사실상 무인증**이다. `/exec` URL과 시크릿을 아는 사람은 시트에 행을 넣거나(`upsert`), uuid를 알면 지울 수 있다(`delete`).
+  읽기 경로는 없다. 브라우저에서 호출하는 구조상 시크릿을 숨길 방법이 없으므로, 고치려면 GAS를 앱 세션 검증으로 바꿔야 한다
 - **사용자 입력 렌더링 규칙**: innerHTML에 들어가는 모든 사용자 문자열(메모·항목명·멤버명·계좌명)은 `esc()`, `onclick="fn('…')"` 인자는 `jsq()` 필수. 안 지키면 따옴표·`<` 든 입력에 UI가 깨짐 (2026-07 전면 적용됨)
 
 ---
