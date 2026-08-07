@@ -69,6 +69,7 @@ Our_Budget/
 │   ├── verify_login.js  #   로그인 세션은 읽히는가 (반대편)
 │   ├── check_assets.js  #   배포본에 앱 외 파일이 서빙되는가
 │   ├── check_authgate.js#   로그인 게이트 배선이 소스에 들어갔는가
+│   ├── check_live.js    #   배포본이 커밋한 것과 동일한가 (sha256)
 │   ├── shot_auth.js     #   헤드리스 렌더 확인
 │   └── poll_deploy.js   #   배포 반영 폴링
 ├── docs/superpowers/    # 스펙·플랜 (배포 안 됨)
@@ -182,10 +183,13 @@ revoke all on public.<table> from anon;
 차단된 것처럼 보이지만 테이블 존재와 컬럼 구조는 그대로 새고, 정책이 하나만 느슨해져도 즉시 열린다.
 `scripts/verify_rls.js`가 이 경우를 성공으로 세지 않도록 명시적으로 실패 처리한다.
 
-⚠️ **뷰 3개(`v_account_balance`·`v_limit_usage`·`v_period_category`)도 함께 `revoke`했다.**
-`security_invoker=off` + owner=`postgres`라 **하위 테이블의 RLS를 우회**한다 —
+⚠️ **뷰 3개(`v_account_balance`·`v_limit_usage`·`v_period_category`)는 두 겹으로 막았다.**
+원래 `security_invoker=off` + owner=`postgres`라 **하위 테이블의 RLS를 우회**했다 —
 테이블만 잠갔을 때 anon이 이 뷰로 계좌 잔액과 카테고리별 지출을 그대로 읽는 것을 실측으로 확인했다(200).
-앱은 이 뷰를 쓰지 않는다(`public/index.html`에 참조 0건). **새 뷰를 만들면 `security_invoker=on`으로 만들 것.**
+① anon `revoke` ② `security_invoker=on`.
+②를 추가한 이유: ①만으로는 **"권한을 회수한 상태를 계속 유지해야" 성립하는 방어**다.
+누가 나중에 `grant`를 되돌리면 조용히 다시 열린다. `security_invoker=on`이면 호출자 권한으로 평가되므로 그 경우에도 RLS가 막는다.
+앱은 이 뷰를 쓰지 않는다(`public/index.html`에 참조 0건). **새 뷰도 `security_invoker=on`으로 만들 것** — Supabase 어드바이저가 ERROR로 잡는다.
 
 검증 짝 (둘 다 통과해야 끝난 것):
 - `node scripts/verify_rls.js` — anon이 막혔는가 (기대: 가계부 401, 휴양림 200)
@@ -399,12 +403,16 @@ git add public/index.html
 git commit -m "..."
 git push
 # Cloudflare Workers 자동 배포 (1~2분 소요)
-node scripts/poll_deploy.js   # 반영 확인 (콘텐츠 마커로 판정)
+node scripts/poll_deploy.js "<이번 변경에만 있는 문자열>"   # 반영을 기다림
+node scripts/check_live.js                              # 반영 확인 (배포본 sha256 == origin/main blob)
 ```
 > GAS 백업 코드를 고쳤다면 `backup_appscript.gs`도 함께 커밋. (단 실제 반영은 Apps Script "새 버전" 재배포 필요)
 
 ⚠️ **배포 도착 판정을 상태코드로 하지 말 것.** 옛 버전도 `200`을 주므로 `200`은 "떠 있다"는 뜻일 뿐
-"내 변경이 반영됐다"가 아니다 → 새로 넣은 문자열을 마커로 잡아 본문에서 찾는다(`poll_deploy.js`가 그렇게 한다).
+"내 변경이 반영됐다"가 아니다. 마커 검사(`poll_deploy.js`)가 최소선이고, 확정 판정은 `check_live.js`의 해시 비교다 —
+마커는 "그 문자열이 있다"까지만 보장하지만 해시는 한 바이트만 달라도 잡는다.
+⚠️ 비교 대상은 **작업 사본이 아니라 커밋된 blob**(`git show origin/main:public/index.html`).
+Windows 작업 사본은 CRLF, 리포 blob은 LF라 작업 사본과 비교하면 항상 불일치가 난다.
 
 ### JS 검증 (테스트 프레임워크 없음)
 브라우저 없이 인라인 JS를 확인하는 법: 마지막 `<script>` 블록을 추출 → `new Function`/`Module._compile`에 stub(supabase·Chart·document·localStorage) 주입해 파싱/순수함수 단위테스트. `node`로 실행.

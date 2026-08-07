@@ -10,6 +10,10 @@ const MUST_BLOCK = [
   "/wrangler.jsonc", "/.git/config", "/.git/HEAD", "/.git/index", "/.git/logs/HEAD",
   "/docs/superpowers/specs/2026-08-07-auth-gate-design.md",
   "/scripts/dump.js", "/public/index.html",   // public/ 은 루트로 매핑되므로 이 경로도 404여야 정상
+  // 아래 4개는 git 미추적이라 애초에 빌드에 안 들어간다(=지금도 404).
+  // 그래도 검사하는 이유: 실수로 커밋되는 순간 배포되는 경로들이고, 담긴 게 제일 치명적이기 때문.
+  // .mcp.json = Supabase 관리자 토큰(sbp_, RLS를 통째로 우회) / PROGRESS.md = 옛 토큰·데이터 상세
+  "/.mcp.json", "/PROGRESS.md", "/insert_master.ps1", "/_backup/2026-08-07.json",
 ];
 const MUST_SERVE = ["/"];
 
