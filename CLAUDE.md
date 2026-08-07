@@ -170,6 +170,7 @@ MTMAP          // { 멤버: { 결제수단: kind } } — tax_map(type='method')
 CTMAP          // { 멤버: { 카테고리: kind } } — tax_map(type='category'), 소득 판정
 TAX_READY      // tax_map 테이블 존재 여부. false면 연말정산이 설치 안내를 띄움
 TY_SALARY      // { 멤버: 총급여 수동값 } — app_settings의 ty_salary_*
+loadWarn       // string[] 부분 로드 실패 테이블 이름 — warnBanner()가 모든 탭 상단에 노출
 
 tab          // 현재 탭: list | cat | limit | analysis | acct | master
 scope        // 'current' | 'all'
@@ -198,7 +199,11 @@ memberVal    // 입력 시트의 '누가' 선택값
 ### 주요 함수
 | 함수 | 역할 |
 |------|------|
-| `loadAll()` | members·transactions·category_limits·master_data·app_settings 병렬 로드 |
+| `loadAll()` | members·transactions·category_limits·master_data·app_settings 병렬 로드. 끝에서 `rebuildCatOrder()` |
+| `fetchTransactions()` | 거래 전량 수신 — `count:"exact"`의 전체 행 수와 실수신 건수를 대조해 모자라면 `.range()`로 이어 받는다. PostgREST `max-rows` 상한에 걸리면 **에러 없이 잘려** 모든 집계가 조용히 틀어지므로 (490행/2026-08 기준 미도달, 연 ~650건 페이스) |
+| `warnBanner()` | 부분 로드 실패(`loadWarn`) 배너 — `render()`가 모든 탭 본문 앞에 붙임 |
+| `orphanTransfers() / orphanBanner()` | 짝 없는 계좌간 이동 leg 탐지 / 계좌 탭 경고 배너. 짝 판정 기준은 **`delEntry`의 mate 탐색과 동일하게 유지**(같은 멤버·날짜·금액의 반대 type) |
+| `rebuildCatOrder()` | 카테고리 색 배정 순서를 ROWS+MASTER 합집합의 로케일 정렬로 고정 (`loadAll` 끝에서 1회) |
 | `refreshData()` | 헤더 ↻ 버튼 — 수동 재로드 (다른 기기 입력 동기화) |
 | `setSearch(v)` | 내역 검색 — 200ms 디바운스 후 render, searchBox 포커스·커서 복원 |
 | `setDeviceUser(name) / openDeviceUser()` | 기기 기본 사용자 설정·선택 모달 (헤더 👤 칩에서도 열림) |
@@ -211,7 +216,7 @@ memberVal    // 입력 시트의 '누가' 선택값
 | `saveTransfer(amount)` | 계좌간 이동 — 출금계좌 지출 + 입금계좌 입금 2건을 한 번에 insert (category='계좌간 이동') |
 | `saveLimit(member, cat)` | 멤버별 한도 upsert — **빈값/0이면 해당 행 delete**(한도 해제) |
 | `editEntry(id)` | 수정 시트 열기 — id로 ROWS 조회. ⚠️행 JSON을 onclick에 인라인 금지(메모 따옴표에 깨짐) |
-| `addMember() / delMember()` | 멤버 DB CRUD |
+| `addMember() / delMember()` | 멤버 DB CRUD. **거래가 1건이라도 있으면 delMember는 차단** — `transactions.member` FK가 cascade라 거래가 통째로 사라지는데 구글 시트 백업엔 그 삭제가 전파되지 않아 복구 근거가 없다 |
 | `addMaster(key) / delMaster(key, val)` | 카테고리·결제수단·계좌 CRUD |
 | `refreshCatList()` | 입력 시트 select 옵션 갱신 |
 | `openPicker(sel,title) / pickOptIdx(i) / updateSelBtn(sel)` | 커스텀 하단 시트 피커 열기·선택·버튼 표시 갱신 |
@@ -226,7 +231,7 @@ memberVal    // 입력 시트의 '누가' 선택값
 | `taxMapSection(m,kind,t)` | 소득·지출 매핑 UI 공용 빌더 (연말정산 화면용). 소득은 입금 있는 카테고리로 좁힘 |
 | `setTaxMap / applyTaxSuggest / saveTySalary / resetTySalary / copyTaxDDL` | 매핑 단건 저장(빈값=삭제) / 미분류 일괄 추천 / 총급여 수동값(0이면 삭제=추정 복귀) / 설치 SQL 복사 |
 | `drawAnalysisCharts() / destroyCharts()` | 도넛 + 주기별 스택막대(지출=카테고리·왼축, 수입=오른 보조축) + 추이 라인 / 인스턴스 일괄 파괴 |
-| `expOf(rs) / incOf(rs) / catColor(c)` | 지출·수입 합계 헬퍼(이동 제외), 카테고리 색 — **처음 등장 순서대로 팔레트 배정**(`_catOrder`). ⚠️이름해시 금지: 한글 카테고리가 한 칸에 몰려 전부 초록으로 보였음 |
+| `expOf(rs) / incOf(rs) / catColor(c)` | 지출·수입 합계 헬퍼(이동 제외), 카테고리 색 — `_catOrder` 인덱스로 팔레트 배정. ⚠️**이름해시 금지**(한글이 한 칸에 몰려 전부 초록), ⚠️**'처음 등장 순서'로도 되돌리지 말 것**(탭 여는 순서·멤버 필터에 따라 기기·세션마다 색이 달라짐) → `rebuildCatOrder()`의 로케일 정렬이 유일한 기준 |
 | `isTransfer(r)` | 계좌간 이동 거래 판별(`r.category===TRANSFER_CAT`) — 통계 제외 필터에 공통 사용 |
 | `$(id) / parseDate(s) / todayStr() / amtVal(id)` | getElementById 축약 / 날짜 파싱(YYYY-MM-DD는 정오로 — 타임존 경계 안전) / 오늘 날짜 문자열 / 콤마 금액 input→숫자 |
 | `comma(n) / dbErr(res,pre?)` | 콤마 숫자 포맷 / Supabase 응답 에러 공통 처리(에러면 토스트 후 true — `if(dbErr(res))return;` 패턴) |
@@ -237,7 +242,7 @@ memberVal    // 입력 시트의 '누가' 선택값
 | `drillTo(q)` | 분류 카드 클릭 → 내역 탭 이동 + 검색어 세팅 (주기·멤버 필터 유지, '미지정' 카드는 비활성) |
 | `exportCSV()` | 설정 탭 — 전체 거래 CSV 다운로드 (UTF-8 BOM, 콤마·따옴표·개행 인용 처리) |
 | `ensureOpt(selId,val)` | 수정 시트에서 마스터에 없는 기존 값을 select에 임시 옵션으로 추가 — 삭제된 카테고리·계좌가 첫 옵션으로 바뀌는 것 방지 |
-| `render()` | 현재 탭 전체 재렌더 |
+| `render()` | 현재 탭 전체 재렌더. 본문을 `body` 변수에 모아 `warnBanner()+body`로 **한 번에** 주입하고, 캔버스 그리기는 `after`로 미뤄 innerHTML 이후 실행 — 탭별로 `m.innerHTML=`을 흩어 쓰면 공용 배너를 붙일 자리가 사라진다 |
 
 ### 탭 구성
 | 탭 | 설명 |
@@ -316,6 +321,9 @@ Supabase MCP가 연결되어 있으면:
 (정책을 빠뜨리면 읽기는 되고 저장만 조용히 실패한다).
 앱은 새 테이블이 없어도 죽지 않게 짜되(`if(!res.error)`), **없는 상태를 화면에 명시**할 것 —
 이번에 조용히 전 항목 0원으로 보여 사용자가 버그로 오인했다.
+표면화 수단 2종: 테이블 단위 기능이면 `TAX_READY`처럼 전용 플래그로 화면을 갈아끼우고,
+로드 실패가 폴백값으로 흡수되는 경우엔 `loadWarn.push("…")` → `warnBanner()`.
+**폴백이 사용자 데이터와 구별되지 않는 게 진짜 위험** — 빈 한도·`DEFAULT_CATS`를 보고 다시 저장하면 원본을 덮어쓴다.
 
 ### 배포
 ```bash
@@ -333,6 +341,8 @@ git push
 - **실 DB 검증**: 복사본에 mock 없이 `localStorage` 기기사용자 + `goTab()`만 주입하면 실제 Supabase로 렌더된다. 목은 "숫자가 나온다"까지만 보장 — 실제 매핑·데이터로 띄워야 결론이 맞는지 알 수 있다
   - ⚠️ **이 모드에서 `dispatchEvent`로 onchange/onclick을 발화시키면 실서비스 DB에 그대로 쓴다** (테스트 DB 없음 — 가족 실데이터다). 배선만 확인할 땐 load 리스너에서 `window.setTaxMap=(...a)=>calls.push(a)`처럼 **변경 함수를 스텁으로 덮은 뒤** 이벤트를 쏘고 인자만 회수할 것 (설정 탭 미등록 8행 셀렉트를 이렇게 무해하게 검증 — 인자 이스케이프·기존값 선택까지 확인)
 - **화면 숫자가 의심스러우면**: REST로 실데이터 스냅샷을 받아 순수함수를 복사한 재현 스크립트로 대조. 이번에 시나리오 비교의 잘못된 사유 문구와, 공제액을 좌우하던 '제외' 금액을 이 방법으로 발견
+  - 이 대조는 **"앱이 데이터를 전량 받았다"의 증명**도 된다 — 렌더된 잔액·총수입·총지출이 REST 490행 직접 계산과 자릿수까지 일치하면 잘림이 없다는 뜻(`fetchTransactions` 검증에 사용). 건수만 세는 것보다 강한 증거
+- **차트가 실제로 그려졌는지**: 스크린샷을 눈으로 보는 대신 `getImageData`의 알파 채널에 0 아닌 픽셀이 있는지 세어 `document.title`에 `"CANVAS 3/3"`처럼 찍고 `--dump-dom | grep '<title>'`로 회수. 빈 캔버스가 배경색과 같아 '그려진 것처럼' 보이는 경우를 잡는다
 - 헤드리스 chrome은 **Bash 툴로 실행**할 것. PowerShell에서 `& $chrome ... 2>$null`로 돌리면 파일은 생성되는데 출력이 사라져 실패로 오인함
 - 차트·UI 시각 확인(헤드리스 Chrome): index.html 복사본에 mock(`window.supabase.createClient`→체이너블 thenable `{data,error}`)+`localStorage` 기기사용자 주입, `goTab()`로 탭 강제 후 `chrome --headless=new --screenshot=<절대경로>.png --force-device-scale-factor=2 --virtual-time-budget=8000`(탭 강제 setTimeout이 돌 시간 확보 — 없으면 탭 전환 전에 찍힘). `--screenshot`은 절대경로 필수(상대경로면 "액세스 거부(0x5)"로 파일 미생성). Chrome 경로: `C:\Program Files\Google\Chrome\Application\chrome.exe`
   - ⚠️ **mock은 `window.addEventListener('load', …)` 안에서 주입할 것.** supabase CDN이 `<script defer>`라 인라인 mock보다 **나중에** 실행돼 `window.supabase`를 덮어쓴다 → CDN 태그 뒤에 인라인으로 두면 mock이 무시되고 조용히 실서비스 DB를 조회한다(스크린샷은 그럴듯하게 나와서 알아채기 어려움). 앱의 `window.onload` 대입보다 먼저 등록되므로 load 리스너가 먼저 돈다
@@ -350,6 +360,7 @@ git push
 - 내역(list) 리스트엔 이동 2건이 그대로 보임 + `🔄` 아이콘과 `.chip.trf`(파란 '출금·이동'/'입금·이동' 배지)로 한 쌍임을 표시. 날짜별 소계 `de=expOf()`도 이동 제외라, 이동이 낀 날은 보이는 지출행이 소계에 안 잡힐 수 있음(의도된 동작)
 - **수정 불가**: 이동 leg는 한 쌍이라 단건 수정 시 짝과 어긋남 → `editEntry`가 `isTransfer(r)`이면 토스트 띄우고 차단(삭제 후 재등록 유도). 신규 입력에서만 `tgTrf` 노출
 - **짝 삭제**: `delEntry(id)`가 이동 leg 삭제 시 짝(같은 member·date·amount·`TRANSFER_CAT`·반대 type)을 찾아 `.in("id",[id,mate])`로 함께 삭제 + 구글 시트 백업도 양쪽 전송. 동일 이동이 2쌍 있어도 1건씩 매칭돼 남은 쌍은 유효하게 보존됨
+- **짝 없는 leg 감지**: `orphanTransfers()`가 (멤버·날짜·금액) 그룹에서 지출·입금 수를 맞춰보고 남는 쪽을 반환 → `orphanBanner()`가 계좌 탭 상단에 경고. 한쪽만 남으면 **그 계좌 잔액이 금액만큼 틀어지는데 `isTransfer`로 통계에서도 빠져 화면 어디에도 안 드러난다**(구 시트 이관분으로 추정되는 50만원 건이 그렇게 숨어 있었음 — 코드 경로로는 재현 불가). 짝 판정 기준은 `delEntry`와 반드시 같이 움직일 것
 
 ### 모바일 대응 주의사항
 - `<input list="datalist">` 사용 금지 → iOS Safari 미지원
