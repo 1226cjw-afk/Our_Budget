@@ -19,8 +19,17 @@ const must = [
 
 const forbid = [
   ["비밀번호 하드코딩",           /signInWithPassword\(\{[^}]*password\s*:\s*["'][^"']/],
-  ["ESC로 로그인 닫기",           /Escape[\s\S]{0,300}?authOv/],
 ];
+
+// ESC 핸들러가 로그인 게이트를 닫으면 안 된다(닫히면 게이트가 아니다).
+// 주석에서 authOv를 '언급'만 해도 걸리면 오탐이므로 줄 주석을 걷어낸 뒤 코드만 본다.
+function escHandlerCode(s){
+  const i = s.indexOf('e.key!=="Escape"');
+  if(i < 0) return null;
+  const end = s.indexOf("});", i);
+  if(end < 0) return null;
+  return s.slice(i, end).replace(/\/\/[^\n]*/g, "");
+}
 
 // window.onload 본문 안에서 loadAll을 직접 부르면 안 된다 — 세션 없이 데이터를 긁게 된다.
 // (startApp 안의 loadAll은 정상이므로 '근처 문자열' 매칭으로는 판정할 수 없다. 본문을 잘라내 확인)
@@ -47,6 +56,14 @@ forbid.forEach(([n, re]) => {
   if(hit) bad++;
   console.log(`${hit ? "FAIL" : "ok  "} ${n} (없어야 함)`);
 });
+
+const esc = escHandlerCode(src);
+if(esc === null){ bad++; console.log("FAIL ESC 핸들러를 못 찾음"); }
+else {
+  const hit = /authOv/.test(esc);
+  if(hit) bad++;
+  console.log(`${hit ? "FAIL" : "ok  "} ESC가 로그인 게이트를 닫음 (없어야 함)`);
+}
 
 const body = onloadBody(src);
 if(body === null){ bad++; console.log("FAIL window.onload 본문을 못 찾음"); }

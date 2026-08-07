@@ -846,6 +846,25 @@ body.sheet-open{overflow:hidden}
   </div>
 </div>
 
+<!-- 비밀번호 변경 (로그인 상태에서만). 로그인 게이트와 달리 닫을 수 있다 -->
+<div class="picker-ov auth-ov" id="pwOv" onclick="closePwChange()">
+  <div class="auth-card" onclick="event.stopPropagation()">
+    <div class="auth-ic">🔑</div>
+    <div class="auth-t">비밀번호 변경</div>
+    <div class="auth-d">가족이 함께 쓰는 비밀번호입니다.<br>바꾸면 다른 기기는 다시 로그인이 필요할 수 있어요.</div>
+    <form onsubmit="return doPwChange(event)">
+      <input type="text" name="username" autocomplete="username" value="우리집 가계부" readonly
+             style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0" tabindex="-1" aria-hidden="true">
+      <input class="auth-pw" id="pwCur"  type="password" autocomplete="current-password" placeholder="현재 비밀번호">
+      <input class="auth-pw" id="pwNew"  type="password" autocomplete="new-password" placeholder="새 비밀번호 (6자 이상)" style="margin-top:8px">
+      <input class="auth-pw" id="pwNew2" type="password" autocomplete="new-password" placeholder="새 비밀번호 확인" style="margin-top:8px" enterkeyhint="go">
+      <div class="auth-msg" id="pwMsg"></div>
+      <button class="auth-btn" id="pwBtn" type="submit">변경하기</button>
+      <button type="button" class="picker-cl" style="margin-top:10px;width:100%" onclick="closePwChange()">취소</button>
+    </form>
+  </div>
+</div>
+
 <div class="overlay" id="overlay">
   <div class="sheet">
     <div class="s-top">
@@ -1165,6 +1184,44 @@ async function doLogout(){
   if(!confirm("로그아웃할까요?\n다시 보려면 비밀번호를 입력해야 해요.")) return;
   await sb.auth.signOut();
   location.reload();   // 전역 상태를 확실히 비운다
+}
+
+/* ── 비밀번호 변경 (로그인 상태에서) ── */
+function openPwChange(){
+  ["pwCur","pwNew","pwNew2"].forEach(id=>{ const el=$(id); if(el) el.value=""; });
+  $("pwMsg").textContent="";
+  $("pwOv").classList.add("open");
+  document.body.classList.add("sheet-open");
+  setTimeout(()=>{ const el=$("pwCur"); if(el) el.focus(); }, 80);
+}
+function closePwChange(){
+  $("pwOv").classList.remove("open");
+  if(!$("overlay").classList.contains("open")) document.body.classList.remove("sheet-open");
+}
+async function doPwChange(ev){
+  if(ev) ev.preventDefault();
+  const cur=$("pwCur").value, nw=$("pwNew").value, nw2=$("pwNew2").value;
+  const msg=$("pwMsg"), btn=$("pwBtn");
+  if(nw.length<6){ msg.textContent="새 비밀번호는 6자 이상이어야 해요."; return false; }
+  if(nw!==nw2){   msg.textContent="새 비밀번호가 서로 달라요.";        return false; }
+  if(nw===cur){   msg.textContent="현재 비밀번호와 같아요.";           return false; }
+  btn.disabled=true; btn.textContent="변경 중…"; msg.textContent="";
+  // 현재 비밀번호를 먼저 확인한다. 세션만으로 바꾸게 두면 폰을 주운 사람이
+  // 비밀번호를 바꿔 가족 전체를 잠가버릴 수 있다 — 데이터 열람보다 더 나쁜 결과
+  const chk = await sb.auth.signInWithPassword({ email:FAMILY_EMAIL, password:cur });
+  if(chk.error){
+    btn.disabled=false; btn.textContent="변경하기";
+    msg.textContent = /rate|Too many/i.test(chk.error.message||"")
+      ? "시도가 너무 잦아요. 잠시 후 다시 해주세요."
+      : "현재 비밀번호가 맞지 않아요.";
+    return false;
+  }
+  const { error } = await sb.auth.updateUser({ password:nw });
+  btn.disabled=false; btn.textContent="변경하기";
+  if(error){ msg.textContent = error.message || "변경에 실패했어요."; return false; }
+  closePwChange();
+  toast("비밀번호를 바꿨어요");
+  return false;
 }
 
 /* ── 데이터 로드 ── */
@@ -2573,7 +2630,10 @@ function viewMaster(){
     </div>
     <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--bd);display:flex;justify-content:space-between;align-items:center">
       <span style="font-size:.78rem;color:var(--t3)">가족 공용 계정으로 로그인됨</span>
-      <button class="m-del" onclick="doLogout()">로그아웃</button>
+      <span style="display:flex;gap:8px">
+        <button class="picker-cl" onclick="openPwChange()">비밀번호 변경</button>
+        <button class="m-del" onclick="doLogout()">로그아웃</button>
+      </span>
     </div>
   </div>`;
 
@@ -2781,8 +2841,10 @@ $("fAmount").addEventListener("input",e=>fmtNum(e.target));
 document.addEventListener("keydown",e=>{
   if(e.key!=="Escape") return;
   if($("pickerOv").classList.contains("open")) closePicker();
+  else if($("pwOv").classList.contains("open")) closePwChange();
   else if($("duOv").classList.contains("open")) closeDeviceUser();
   else if($("overlay").classList.contains("open")) closeSheet();
+  // authOv(로그인 게이트)는 의도적으로 제외 — ESC로 닫히면 게이트가 아니다
 });
 
 /* ── 커스텀 피커 ── */
