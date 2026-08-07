@@ -584,6 +584,18 @@ body.sheet-open{overflow:hidden}
   background:rgba(240,84,112,.06);border:1px solid rgba(240,84,112,.22);
   border-radius:18px;padding:20px 18px;margin-top:16px;
 }
+/* 경고 배너 — 앱은 계속 쓸 수 있으나 화면 숫자를 의심해야 하는 상태(부분 로드 실패·짝 없는 이동 leg) */
+.warn-card{
+  background:rgba(255,169,77,.07);border:1px solid rgba(255,169,77,.28);
+  border-radius:16px;padding:15px 16px;margin-bottom:14px;
+}
+.wc-t{font-size:.88rem;font-weight:800;color:#FFA94D;margin-bottom:7px}
+.wc-b{font-size:.78rem;color:var(--t2);line-height:1.75}
+.wc-b b{color:var(--t1)}
+.wc-btn{
+  margin-top:12px;padding:9px 16px;background:var(--acg);color:var(--ac);
+  border:1px solid rgba(201,147,58,.25);border-radius:10px;font-weight:700;font-size:.8rem;
+}
 
 /* ── 커스텀 셀렉트 ── */
 .sel-btn{
@@ -922,6 +934,9 @@ let typeVal      = "지출";
 let memberVal    = null;    // 입력 시트
 let editId       = null;
 let loadError    = null;
+// 부분 로드 실패한 테이블 이름들 — 앱은 폴백으로 계속 돌지만 화면 상단 배너로 반드시 표면화한다.
+// (예전엔 master_data 로드가 실패하면 조용히 DEFAULT_CATS로 떨어져 '설정이 사라진' 것처럼 보였다)
+let loadWarn     = [];
 
 /* ── 유틸 ── */
 const $        = id => document.getElementById(id);
@@ -955,18 +970,45 @@ const catsOf = m => Array.from(new Set([...((MASTER[m]&&MASTER[m].categories)||D
 
 // 계좌간 이동 거래 여부 — 소비/수입 통계에선 제외, 계좌 잔액엔 포함
 const isTransfer = r => r.category===TRANSFER_CAT;
+// 짝 없는 이동 leg 탐지. 한쪽만 남으면 그 계좌 잔액이 금액만큼 틀어지는데, isTransfer()로 수입·지출
+// 통계에서도 빠져 있어 그 돈이 화면 어디에도 드러나지 않는다(50만원 건이 실제로 그렇게 숨어 있었음).
+// 짝 판정 기준은 delEntry의 mate 탐색과 동일하게 유지할 것: 같은 멤버·날짜·금액의 반대 type
+function orphanTransfers(){
+  const g = {};
+  ROWS.forEach(r => {
+    if(!isTransfer(r)) return;
+    const k = `${r.member}|${r.date}|${Number(r.amount)}`;
+    (g[k] || (g[k] = [])).push(r);
+  });
+  const out = [];
+  Object.values(g).forEach(list => {
+    const ex = list.filter(r => r.type!=="입금"), inc = list.filter(r => r.type==="입금");
+    const n = Math.min(ex.length, inc.length);   // 앞의 n쌍은 정상 매칭, 남는 쪽이 짝 없는 leg
+    out.push(...ex.slice(n), ...inc.slice(n));
+  });
+  return out.sort((a,b) => a.date < b.date ? 1 : -1);
+}
 // 합계 헬퍼 (지출/수입) — 여러 뷰에서 반복되던 filter+reduce 통합. 이동은 합계에서 제외
 const expOf = rs => rs.reduce((s,r)=>s+((r.type!=="입금"&&!isTransfer(r))?r.amount:0),0);
 const incOf = rs => rs.reduce((s,r)=>s+((r.type==="입금"&&!isTransfer(r))?r.amount:0),0);
 // 카테고리 색상 — 이름 기반 고정 해시(같은 카테고리는 항상 같은 색)
 // 다크모드에서 또렷이 구분되는 12색(웜/쿨 교차, 초록 계열 최소화). 도넛·스택·추이 공통.
 const CAT_PALETTE = ["#FF6B6B","#4DABF7","#FFA94D","#9775FA","#51CF66","#F06595","#FFD43B","#22B8CF","#DA77F2","#C99A5B","#20C997","#5C7CFA"];
-// 카테고리 색은 '처음 등장한 순서'대로 팔레트를 배정 → 서로 다른 카테고리는 항상 다른 색.
-// (기존 이름 해시 방식은 카페·문화·데이트·이자·기타가 같은 칸[4]에 몰려 전부 초록으로 보이던 문제가 있었음)
+// 카테고리 색은 팔레트 인덱스 배정 → 서로 다른 카테고리는 항상 다른 색.
+// 목록을 로드 직후 로케일 정렬해 고정한다 — '처음 등장 순서'로 잡으면 어느 탭을 먼저 열었는지·
+// 멤버 필터가 무엇인지에 따라 같은 카테고리가 기기·세션마다 다른 색으로 보였다.
+// (그보다 앞선 이름 해시 방식은 카페·문화·데이트·이자·기타가 같은 칸[4]에 몰려 전부 초록으로 보였음 — 되돌리지 말 것)
 let _catOrder = [];
+function rebuildCatOrder(){
+  const s = new Set();
+  ROWS.forEach(r => { if(r.category) s.add(String(r.category)); });
+  Object.values(MASTER).forEach(md => (md.categories||[]).forEach(c => s.add(String(c))));
+  _catOrder = [...s].sort((a,b) => a.localeCompare(b,"ko"));
+}
 function catColor(c){
   const s = String(c);
   let i = _catOrder.indexOf(s);
+  // 로드 이후 새로 생긴 값(예: 저장 직후)만 뒤에 덧붙는다 — 다음 로드 때 정렬 목록에 합류
   if(i < 0){ i = _catOrder.length; _catOrder.push(s); }
   return CAT_PALETTE[i % CAT_PALETTE.length];
 }
@@ -1019,11 +1061,30 @@ window.onload = async () => {
 };
 
 /* ── 데이터 로드 ── */
+// 거래내역 전량 수신. PostgREST에 `max-rows` 상한이 걸려 있으면 응답이 **에러 없이 잘려서** 오고,
+// 그 순간부터 모든 집계가 조용히 틀어진다 → count(전체 행 수)와 실수신 건수를 대조해 나머지를 이어 받는다.
+// id 2차 정렬: 같은 날짜 내 순서가 리로드·페이지 경계마다 뒤섞이지 않게(페이지네이션의 전제)
+async function fetchTransactions(){
+  const q = () => sb.from("transactions").select("*",{count:"exact"}).order("date",{ascending:false}).order("id");
+  const first = await q();
+  if(first.error) return first;
+  let data = first.data||[];
+  const total = first.count;
+  while(total!=null && data.length < total){
+    const nxt = await q().range(data.length, total-1);
+    if(nxt.error) return nxt;
+    const d = nxt.data||[];
+    if(!d.length) break;   // 더 안 오면 중단 (무한 루프 방지)
+    data = data.concat(d);
+  }
+  return {data, error:null, count:total};
+}
 async function loadAll(){
   loadError = null;
+  loadWarn  = [];
   const [mem, tx, lim, mst, cfg, mtm] = await Promise.all([
     sb.from("members").select("name").order("id"),
-    sb.from("transactions").select("*").order("date",{ascending:false}).order("id"),  // id 2차 정렬: 같은 날짜 내 순서가 리로드마다 안 뒤섞이게
+    fetchTransactions(),
     sb.from("category_limits").select("*"),
     sb.from("master_data").select("*"),
     sb.from("app_settings").select("*"),
@@ -1041,6 +1102,13 @@ async function loadAll(){
 
   if(tx.error) throw new Error(tx.error.message||"거래내역 로드 오류");
   ROWS = tx.data||[];
+
+  // 아래 세 테이블은 실패해도 앱을 세우지 않고 폴백으로 넘어간다. 대신 무엇이 안 왔는지 배너로 알린다
+  // — 폴백값(빈 한도·DEFAULT_CATS·기본 설정)이 '사용자가 지운 것'처럼 보이면 안 되므로.
+  if(lim.error) loadWarn.push("한도 설정");
+  if(mst.error) loadWarn.push("카테고리·결제수단·계좌 설정");
+  if(cfg.error) loadWarn.push("결제주기·앱 설정");
+  // tax_map 실패는 TAX_READY=false로 연말정산 화면이 직접 안내하므로 여기서 중복 경고하지 않는다
 
   // LIMITS: {멤버: {카테고리: 금액}}
   LIMITS = {};
@@ -1089,6 +1157,8 @@ async function loadAll(){
     if(row.key.startsWith('cat_icon_')&&row.value)USER_ICONS[row.key.slice('cat_icon_'.length)]=row.value;
   });
   MEMBERS.forEach(m=>{if(!(m in BILLING_STARTS))BILLING_STARTS[m]=_globalBS;});
+
+  rebuildCatOrder();  // 카테고리 색 배정을 이번 데이터 기준으로 고정 (ROWS·MASTER가 다 채워진 뒤여야 함)
 }
 
 /* 데이터 재로드 + 재렌더 — CRUD 후 공통 마무리 */
@@ -1199,8 +1269,17 @@ async function addMember(){
   if(dbErr(res)) return;
   el.value=""; await reloadAndRender();
 }
+// transactions.member → members(name) 이 FK(on delete cascade)라, 멤버를 지우면 그 사람의 거래가 통째로 사라진다.
+// 구글 시트 백업엔 이 cascade 삭제가 전달되지 않아 복구 근거도 함께 없어짐 → 거래가 남아 있으면 아예 차단한다.
 async function delMember(name){
-  if(!confirm(`'${name}' 멤버를 삭제하시겠습니까?\n해당 멤버의 마스터 데이터와 한도 설정이 함께 삭제됩니다.`)) return;
+  const n = ROWS.filter(r=>r.member===name).length;
+  if(n){
+    alert(`'${name}' 님에게 거래 ${comma(n)}건이 남아 있어 삭제할 수 없어요.\n\n`+
+      `멤버를 지우면 이 거래 ${comma(n)}건이 DB에서 함께 삭제되고, 구글 시트 백업에는 그 삭제가 전달되지 않아 되돌릴 방법이 없습니다.\n\n`+
+      `거래를 다른 멤버로 옮기거나 먼저 정리한 뒤 다시 시도해주세요.`);
+    return;
+  }
+  if(!confirm(`'${name}' 멤버를 삭제하시겠습니까?\n이 멤버의 카테고리·결제수단·계좌 설정, 한도, 연말정산 매핑이 함께 삭제됩니다.\n(거래는 0건이라 사라질 내역은 없어요)`)) return;
   const res=await sb.from("members").delete().eq("name",name);
   if(dbErr(res)) return;
   await reloadAndRender();
@@ -1381,17 +1460,33 @@ function render(){
     </div></div>`;
     return;
   }
-  if(tab==="list")     m.innerHTML = filterBar() + viewList();
-  else if(tab==="cat") m.innerHTML = filterBar() + viewCategory();
-  else if(tab==="limit")    m.innerHTML = viewLimit();
+  // 캔버스를 그리는 탭이 있어 innerHTML 주입과 draw를 분리한다 (배너를 앞에 붙이려면 한 곳에서 써야 함)
+  let body = "", after = null;
+  if(tab==="list")          body = filterBar() + viewList();
+  else if(tab==="cat")      body = filterBar() + viewCategory();
+  else if(tab==="limit")    body = viewLimit();
   else if(tab==="analysis"){
     const seg = pills([["spend","📊 지출분석"],["tax","🧾 연말정산"]], anView, "setAnView");
     // 연말정산은 개인 단위라 '전체' 없는 멤버 바를 쓴다 (합산하면 각자의 25% 문턱이 뒤섞임)
-    if(anView==="tax"){ m.innerHTML = seg + memberBar(tyMember,"setTyMember") + viewTaxYear(); drawTaxChart(); }
-    else { m.innerHTML = seg + memberFilterPills() + viewAnalysis(); drawAnalysisCharts(); }
+    if(anView==="tax"){ body = seg + memberBar(tyMember,"setTyMember") + viewTaxYear(); after = drawTaxChart; }
+    else { body = seg + memberFilterPills() + viewAnalysis(); after = drawAnalysisCharts; }
   }
-  else if(tab==="acct")     m.innerHTML = viewAccount();
-  else if(tab==="master")   m.innerHTML = viewMaster();
+  else if(tab==="acct")     body = viewAccount();
+  else if(tab==="master")   body = viewMaster();
+  m.innerHTML = warnBanner() + body;   // 부분 로드 실패는 어느 탭에 있든 상단에 고정 노출
+  if(after) after();
+}
+
+// 일부 테이블이 안 실려온 상태를 명시하는 배너. 앱은 폴백값으로 계속 동작하므로 화면을 가리지 않는다
+// — 조용히 넘기면 폴백(빈 한도·DEFAULT_CATS)이 '설정이 지워진 것'처럼 보이고, 그 위에 저장하면 진짜로 덮어쓴다.
+function warnBanner(){
+  if(!loadWarn.length) return "";
+  return `<div class="sec" style="padding-bottom:0"><div class="warn-card">
+    <div class="wc-t">⚠️ 일부 설정을 불러오지 못했어요</div>
+    <div class="wc-b"><b>${esc(loadWarn.join(" · "))}</b><br>
+      지금 화면엔 기본값이 대신 표시됩니다. 이 상태에서 저장하면 기존 설정을 덮어쓸 수 있으니 먼저 다시 불러와주세요.</div>
+    <button class="wc-btn" onclick="retryLoad()">다시 불러오기</button>
+  </div></div>`;
 }
 
 async function retryLoad(){
@@ -2290,6 +2385,22 @@ async function resetTySalary(member){
 }
 
 /* ── 계좌 탭 (멤버 필터 적용) ── */
+// 짝 없는 이동 leg 점검 배너 — 잔액이 틀어지는 곳이 계좌 탭이므로 여기에 띄운다
+function orphanBanner(){
+  const all = orphanTransfers();
+  const os  = memberFilter==="전체" ? all : all.filter(r=>r.member===memberFilter);
+  if(!os.length) return "";
+  const li = os.slice(0,5).map(r=>
+    `<div style="margin-top:6px">· ${r.date} · <b>${won(Number(r.amount))}</b> · ${esc(r.account||"미분류")}
+     <span style="color:var(--t3)">(${r.type==="입금"?"입금":"출금"}만 있음${r.memo?" · "+esc(r.memo):""})</span></div>`).join("");
+  return `<div class="warn-card">
+    <div class="wc-t">🔗 짝 없는 계좌간 이동 ${os.length}건</div>
+    <div class="wc-b">이동은 출금·입금 2건이 한 쌍이어야 해요. 한쪽만 있으면 <b>그 계좌 잔액이 그만큼 틀어지고</b>,
+      이동은 수입·지출 통계에서도 빠지기 때문에 그 금액이 화면 어디에도 잡히지 않습니다.<br>
+      내역 탭(◀로 해당 주기 이동)에서 짝을 추가하거나, 실제 이동이 아니면 카테고리를 바꿔주세요.
+      ${li}${os.length>5?`<div style="margin-top:6px;color:var(--t3)">…외 ${os.length-5}건</div>`:""}</div>
+  </div>`;
+}
 function viewAccount(){
   const rows = myRows();
   // 잔액(acct)엔 이동 포함(계좌 간 돈 흐름), 총 수입·지출 표시엔 이동 제외(같은 금액이 양쪽에 잡혀 부풀어 보임)
@@ -2299,7 +2410,7 @@ function viewAccount(){
     if(r.type==="입금"){ if(!isTransfer(r))inc+=r.amount; bal+=r.amount; acct[a]=(acct[a]||0)+r.amount; }
     else{ if(!isTransfer(r))exp+=r.amount; bal-=r.amount; acct[a]=(acct[a]||0)-r.amount; }
   });
-  let h=`${memberFilterPills()}<div class="sec">
+  let h=`${memberFilterPills()}<div class="sec">${orphanBanner()}
     <div class="acct-tot"><div class="at-l">${memberFilter==="전체"?"전체 합산 잔액":esc(memberFilter)+"의 잔액"}</div><div class="at-v">${won(bal)}</div></div>
     <div class="acct-grid">
       <div class="am"><div class="am-l">총 수입</div><div class="am-v g">+${won(inc)}</div><div class="a-sub">계좌간 이동 제외</div></div>
