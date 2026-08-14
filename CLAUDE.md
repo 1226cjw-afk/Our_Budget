@@ -107,35 +107,42 @@ created_at timestamptz default now()
 
 ### transactions
 ```sql
-id       uuid default gen_random_uuid() primary key
-date     date
-amount   numeric
-type     text   -- '지출' | '입금'
-member   text references members(name) on delete cascade
-category text
-method   text
-account  text
-memo     text
+id         uuid default gen_random_uuid() primary key
+date       date        not null
+amount     numeric     not null check (amount >= 0)
+type       text        not null check (type in ('지출','입금'))
+category   text        not null
+account    text        not null
+member     text        references members(name) on delete cascade   -- null 허용
+method     text                                                     -- null 허용
+memo       text                                                     -- null 허용
+created_at timestamptz default now()
 ```
+> ⚠️ **`type` CHECK에 `'이동'`은 없다** — 입력 시트의 '이동' 토글은 UI 개념일 뿐,
+> `saveTransfer()`가 `지출`+`입금` 2건으로 풀어서 저장하고 `category='계좌간 이동'`으로 구분한다.
+> 이 CHECK가 그 설계를 DB에서 강제한다. '이동'을 type으로 직접 저장하도록 '단순화'하면 insert가 통째로 실패한다.
+> ⚠️ `category`·`account`가 NOT NULL이라 `saveEntry()`의 "금액·카테고리·계좌는 필수" 검증을 없애면
+> 토스트 대신 DB 오류가 뜬다(둘은 같이 움직여야 한다).
 
 ### category_limits
 ```sql
 id            uuid default gen_random_uuid()
-member        text references members(name) on delete cascade
-category      text
-monthly_limit numeric check (monthly_limit >= 0)
-primary key (member, category)
+member        text not null references members(name) on delete cascade
+category      text not null
+monthly_limit numeric not null check (monthly_limit >= 0)
+primary key (member, category)   -- saveLimit의 onConflict 대상
 ```
 > 멤버별 독립 한도. 복합 PK (member, category).
 > ⚠️ 과거 `UNIQUE(category)` 단독 제약이 남아 멤버별 한도를 막던 버그가 있었음 → 2026-06 제거됨. 다시 추가 금지.
 
 ### master_data
 ```sql
-id     serial primary key
-member text references members(name) on delete cascade
-type   text   -- 'category' | 'method' | 'account'
-value  text
-unique (member, type, value)
+id         uuid default gen_random_uuid() primary key   -- ⚠️ serial 아님(2026-08-14 실측 정정)
+member     text not null references members(name) on delete cascade
+type       text not null   -- 'category' | 'method' | 'account'
+value      text not null
+created_at timestamptz default now()
+unique (member, type, value)   -- addMaster의 onConflict 대상
 ```
 
 ### tax_map
@@ -177,6 +184,22 @@ value text
 > - `ty_salary_<멤버명>` : 연말정산 총급여 수동값. 없으면 올해 '월급·급여·상여' 입금의 연환산 추정을 쓴다(수동값이 항상 우선)
 > - `cat_icon_<카테고리명>` : 카테고리 이모지 아이콘 (전 멤버 공통). master_data에 icon 컬럼을 두지 않은 이유: 신규 멤버는 카테고리가 DB 없이 DEFAULT_CATS fallback으로 돌아 행이 없을 수 있음
 
+### upsert 계약 (코드 ↔ DB) — 2026-08-14 실측 대조 완료
+`sb.from(...).upsert(..., {onConflict:"…"})`의 `onConflict`는 **DB에 그 이름의 유니크 제약이 실재해야** 동작한다.
+없으면 저장이 `dbErr` 토스트 한 줄로 끝나 원인이 안 보인다. 현재 4곳 모두 대응이 확인됐다:
+
+| 코드 | onConflict | DB 제약 |
+|------|-----------|---------|
+| `saveLimit` | `member,category` | `category_limits_pkey` PRIMARY KEY (member, category) |
+| `addMaster` | `member,type,value` | `master_data_member_type_value_key` UNIQUE (member, type, value) |
+| `saveBillingStart`·`saveAppSetting`·`saveIcon`·`saveTySalary` | `key` | `app_settings_pkey` PRIMARY KEY (key) |
+| `setTaxMap`·`applyTaxSuggest` | `member,type,value` | `tax_map_pkey` PRIMARY KEY (member, type, value) |
+
+> FK는 4개 테이블 모두 `member → members(name) ON DELETE CASCADE` — `delMember`가 거래 1건이라도 있으면
+> 차단하는 이유가 이것이다(위 `delMember` 항목).
+> PostgREST 행 상한: `pgrst.db_max_rows` 역할 오버라이드 없음 → Supabase 기본값(1000). 507행은 그 아래라
+> 현재 잘림 없음. 1000에 근접하면 `fetchTransactions`의 페이지네이션이 실제로 발동하기 시작한다.
+
 ### RLS 정책 (가계부 6개 테이블 공통) — 2026-08-07 축소
 ```sql
 create policy family_only on public.<table>
@@ -196,6 +219,18 @@ revoke all on public.<table> from anon;
 ②를 추가한 이유: ①만으로는 **"권한을 회수한 상태를 계속 유지해야" 성립하는 방어**다.
 누가 나중에 `grant`를 되돌리면 조용히 다시 열린다. `security_invoker=on`이면 호출자 권한으로 평가되므로 그 경우에도 RLS가 막는다.
 앱은 이 뷰를 쓰지 않는다(`public/index.html`에 참조 0건). **새 뷰도 `security_invoker=on`으로 만들 것** — Supabase 어드바이저가 ERROR로 잡는다.
+
+⚠️ **이 뷰 3개는 안 쓰는 게 아니라 쓰면 틀린다** (2026-08-14 실측). 전부 멤버 개념이 없던 옛 모델의 잔재다:
+- `v_limit_usage` — **`member` 컬럼이 없다**. `category`만으로 `category_limits`와 join하므로,
+  멤버별 한도(복합 PK)로 바뀐 뒤로는 한 사람의 한도가 가족 전체 지출과 대조된다.
+- `v_period_category` — `billing_key(date)`로 주기를 매기는데 이 함수가 **25일을 하드코딩**한다
+  (`extract(day from d) >= 25`). 멤버별 시작일(지현 21일)을 무시 — 앱에서 2026-08-14에 고친 것과 같은 종류의 버그가 DB에 남은 것.
+- `v_account_balance` — 멤버 구분 없이 계좌명으로만 합산.
+- `public.billing_key(date)`도 같은 이유로 쓰지 말 것. `IMMUTABLE`·`SECURITY INVOKER`라 위험하진 않지만
+  (어드바이저의 `function_search_path_mutable` WARN 대상), 결과가 정우 기준으로만 맞다.
+
+→ **집계는 앱의 `bucketByPeriod`/`billingPeriod`가 유일한 기준**이다. 이 뷰·함수로 숫자를 검산하면 서로 다른 답이 나온다.
+미사용이므로 정리(`drop view`) 후보지만, 지우는 건 되돌리기 어려우니 사용자 확인 후에 할 것.
 
 검증 짝 (둘 다 통과해야 끝난 것):
 - `node scripts/verify_rls.js` — anon이 막혔는가 (기대: 가계부 401, 휴양림 200)
@@ -400,6 +435,24 @@ Supabase Auth 공유 계정 1개. Worker 프록시도, 자체 인증 코드도 �
 ---
 
 ## 자주 하는 작업
+
+### DB 연계 점검 (코드가 DB에 대해 가정하는 것이 아직 참인가)
+스크립트 검증(`verify_rls`·`verify_login`)은 **경계**만 본다. 스키마 계약이 어긋나면 저장이 토스트 한 줄로
+조용히 실패하므로, 스키마를 건드렸거나 저장이 안 될 땐 아래를 MCP로 직접 확인한다 (전부 읽기 전용):
+
+1. **upsert 대상**: `select conname, contype, pg_get_constraintdef(oid) from pg_constraint where conrelid='public.<표>'::regclass;`
+   → 위 'upsert 계약' 표와 대조. `onConflict` 문자열과 제약이 어긋나면 그 저장 기능만 죽는다.
+2. **컬럼·NOT NULL**: `information_schema.columns` → 앱의 필수값 검증(`saveEntry`의 카테고리·계좌)과 NOT NULL이 같이 움직이는지.
+3. **정책·권한**: `pg_policies` + `has_table_privilege('anon'|'authenticated', …)`
+   → 기대: anon 전부 false / authenticated SELECT·INSERT·UPDATE·DELETE 전부 true + policy `using(true) with check(true)`.
+4. **어드바이저**: `mcp__supabase__get_advisors({type:"security"})` — ERROR 0건이어야 한다.
+   현재 WARN 2건은 알려진 것: `billing_key` search_path(무해, 위 뷰 절 참조) / **누출 비밀번호 보호 비활성**.
+   ⚠️ 후자는 이 앱에선 예사롭지 않다 — 보안 경계 전체가 **공용 비밀번호 하나**다.
+   Supabase 대시보드 → Authentication → Password Protection에서 켜두는 편이 낫다(HaveIBeenPwned 대조, 무료·설정 한 번).
+5. ⚠️ 쿼리는 **가계부 6개 테이블 + 뷰 3개로 범위를 명시**할 것 — `public` 전체를 훑으면 휴양림 프로젝트가 섞여 나온다.
+
+> 실제 REST 왕복(로그인 세션으로 전량이 오는가)은 `$env:BUDGET_PW='...'; node scripts\verify_login.js`.
+> 비밀번호가 없으면 여기까지는 확인할 수 없다 — MCP로는 서버 안쪽만 본다.
 
 ### DB 스키마 변경이 필요할 때
 Supabase MCP가 연결되어 있으면:
