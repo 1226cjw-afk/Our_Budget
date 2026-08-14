@@ -149,6 +149,12 @@ check ( (type='method'   and kind in ('credit','check','cash','none'))
      or (type='category' and kind in ('income','none')) )
 ```
 > 연말정산 매핑 2종을 한 테이블에. `master_data`의 (member, type, value) 형태를 그대로 따랐다.
+>
+> ⚠️ **이 테이블의 설치 SQL은 앱 안에도 있다**(`TAX_MAP_DDL` — 테이블이 없으면 연말정산 화면이 띄워 사용자가 그대로 실행한다).
+> 그래서 이 DDL은 아래 'RLS 정책'과 **반드시 같이 움직여야 한다**. 실제로 2026-08-07에 RLS를 좁힐 때 앱 안의 DDL만
+> 옛 `create policy "all" ... using (true)`(anon 포함) + `revoke` 없음으로 남아 있었다 —
+> 그대로 실행됐다면 앱이 방금 닫은 구멍을 스스로 다시 열어주는 셈이었다(2026-08-14 수정).
+> 스키마를 바꿀 땐 `public/index.html`의 `TAX_MAP_DDL`도 함께 고칠 것.
 > - `type='method'` → **지출 매핑**: `credit`=신용 15% / `check`=체크 30% / `cash`=현금영수증 30% / `none`=공제제외(이체 등). 체크·현금은 공제율이 같지만 사용 추이를 따로 보려고 화면에서만 분리
 > - `type='category'` → **소득 매핑**: `income`=총급여에 산입 / `none`=제외. **총급여 판정은 오직 이 매핑만 따른다** (`SALARY_RE`는 추천 UI 전용 — 하드코딩 regex로 집계하지 말 것)
 >
@@ -263,6 +269,15 @@ Supabase Auth 공유 계정 1개. Worker 프록시도, 자체 인증 코드도 �
 멤버별 시작일 설정 (`BILLING_STARTS`, 기본 매월 25일~익월 24일). `billingPeriod(member, ref)`가 해당 멤버 주기 계산 — 종료일은 '다음 시작일 하루 전'으로 산출 (시작일=1이면 같은 달 말일. 과거엔 1일 설정 시 두 달짜리 주기가 되던 버그 → 2026-07 수정, 회귀 금지).
 `viewedPeriod(member)`는 여기에 `periodOffset`을 반영한 '현재 조회 중인 주기' — `scoped()`가 사용.
 
+⚠️ **멤버마다 시작일이 다르다** (실제로 정우 25일 / 지현 21일). 그래서 여러 멤버의 행을 주기로 나눌 땐
+**행마다 그 멤버의 주기**로 판정해야 한다 — 한 사람 기준으로 자르면 다른 사람의 21~24일 거래가 이웃 주기로 밀린다.
+- 내역 탭 `scoped()`는 원래부터 행별 판정이었지만, 분석·분류 탭은 `MEMBERS[0]` 주기로 전원을 잘랐다
+  → 같은 '이번 주기'인데 두 탭 숫자가 달랐다(2026-08 기준 지현 **24건·293만원**이 엉뚱한 주기에 잡힘). 2026-08-14 수정.
+- 이제 `bucketByPeriod(rows, n, refMember)`가 그 판정을 전담한다. **주기 버킷이 필요하면 이 함수를 쓸 것** —
+  `periods.map(p => rows.filter(r => inPeriod(r.date, p)))` 패턴을 다시 쓰면 같은 버그가 돌아온다.
+- 인덱스 `n-1`이 각 멤버의 '이번 주기'이고, 이는 `viewedPeriod(m)`(periodOffset=0)과 일치한다(테스트로 고정).
+- 라벨은 기준 멤버 것이라 집계 기준과 어긋나 보일 수 있어, `mixedPeriods()`가 참이면 화면에 '각자 주기 기준'을 명시한다.
+
 ### 주요 함수
 | 함수 | 역할 |
 |------|------|
@@ -272,12 +287,12 @@ Supabase Auth 공유 계정 1개. Worker 프록시도, 자체 인증 코드도 �
 | `openPwChange() / doPwChange(ev)` | 설정 탭 비밀번호 변경. **현재 비밀번호를 재확인한 뒤** `updateUser` (위 '로그인 게이트' 절의 이유) |
 | `isAuthErr(e)` | 인증 실패를 일반 로드 오류와 구분 (`401`·`JWT`·`PGRST301`·`Invalid Refresh Token`) — 화면 분기의 기준 |
 | `loadAll()` | members·transactions·category_limits·master_data·app_settings 병렬 로드. 끝에서 `rebuildCatOrder()` |
-| `fetchTransactions()` | 거래 전량 수신 — `count:"exact"`의 전체 행 수와 실수신 건수를 대조해 모자라면 `.range()`로 이어 받는다. PostgREST `max-rows` 상한에 걸리면 **에러 없이 잘려** 모든 집계가 조용히 틀어지므로 (490행/2026-08 기준 미도달, 연 ~650건 페이스) |
+| `fetchTransactions()` | 거래 전량 수신 — `count:"exact"`의 전체 행 수와 실수신 건수를 대조해 모자라면 `.range()`로 이어 받는다. PostgREST `max-rows` 상한에 걸리면 **에러 없이 잘려** 모든 집계가 조용히 틀어지므로 (507행/2026-08-14 기준 미도달, 연 ~650건 페이스) |
 | `warnBanner()` | 부분 로드 실패(`loadWarn`) 배너 — `render()`가 모든 탭 본문 앞에 붙임 |
 | `orphanTransfers() / orphanBanner()` | 짝 없는 계좌간 이동 leg 탐지 / 계좌 탭 경고 배너. 짝 판정 기준은 **`delEntry`의 mate 탐색과 동일하게 유지**(같은 멤버·날짜·금액의 반대 type) |
 | `rebuildCatOrder()` | 카테고리 색 배정 순서를 ROWS+MASTER 합집합의 로케일 정렬로 고정 (`loadAll` 끝에서 1회) |
 | `refreshData()` | 헤더 ↻ 버튼 — 수동 재로드 (다른 기기 입력 동기화) |
-| `setSearch(v)` | 내역 검색 — 200ms 디바운스 후 render, searchBox 포커스·커서 복원 |
+| `setSearch(v)` / `listResultsHtml(all?)` | 내역 검색 — 200ms 디바운스 후 **`#listResults`만** 부분 갱신(`listResultsHtml`가 결과 목록 HTML만 반환). ⚠️`render()`로 전체 재렌더하면 조합 중인 input 노드까지 교체돼 한글 IME가 자모로 flush된다('ㅇㅣㅂㄹㅕㄱ'). 모바일 IME는 compositionstart/end를 신뢰성 있게 쏘지 않아 조합 가드로는 못 막음 — **포커스·커서 복원 방식으로 되돌리지 말 것** |
 | `setDeviceUser(name) / openDeviceUser()` | 기기 기본 사용자 설정·선택 모달 (헤더 👤 칩에서도 열림) |
 | `saveBillingStart(member)` | 멤버별 결제 주기 시작일 저장 |
 | `saveAppSetting(key,elId,min,max,def,unit)` | 전역 앱 설정 upsert (warn_threshold·analysis_periods) |
@@ -311,6 +326,9 @@ Supabase Auth 공유 계정 1개. Worker 프록시도, 자체 인증 코드도 �
 | `catsOf(m)` | 멤버 카테고리 목록 = master_data 설정 + 저장된 한도 카테고리 합집합 (한도 탭·입력 시트 공용) |
 | `reloadAndRender()` | `loadAll()+render()` — CRUD 후 공통 마무리 |
 | `movePeriod(d) / resetPeriod() / viewedPeriod(m)` | 내역·분류 탭 ◀▶ 주기 탐색 (periodOffset 0 클램프, 누르면 scope='current') |
+| `bucketByPeriod(rows,n,ref)` / `mixedPeriods()` | 최근 n주기 버킷팅(**행마다 그 멤버 주기**, 인덱스 n-1=이번 주기) / 멤버 간 시작일이 갈리는 상태인지 — 위 '결제 주기' 절 참조 |
+| `myRows() / retryLoad() / recentPeriods(n,m)` | 멤버 필터 적용 행 / 로드 실패 후 재시도(배너·에러카드 버튼) / 최근 n주기 목록 |
+| `taxSelect(member,kind,value,cur)` / `tyAmtLabel(a,isCat,cur)` | 연말정산 매핑 셀렉트·금액 캡션 공용 빌더 — 연말정산 화면·설정 탭 **4곳**이 같은 마크업을 쓴다. 인라인으로 복붙하지 말 것(옵션 하나 고칠 때 한 곳을 빠뜨린다) |
 | `drillTo(q)` | 분류 카드 클릭 → 내역 탭 이동 + 검색어 세팅 (주기·멤버 필터 유지, '미지정' 카드는 비활성) |
 | `exportCSV()` | 설정 탭 — 전체 거래 CSV 다운로드 (UTF-8 BOM, 콤마·따옴표·개행 인용 처리) |
 | `ensureOpt(selId,val)` | 수정 시트에서 마스터에 없는 기존 값을 select에 임시 옵션으로 추가 — 삭제된 카테고리·계좌가 첫 옵션으로 바뀌는 것 방지 |
@@ -424,7 +442,7 @@ Windows 작업 사본은 CRLF, 리포 blob은 LF라 작업 사본과 비교하�
     `sb.auth.signInWithPassword`를 `<head>` 인라인으로 한 번 태우거나 `localStorage["ourbudget.auth"]`에 세션을 심을 것
   - ⚠️ **이 모드에서 `dispatchEvent`로 onchange/onclick을 발화시키면 실서비스 DB에 그대로 쓴다** (테스트 DB 없음 — 가족 실데이터다). 배선만 확인할 땐 load 리스너에서 `window.setTaxMap=(...a)=>calls.push(a)`처럼 **변경 함수를 스텁으로 덮은 뒤** 이벤트를 쏘고 인자만 회수할 것 (설정 탭 미등록 8행 셀렉트를 이렇게 무해하게 검증 — 인자 이스케이프·기존값 선택까지 확인)
 - **화면 숫자가 의심스러우면**: REST로 실데이터 스냅샷을 받아 순수함수를 복사한 재현 스크립트로 대조. 이번에 시나리오 비교의 잘못된 사유 문구와, 공제액을 좌우하던 '제외' 금액을 이 방법으로 발견
-  - 이 대조는 **"앱이 데이터를 전량 받았다"의 증명**도 된다 — 렌더된 잔액·총수입·총지출이 REST 490행 직접 계산과 자릿수까지 일치하면 잘림이 없다는 뜻(`fetchTransactions` 검증에 사용). 건수만 세는 것보다 강한 증거
+  - 이 대조는 **"앱이 데이터를 전량 받았다"의 증명**도 된다 — 렌더된 잔액·총수입·총지출이 REST 507행(2026-08-14) 직접 계산과 자릿수까지 일치하면 잘림이 없다는 뜻(`fetchTransactions` 검증에 사용). 건수만 세는 것보다 강한 증거
 - **차트가 실제로 그려졌는지**: 스크린샷을 눈으로 보는 대신 `getImageData`의 알파 채널에 0 아닌 픽셀이 있는지 세어 `document.title`에 `"CANVAS 3/3"`처럼 찍고 `--dump-dom | grep '<title>'`로 회수. 빈 캔버스가 배경색과 같아 '그려진 것처럼' 보이는 경우를 잡는다
 - 헤드리스 chrome은 **Bash 툴로 실행**할 것. PowerShell에서 `& $chrome ... 2>$null`로 돌리면 파일은 생성되는데 출력이 사라져 실패로 오인함
 - 차트·UI 시각 확인(헤드리스 Chrome): `public/index.html` 복사본에 mock(`window.supabase.createClient`→체이너블 thenable `{data,error}`)+`localStorage` 기기사용자 주입, `goTab()`로 탭 강제 후 `chrome --headless=new --screenshot=<절대경로>.png --force-device-scale-factor=2 --virtual-time-budget=8000`(탭 강제 setTimeout이 돌 시간 확보 — 없으면 탭 전환 전에 찍힘). `--screenshot`은 절대경로 필수(상대경로면 "액세스 거부(0x5)"로 파일 미생성). Chrome 경로: `C:\Program Files\Google\Chrome\Application\chrome.exe`

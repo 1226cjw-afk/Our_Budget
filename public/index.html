@@ -947,8 +947,12 @@ const TY_CAT_KINDS = {income:"소득", none:"제외"};                          
 const TY_RATE  = {credit:.15, check:.30, cash:.30, none:0};
 const TY_COLOR = {credit:"#F05470", check:"#2EC890", cash:"#E8961E"};
 const SALARY_RE = /월급|급여|상여|보너스/;   // 소득 카테고리 '추천'에만 사용 — 집계는 CTMAP(사용자 매핑)만 따른다
-// 앱에서 DDL을 실행할 권한이 없어(anon key), 테이블이 없으면 화면에 이 SQL을 띄워 직접 실행하게 한다
-const TAX_MAP_DDL = `create table tax_map (
+// 앱에서 DDL을 실행할 권한이 없어(anon key), 테이블이 없으면 화면에 이 SQL을 띄워 직접 실행하게 한다.
+// ⚠️ 이 SQL은 사용자가 그대로 붙여넣어 실행한다 → 나머지 5개 테이블과 **똑같은 경계**여야 한다.
+//    예전엔 `create policy "all" ... using (true)`(anon 포함)였다. 그대로 실행하면 로그인 게이트를
+//    우회해 anon key만으로 tax_map을 읽을 수 있어, 2026-08-07에 닫은 구멍을 앱이 다시 열어주는 꼴이었다.
+//    revoke가 따로 필요한 이유: Supabase는 public 스키마의 새 테이블에 anon 권한을 기본 부여한다.
+const TAX_MAP_DDL = `create table if not exists public.tax_map (
   member text references members(name) on delete cascade,
   type   text not null check (type in ('method','category')),
   value  text not null default '',
@@ -957,8 +961,12 @@ const TAX_MAP_DDL = `create table tax_map (
   check ( (type='method'   and kind in ('credit','check','cash','none'))
        or (type='category' and kind in ('income','none')) )
 );
-alter table tax_map enable row level security;
-create policy "all" on tax_map for all using (true) with check (true);`;
+alter table public.tax_map enable row level security;
+-- 가족 안에서는 서로의 내역을 다 본다. 경계는 '로그인 여부' 하나 (다른 테이블과 동일)
+create policy family_only on public.tax_map
+  for all to authenticated using (true) with check (true);
+-- 정책만 바꾸고 이 줄을 빠뜨리면 anon에게 200 []가 간다 (차단처럼 보이지만 열려 있음)
+revoke all on public.tax_map from anon;`;
 // 탭 아이콘 — Lucide 스타일 인라인 SVG (이모지는 OS별 렌더가 제각각이라 구조 아이콘엔 미사용)
 const NI = p => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
 const TABS = [
@@ -1052,7 +1060,7 @@ function orphanTransfers(){
     const n = Math.min(ex.length, inc.length);   // 앞의 n쌍은 정상 매칭, 남는 쪽이 짝 없는 leg
     out.push(...ex.slice(n), ...inc.slice(n));
   });
-  return out.sort((a,b) => a.date < b.date ? 1 : -1);
+  return out.sort((a,b) => String(b.date).localeCompare(String(a.date)));  // 최신순 (동일 날짜는 원래 순서 유지)
 }
 // 합계 헬퍼 (지출/수입) — 여러 뷰에서 반복되던 filter+reduce 통합. 이동은 합계에서 제외
 const expOf = rs => rs.reduce((s,r)=>s+((r.type!=="입금"&&!isTransfer(r))?r.amount:0),0);
@@ -1098,6 +1106,25 @@ function recentPeriods(n, member){
   return Array.from({length:n},(_,i)=>billingPeriod(member,new Date(cur.start.getFullYear(),cur.start.getMonth()-(n-1-i),sd)));
 }
 const inPeriod = (s,p) => { const d=parseDate(s); return d>=p.start&&d<=p.end; };
+/* 최근 n주기로 행을 나눈다 (인덱스 n-1 = 이번 주기).
+   ⚠️ 멤버마다 주기 시작일이 다르다(정우 25일 / 지현 21일). 한 사람 기준으로 잘라내면
+   지현의 21~24일 거래가 엉뚱한 주기에 들어가, 같은 '이번 주기'인데 내역 탭과 분석·분류 탭의
+   숫자가 어긋난다 — 내역 탭 scoped()는 행마다 그 멤버의 주기를 쓰기 때문.
+   → 라벨은 기준 멤버 주기로 표시하되, 버킷 판정은 각 행의 멤버 주기로 한다. */
+function bucketByPeriod(rows, n, refMember){
+  const cache={};   // 멤버별 recentPeriods — 행마다 Date를 새로 만들지 않도록
+  const psOf = m => cache[m] || (cache[m] = recentPeriods(n, MEMBERS.includes(m) ? m : refMember));
+  const out = Array.from({length:n}, () => []);
+  rows.forEach(r => {
+    const ps = psOf(r.member);
+    for(let i=0;i<n;i++){ if(inPeriod(r.date, ps[i])){ out[i].push(r); break; } }
+  });
+  return out;
+}
+/* '전체' 필터인데 멤버들의 주기 시작일이 갈리는 상태 — 표시 라벨은 기준 멤버 것이지만
+   집계는 각자 주기라, 그 사실을 화면에 밝혀야 라벨과 숫자가 어긋나 보이지 않는다 */
+const mixedPeriods = () => memberFilter==="전체" &&
+  new Set(MEMBERS.map(m => BILLING_STARTS[m]||25)).size > 1;
 // 현재 조회 중인 주기 — periodOffset(0=이번, -1=한 주기 전…) 반영
 function viewedPeriod(member){
   const cur=billingPeriod(member);
@@ -1618,10 +1645,13 @@ function render(){
       <div style="font-size:1.05rem;font-weight:900;color:var(--r);margin-bottom:8px">⚠️ 데이터 연결 오류</div>
       <div style="font-size:.82rem;color:var(--t2);margin-bottom:14px;line-height:1.75">${loadError}</div>
       <div style="font-size:.76rem;color:var(--t3);line-height:1.9">
-        <b style="color:var(--t2)">해결 방법 (Supabase 대시보드)</b><br>
-        1. Table Editor → members / transactions / category_limits / master_data → RLS Policies<br>
-        2. "New Policy" → "For full customization"<br>
-        3. Policy: <code style="background:var(--bg3);padding:2px 6px;border-radius:4px">FOR ALL USING (true) WITH CHECK (true)</code>
+        <b style="color:var(--t2)">해결 방법</b><br>
+        1. 인터넷 연결을 확인하고 아래 '다시 시도'를 눌러보세요.<br>
+        2. 계속되면 로그아웃 후 다시 로그인해보세요 (세션 만료일 수 있어요).<br>
+        3. 그래도 안 되면 Supabase 대시보드 → Table Editor → RLS Policies에서
+        가계부 6개 테이블에 <code style="background:var(--bg3);padding:2px 6px;border-radius:4px">family_only</code> 정책이 남아 있는지 확인:
+        <code style="background:var(--bg3);padding:2px 6px;border-radius:4px">FOR ALL TO authenticated USING (true) WITH CHECK (true)</code><br>
+        <b style="color:var(--r)">⚠️ <code>TO authenticated</code>를 빼면 로그인 없이도 데이터가 열립니다</b> — 이 부분은 지우지 마세요.
       </div>
       <button onclick="retryLoad()" style="margin-top:14px;padding:10px 20px;background:var(--acg);color:var(--ac);border:1px solid rgba(201,147,58,.25);border-radius:11px;font-weight:700;font-size:.84rem">다시 시도</button>
     </div></div>`;
@@ -1761,13 +1791,15 @@ function viewCategory(){
   Object.entries(sum).sort((a,b)=>b[1].exp-a[1].exp).forEach(([c,v])=>h+=catCard(c,v,totExp?Math.round(v.exp/totExp*100):0,c!=="미지정"));
   if(scope==="all"){
     const _catMem=memberFilter!=="전체"?memberFilter:MEMBERS[0];
-    // scope==='all'이라 rows===myRows() — 주기마다 재스캔하지 않고 rows 재사용
-    [...recentPeriods(AN_PERIODS,_catMem)].reverse().forEach(p=>{
-      const ma=aggCat(rows.filter(r=>inPeriod(r.date,p)),field);
-      if(!Object.keys(ma).length) return;
-      h+=`<div class="sec-t">📅 ${p.label}</div>`;
+    // scope==='all'이라 rows===myRows() — 각 행을 그 멤버의 주기로 버킷팅(라벨은 기준 멤버 것)
+    const ps=recentPeriods(AN_PERIODS,_catMem), buckets=bucketByPeriod(rows,AN_PERIODS,_catMem);
+    const mixed=mixedPeriods();
+    for(let i=ps.length-1;i>=0;i--){
+      const ma=aggCat(buckets[i],field);
+      if(!Object.keys(ma).length) continue;
+      h+=`<div class="sec-t">📅 ${ps[i].label}${mixed?' <span style="text-transform:none;letter-spacing:0">· 각자 주기 기준</span>':''}</div>`;
       Object.entries(ma).sort((a,b)=>b[1].exp-a[1].exp).forEach(([c,v])=>h+=catCard(c,v,0));
-    });
+    }
   }
   return h+`</div>`;
 }
@@ -1851,7 +1883,8 @@ function viewAnalysis(){
   const _anMem = memberFilter!=="전체" ? memberFilter : MEMBERS[0];
   const periods = recentPeriods(AN_PERIODS, _anMem);
   const mine = myRows();  // ROWS 스캔 1회로 고정 — 주기별·반복지출에서 재사용(주기 수만큼 재필터하던 것 제거)
-  const rowsByPeriod = periods.map(p => mine.filter(r=>inPeriod(r.date,p)));
+  // 각 행을 '그 멤버의' 주기로 버킷팅 — 내역 탭과 같은 기준 (위 bucketByPeriod 주석 참조)
+  const rowsByPeriod = bucketByPeriod(mine, AN_PERIODS, _anMem);
   const labels = periods.map(p => p.label.split(" ")[0]);
 
   // 주기별 수입·지출 합계
@@ -1891,14 +1924,14 @@ function viewAnalysis(){
   const avgPct = avg?Math.round((last-avg)/avg*100):0;
   const net    = lastInc-last;
 
-  // 반복 지출 (세부내역 기준, 2주기 이상 등장)
+  // 반복 지출 (세부내역 기준, 2주기 이상 등장) — 주기 판정은 위 버킷을 그대로 재사용해
+  // 차트와 같은 기준을 쓴다(따로 findIndex로 재판정하면 멤버별 주기가 다시 어긋난다)
   const byMemo={};
-  mine.filter(r=>r.type==="지출"&&r.memo&&!isTransfer(r)).forEach(r=>{
-    const pi=periods.findIndex(p=>inPeriod(r.date,p)); if(pi<0) return;
+  rowsByPeriod.forEach((rs,pi)=>rs.filter(r=>r.type==="지출"&&r.memo&&!isTransfer(r)).forEach(r=>{
     const k=r.category+"::"+r.memo.replace(/\(.*\)/,"").trim();
     (byMemo[k]=byMemo[k]||{cat:r.category,memo:r.memo,total:0,ps:new Set()});
     byMemo[k].total+=r.amount; byMemo[k].ps.add(pi);
-  });
+  }));
   const rec=Object.values(byMemo).map(x=>({...x,span:x.ps.size})).filter(x=>x.span>=2).sort((a,b)=>b.total-a.total);
 
   // 일회성 큰 지출 = 개별 거래가 '자기 카테고리 평소(중앙값)'보다 크게 튄 이상치
@@ -1920,7 +1953,9 @@ function viewAnalysis(){
   // 2) 주기별 지출 구성 — 카테고리 스택 막대 + 수입 막대 (한눈에 주기별 카테고리 지출/수입)
   if(catTotals.length || incomeByPeriod.some(v=>v>0)){
     h+=`<div class="panel"><div class="p-t">📊 주기별 지출 구성<span class="p-sub">카테고리별 · 수입</span></div>
-      <canvas id="chartPeriod" height="200"></canvas></div>`;
+      <canvas id="chartPeriod" height="200"></canvas>${mixedPeriods()
+        ? `<div style="font-size:.7rem;color:var(--t3);margin-top:10px;line-height:1.6">※ 멤버마다 결제주기 시작일이 달라, 가로축 라벨은 ${esc(_anMem)} 기준이고 집계는 각자의 주기로 나눴어요.</div>`
+        : ``}</div>`;
   }
 
   // 3) 카테고리별 지출 비중 (도넛, 이번 주기)
@@ -2134,6 +2169,20 @@ function tyAmounts(member, kind){
   });
   return amt;
 }
+
+/* 연말정산 매핑 컨트롤 — 연말정산 화면(등록/미등록)과 설정 탭(등록/미등록) 네 곳이 같은 마크업을 쓴다.
+   갈라두면 옵션 하나를 고칠 때 한 곳을 빠뜨리고, 그 화면만 조용히 옛 동작으로 남는다.
+   value 빈 문자열('')은 '(미지정)' 결제수단을 가리키는 정상 키다 — tax_map의 value가 not null default '' */
+function taxSelect(member, kind, value, cur){
+  const opts = kind==="category" ? TY_CAT_KINDS : TY_KINDS;
+  return `<select class="tym-sel${cur?'':' un'}" onchange="setTaxMap('${jsq(member)}','${kind}','${jsq(value)}',this.value)">
+      <option value=""${cur?'':' selected'}>미분류</option>
+      ${Object.keys(opts).map(k=>`<option value="${k}"${cur===k?' selected':''}>${opts[k]}</option>`).join("")}
+    </select>`;
+}
+/* 매핑 행의 금액 캡션 — '집계 제외 중'은 금액이 있는데 미분류일 때만 (셋 다 같은 문구여야 함) */
+const tyAmtLabel = (a, isCat, cur) =>
+  `올해 ${a?won(a):(isCat?'입금 없음':'사용 없음')}${!cur&&a?' · 집계 제외 중':''}`;
 
 /* 이름 규칙 추천 — 순서 중요 ('우리 체크카드'는 체크가 '카드'보다 먼저 걸려야 함) */
 function suggestKind(method){
@@ -2433,7 +2482,6 @@ function taxMapSection(member, kind, t){
   const isCat = kind==="category";
   let {registered, unregistered} = tyItems(member, kind);
   const bag  = (isCat?CTMAP:MTMAP)[member]||{};
-  const opts = isCat ? TY_CAT_KINDS : TY_KINDS;
 
   const amt=tyAmounts(member, kind);   // 올해 금액 (소득=입금, 지출=지출)
   // 카테고리는 대부분 지출용이라 전부 늘어놓으면 소득과 무관한 행이 대다수가 된다
@@ -2443,16 +2491,12 @@ function taxMapSection(member, kind, t){
 
   const row = (v,isReg) => {
     const cur=bag[v]||"", a=amt[v]||0;
-    const o = k=>`<option value="${k}"${cur===k?' selected':''}>${opts[k]}</option>`;
     return `<div class="tym">
       <div class="tym-bd">
         <div class="tym-nm">${v?esc(v):'<span style="color:var(--t3)">(미지정)</span>'}${isReg?'':' <span class="tym-tag">미등록</span>'}</div>
-        <div class="tym-a">올해 ${a?won(a):(isCat?'입금 없음':'사용 없음')}${!cur&&a?' · 집계 제외 중':''}</div>
+        <div class="tym-a">${tyAmtLabel(a,isCat,cur)}</div>
       </div>
-      <select class="tym-sel${cur?'':' un'}" onchange="setTaxMap('${jsq(member)}','${kind}','${jsq(v)}',this.value)">
-        <option value=""${cur?'':' selected'}>미분류</option>
-        ${Object.keys(opts).map(o).join("")}
-      </select></div>`;
+      ${taxSelect(member,kind,v,cur)}</div>`;
   };
 
   let h=`<div class="m-section">
@@ -2519,13 +2563,10 @@ async function applyTaxSuggest(member, type){
   const bag=(isCat?CTMAP:MTMAP)[member]||{};
   const {registered,unregistered}=tyItems(member,type);
   // 올해 실제 활동이 있는 항목만 — 활동 없는 카테고리까지 'none'으로 저장하면
-  // 그게 '매핑됨'이 되어 소득 목록에 도로 나타난다(화면 노이즈 복귀)
-  const year=new Date().getFullYear(), amt={};
-  ROWS.forEach(r=>{
-    if(r.member!==member || isTransfer(r) || String(r.date).slice(0,4)!==String(year)) return;
-    if(isCat){ if(r.type==="입금") amt[r.category||""]=(amt[r.category||""]||0)+r.amount; }
-    else     { if(r.type==="지출") amt[r.method||""]  =(amt[r.method||""]  ||0)+r.amount; }
-  });
+  // 그게 '매핑됨'이 되어 소득 목록에 도로 나타난다(화면 노이즈 복귀).
+  // 집계는 tyAmounts를 재사용한다 — 화면(taxMapSection)이 '미분류 N개'를 세는 기준과
+  // 여기서 실제로 저장하는 기준이 갈라지면, 버튼 숫자와 결과 건수가 어긋난다
+  const amt=tyAmounts(member, type);
   const rows=[...registered,...unregistered].filter(v=>!bag[v] && (amt[v]||0)>0)
     .map(v=>({member,type,value:v,kind:isCat?suggestCatKind(v):suggestKind(v)}));
   if(!rows.length){ toast("미분류 항목이 없어요"); return; }
@@ -2707,21 +2748,13 @@ function viewMaster(){
     // 연말정산 매핑을 여기서도 관리 (categories=소득 여부, methods=공제 구분)
     const tKind = key==="categories" ? "category" : key==="methods" ? "method" : null;
     const tBag  = tKind ? ((tKind==="category"?CTMAP:MTMAP)[masterMember]||{}) : {};
-    const tOpts = tKind==="category" ? TY_CAT_KINDS : TY_KINDS;
     h+=`<div class="m-section"><div class="m-title">${icons[key]} ${label} 관리</div>`;
     if(key==="categories") h+=`<div style="font-size:.72rem;color:var(--t3);margin:-6px 0 8px;line-height:1.6">💡 아이콘을 누르면 이모지를 바꿀 수 있어요 (모든 멤버 공통 적용)<br>💵 오른쪽 선택은 <b style="color:var(--t2)">연말정산에서 이 카테고리 입금을 소득으로 볼지</b>입니다</div>`;
     if(key==="methods")    h+=`<div style="font-size:.72rem;color:var(--t3);margin:-6px 0 8px;line-height:1.6">💳 오른쪽 선택은 <b style="color:var(--t2)">연말정산 공제 구분</b>입니다 (신용 15% · 체크/현금 30% · 제외)</div>`;
     h+=`<div class="m-list">`;
     if(items.length) items.forEach(v=>{
       const ico=key==="categories"?`<button class="m-ico" onclick="openIconPicker('${jsq(v)}')" aria-label="아이콘 변경">${icon(v)}</button>`:"";
-      let sel="";
-      if(tKind){
-        const cur=tBag[v]||"";
-        sel=`<select class="tym-sel${cur?'':' un'}" onchange="setTaxMap('${jsq(masterMember)}','${tKind}','${jsq(v)}',this.value)">
-          <option value=""${cur?'':' selected'}>미분류</option>
-          ${Object.keys(tOpts).map(k=>`<option value="${k}"${cur===k?' selected':''}>${tOpts[k]}</option>`).join("")}
-        </select>`;
-      }
+      const sel = tKind ? taxSelect(masterMember, tKind, v, tBag[v]||"") : "";
       h+=`<div class="m-item"><div style="display:flex;align-items:center;gap:10px;min-width:0">${ico}<span class="m-nm">${esc(v)}</span></div><div style="display:flex;align-items:center;gap:8px;flex-shrink:0">${sel}<button class="m-del" onclick="delMaster('${key}','${jsq(v)}')">삭제</button></div></div>`;
     });
     else h+=`<div class="m-empty">아래에서 항목을 추가해주세요.</div>`;
@@ -2746,12 +2779,9 @@ function viewMaster(){
                 <span class="m-nm" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${v?esc(v):'(미지정)'}</span>
                 <span class="tym-tag">미등록</span>
               </div>
-              <div class="tym-a">올해 ${a?won(a):(tKind==="category"?'입금 없음':'사용 없음')}${!cur&&a?' · 집계 제외 중':''}</div>
+              <div class="tym-a">${tyAmtLabel(a, tKind==="category", cur)}</div>
             </div>
-            <select class="tym-sel${cur?'':' un'}" onchange="setTaxMap('${jsq(masterMember)}','${tKind}','${jsq(v)}',this.value)">
-              <option value=""${cur?'':' selected'}>미분류</option>
-              ${Object.keys(tOpts).map(k=>`<option value="${k}"${cur===k?' selected':''}>${tOpts[k]}</option>`).join("")}
-            </select></div>`;
+            ${taxSelect(masterMember, tKind, v, cur)}</div>`;
         });
         h+=`</div>`;
       }

@@ -4,8 +4,10 @@ const https = require("https");
 const HOST = "hqyvkyflakhuvethrstw.supabase.co";
 const KEY  = "sb_publishable_phZGH7odPTBoB4z8FQF_4A_mO2ltQ6J";
 const BUDGET = ["members","transactions","category_limits","master_data","tax_map","app_settings"];
-// 이 뷰들은 security_invoker=off + owner=postgres라 하위 테이블 RLS를 우회한다.
-// 앱은 쓰지 않지만 anon SELECT가 열려 있으면 테이블을 잠가도 잔액·카테고리 지출이 그대로 샌다
+// 이 뷰들은 원래 security_invoker=off + owner=postgres라 하위 테이블 RLS를 우회했다 —
+// 테이블만 잠갔을 때 anon이 잔액·카테고리 지출을 그대로 읽는 것을 실측으로 확인했다(200).
+// 지금은 두 겹으로 막혀 있다: ① anon revoke ② security_invoker=on(2026-08-07).
+// ②가 있어야 누가 나중에 grant를 되돌려도 RLS가 막는다 — 그래도 ①의 회귀를 잡으려고 계속 검사한다.
 const VIEWS  = ["v_account_balance","v_limit_usage","v_period_category"];
 const FOREST = ["forests","rules","favorites"];   // 휴양림 무영향 확인용
 
