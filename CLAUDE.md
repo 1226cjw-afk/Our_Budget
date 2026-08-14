@@ -218,22 +218,26 @@ revoke all on public.<table> from anon;
 ① anon `revoke` ② `security_invoker=on`.
 ②를 추가한 이유: ①만으로는 **"권한을 회수한 상태를 계속 유지해야" 성립하는 방어**다.
 누가 나중에 `grant`를 되돌리면 조용히 다시 열린다. `security_invoker=on`이면 호출자 권한으로 평가되므로 그 경우에도 RLS가 막는다.
-앱은 이 뷰를 쓰지 않는다(`public/index.html`에 참조 0건). **새 뷰도 `security_invoker=on`으로 만들 것** — Supabase 어드바이저가 ERROR로 잡는다.
+**새 뷰도 `security_invoker=on`으로 만들 것** — Supabase 어드바이저가 ERROR로 잡는다.
 
-⚠️ **이 뷰 3개는 안 쓰는 게 아니라 쓰면 틀린다** (2026-08-14 실측). 전부 멤버 개념이 없던 옛 모델의 잔재다:
-- `v_limit_usage` — **`member` 컬럼이 없다**. `category`만으로 `category_limits`와 join하므로,
-  멤버별 한도(복합 PK)로 바뀐 뒤로는 한 사람의 한도가 가족 전체 지출과 대조된다.
-- `v_period_category` — `billing_key(date)`로 주기를 매기는데 이 함수가 **25일을 하드코딩**한다
-  (`extract(day from d) >= 25`). 멤버별 시작일(지현 21일)을 무시 — 앱에서 2026-08-14에 고친 것과 같은 종류의 버그가 DB에 남은 것.
+### ✅ 뷰 3개 + `billing_key()`는 삭제됨 (2026-08-14, 마이그레이션 `drop_legacy_budget_views`)
+막아만 두다가 지웠다. 앱 참조 0건이면서 **쓰면 조용히 틀린 값이 나오는** 물건이었기 때문이다 —
+전부 멤버 개념이 없던 옛 모델의 잔재다:
+- `v_limit_usage` — `member` 컬럼이 없어 `category`만으로 join. 멤버별 한도(복합 PK)로 바뀐 뒤로는
+  한 사람의 한도가 **가족 전체 지출**과 대조됐다.
+- `v_period_category` — `billing_key(date)`가 **25일을 하드코딩**(`extract(day from d) >= 25`)해
+  지현(21일) 주기를 무시. 앱에서 같은 날 고친 버그가 DB에 남아 있던 것.
 - `v_account_balance` — 멤버 구분 없이 계좌명으로만 합산.
-- `public.billing_key(date)`도 같은 이유로 쓰지 말 것. `IMMUTABLE`·`SECURITY INVOKER`라 위험하진 않지만
-  (어드바이저의 `function_search_path_mutable` WARN 대상), 결과가 정우 기준으로만 맞다.
 
-→ **집계는 앱의 `bucketByPeriod`/`billingPeriod`가 유일한 기준**이다. 이 뷰·함수로 숫자를 검산하면 서로 다른 답이 나온다.
-미사용이므로 정리(`drop view`) 후보지만, 지우는 건 되돌리기 어려우니 사용자 확인 후에 할 것.
+→ **주기 집계의 유일한 기준은 앱의 `bucketByPeriod`/`billingPeriod`다.** DB 쪽에 '편한 집계 뷰'를
+다시 만들고 싶어지면, 멤버별 시작일(`app_settings.billing_start_*`)을 받지 못하는 순간 같은 버그가 재생산된다.
+만들려면 `member`를 축에 넣고 시작일을 조인해야 한다.
+- 원본 정의는 커밋 `docs: 쓰지 않는 옛 뷰·함수 삭제` 메시지에 그대로 남겨뒀다(되돌릴 일이 있으면 거기서).
+- `verify_rls.js`는 이 3개를 계속 검사한다 — 이제 404가 정상이고, 같은 이름으로 다시 생기면 잡는다
+  (원래 RLS를 우회해 anon에게 잔액이 새던 경로라 이름 자체가 지뢰다).
 
 검증 짝 (둘 다 통과해야 끝난 것):
-- `node scripts/verify_rls.js` — anon이 막혔는가 (기대: 가계부 401, 휴양림 200)
+- `node scripts/verify_rls.js` — anon이 막혔는가 (기대: 가계부 401, 삭제된 뷰 404, 휴양림 200)
 - `node scripts/verify_login.js` (BUDGET_PW 필요) — 로그인 세션은 읽히는가 + 덤프 건수 대조
   - 2026-08-14 실행: `ALL PASS`. 건수가 MCP로 읽은 값과 완전 일치(507/2/3/30/18/2) — 서버 안쪽과 바깥쪽
     두 경로가 같은 답을 냈다는 뜻이라, 세션이 전량을 읽고 잘림도 없음을 함께 증명한다
@@ -448,7 +452,7 @@ Supabase Auth 공유 계정 1개. Worker 프록시도, 자체 인증 코드도 �
 3. **정책·권한**: `pg_policies` + `has_table_privilege('anon'|'authenticated', …)`
    → 기대: anon 전부 false / authenticated SELECT·INSERT·UPDATE·DELETE 전부 true + policy `using(true) with check(true)`.
 4. **어드바이저**: `mcp__supabase__get_advisors({type:"security"})` — ERROR 0건이어야 한다.
-   현재 WARN 2건은 알려진 것: `billing_key` search_path(무해, 위 뷰 절 참조) / **누출 비밀번호 보호 비활성**.
+   현재 WARN 1건: **누출 비밀번호 보호 비활성**. (`billing_key` search_path WARN은 함수 삭제로 해소됨)
    ⚠️ 후자는 이 앱에선 예사롭지 않다 — 보안 경계 전체가 **공용 비밀번호 하나**다.
    Supabase 대시보드 → Authentication → Password Protection에서 켜두는 편이 낫다(HaveIBeenPwned 대조, 무료·설정 한 번).
 5. ⚠️ 쿼리는 **가계부 6개 테이블 + 뷰 3개로 범위를 명시**할 것 — `public` 전체를 훑으면 휴양림 프로젝트가 섞여 나온다.
