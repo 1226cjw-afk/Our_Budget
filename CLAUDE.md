@@ -29,7 +29,7 @@ branch: main
 - ⚠️ 토큰 만료 시 모든 `mcp__supabase__*`가 `Unauthorized`로 실패한다(재시작해도 안 됨).
   이때 REST가 폴백이지만 **anon key만으로는 더 이상 안 된다**(2026-08-07 RLS 축소로 전부 `401`).
   공용 계정 로그인으로 access_token을 받아야 한다 → `scripts/lib_auth.js`의 `login()` 재사용,
-  비밀번호는 `BUDGET_PW` 환경변수로만 전달(`$env:BUDGET_PW='...'; node scripts\dump.js`).
+  비밀번호는 `BUDGET_PW` 환경변수로만 전달 — 전달법은 아래 '스크립트에 비밀번호 넘기기' 참조.
   단 **DDL은 불가** → 테이블 생성은 사용자에게 SQL을 주고 대시보드에서 실행 요청.
   REST가 `404`면 그 테이블이 없는 것(JS 클라이언트에선 `PGRST205`), `401`이면 **인증 문제**(테이블은 있을 수 있음) — 둘을 섞어 읽지 말 것.
 - BOM 회피: PowerShell 대신 node `https.get`으로 받아 파일로 쓰면 `U+FEFF` 제거가 아예 불필요
@@ -234,7 +234,9 @@ revoke all on public.<table> from anon;
 
 검증 짝 (둘 다 통과해야 끝난 것):
 - `node scripts/verify_rls.js` — anon이 막혔는가 (기대: 가계부 401, 휴양림 200)
-- `$env:BUDGET_PW='...'; node scripts/verify_login.js` — 로그인 세션은 읽히는가 + 덤프 건수 대조
+- `node scripts/verify_login.js` (BUDGET_PW 필요) — 로그인 세션은 읽히는가 + 덤프 건수 대조
+  - 2026-08-14 실행: `ALL PASS`. 건수가 MCP로 읽은 값과 완전 일치(507/2/3/30/18/2) — 서버 안쪽과 바깥쪽
+    두 경로가 같은 답을 냈다는 뜻이라, 세션이 전량을 읽고 잘림도 없음을 함께 증명한다
 - 비밀번호 없이 정책만 확인하려면 SQL에서 역할을 갈아끼운다(가장 빠른 판별):
   `begin; set local role authenticated; select count(*) from transactions; rollback;`
   ⚠️ 이때 **대조군을 반드시 같이 볼 것** — `postgres`는 RLS를 우회하므로 역할 전환이 실패해도 같은 숫자가 나온다.
@@ -451,8 +453,26 @@ Supabase Auth 공유 계정 1개. Worker 프록시도, 자체 인증 코드도 �
    Supabase 대시보드 → Authentication → Password Protection에서 켜두는 편이 낫다(HaveIBeenPwned 대조, 무료·설정 한 번).
 5. ⚠️ 쿼리는 **가계부 6개 테이블 + 뷰 3개로 범위를 명시**할 것 — `public` 전체를 훑으면 휴양림 프로젝트가 섞여 나온다.
 
-> 실제 REST 왕복(로그인 세션으로 전량이 오는가)은 `$env:BUDGET_PW='...'; node scripts\verify_login.js`.
+> 실제 REST 왕복(로그인 세션으로 전량이 오는가)은 `node scripts\verify_login.js`.
 > 비밀번호가 없으면 여기까지는 확인할 수 없다 — MCP로는 서버 안쪽만 본다.
+
+### 스크립트에 비밀번호 넘기기 (BUDGET_PW)
+⚠️ **`$env:BUDGET_PW='비밀번호'`를 PowerShell에 직접 치지 말 것.** PSReadLine이 명령줄을 그대로
+`%APPDATA%\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt`에 남겨 **평문으로 영구 보존**된다.
+아래 방식은 입력이 화면에도 기록에도 남지 않는다:
+```powershell
+$s = Read-Host '가족 공용 비밀번호' -AsSecureString
+$env:BUDGET_PW = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($s))
+node C:\Users\1226c\Projects\Our_Budget\scripts\verify_login.js
+Remove-Item Env:\BUDGET_PW
+```
+- **스크립트는 전체 경로로 부를 것** — `__dirname` 기준으로 파일을 찾게 짜여 있어 어느 폴더에서 실행해도 동작한다
+  (상대경로 `scripts\...`는 홈 폴더에서 치면 `MODULE_NOT_FOUND`로 떨어진다. 실제로 겪음)
+- Read-Host는 **입력이 화면에 안 보이는 게 정상**(별표도 안 나옴)
+- 사용자에게 실행을 부탁할 땐 Claude 세션의 `!` 명령이 아니라 **본인 터미널**로 안내할 것 —
+  세션에서 돌리면 비밀번호가 대화에 남고, `Read-Host`는 비대화형이라 어차피 멈춘다
+- 유출 점검: `ConsoleHost_history.txt`에서 `BUDGET_PW`를 세어 Read-Host/Remove-Item 형태로 전부 설명되는지 확인
+  (값을 출력하지 말 것 — `grep -c`로 개수만)
 
 ### DB 스키마 변경이 필요할 때
 Supabase MCP가 연결되어 있으면:

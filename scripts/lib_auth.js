@@ -3,8 +3,20 @@
 // 스크립트가 데이터를 읽으려면 access_token이 있어야 한다.
 //
 // 비밀번호는 코드·리포·커밋 어디에도 두지 않는다 → 환경변수 BUDGET_PW로 받는다.
-//   PowerShell:  $env:BUDGET_PW='비밀번호'; node scripts\dump.js
-//   bash:        BUDGET_PW='비밀번호' node scripts/dump.js
+//
+// ⚠️ PowerShell에서 `$env:BUDGET_PW='비밀번호'`처럼 **직접 치지 말 것**.
+//    PSReadLine이 명령줄을 그대로 파일에 남긴다
+//    ($env:APPDATA\Microsoft\Windows\PowerShell\PSReadLine\ConsoleHost_history.txt)
+//    → 비밀번호가 평문으로 영구 보존된다. 아래 Read-Host 방식은 입력이 화면에도 기록에도 안 남는다.
+//
+//   PowerShell (권장):
+//     $s = Read-Host '가족 공용 비밀번호' -AsSecureString
+//     $env:BUDGET_PW = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($s))
+//     node C:\Users\1226c\Projects\Our_Budget\scripts\<스크립트>.js   # 전체 경로면 어느 폴더에서든 동작
+//     Remove-Item Env:\BUDGET_PW                                      # 쓰고 나면 지운다
+//
+//   bash: 앞에 공백 한 칸을 두면 히스토리에 안 남는다(HISTCONTROL=ignorespace일 때)
+//      BUDGET_PW='비밀번호' node scripts/dump.js
 const https = require("https");
 
 const HOST  = "hqyvkyflakhuvethrstw.supabase.co";
@@ -30,7 +42,11 @@ async function login(){
   const pw = process.env.BUDGET_PW;
   if(!pw){
     console.error("BUDGET_PW 환경변수가 필요합니다 (가족 공용 비밀번호).");
-    console.error("  PowerShell:  $env:BUDGET_PW='...'; node scripts\\<스크립트>.js");
+    console.error("  PowerShell (기록에 안 남는 방식):");
+    console.error("    $s = Read-Host '가족 공용 비밀번호' -AsSecureString");
+    console.error("    $env:BUDGET_PW = [Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($s))");
+    console.error("    node " + __filename.replace(/lib_auth\.js$/, "<스크립트>.js"));
+    console.error("    Remove-Item Env:\\BUDGET_PW");
     process.exit(2);
   }
   const r = await req("POST", "/auth/v1/token?grant_type=password",

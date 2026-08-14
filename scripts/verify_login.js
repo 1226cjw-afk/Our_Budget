@@ -1,7 +1,7 @@
 // RLS 축소의 '반대편' 검증 — 로그인한 세션은 여전히 전부 읽히는가.
 // verify_rls.js(anon이 막혔는가)와 짝. 둘 다 통과해야 변경이 끝난 것이다.
 //
-//   $env:BUDGET_PW='비밀번호'; node scripts\verify_login.js
+//   비밀번호 전달법은 lib_auth.js 머리주석 참조 (PowerShell에 직접 치면 명령 기록에 평문으로 남는다)
 //
 // 비밀번호·access_token은 출력하지 않는다.
 const fs = require("fs"), path = require("path");

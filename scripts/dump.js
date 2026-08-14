@@ -1,6 +1,6 @@
 // 전량 덤프(롤백·백업 근거).
 // ⚠️ 2026-08-07 RLS를 to authenticated로 좁힌 뒤로 anon key로는 401이다 → 공용 계정 로그인이 필요하다.
-//    $env:BUDGET_PW='비밀번호'; node scripts\dump.js
+//    비밀번호 전달법은 lib_auth.js 머리주석 참조 (PowerShell에 직접 치면 명령 기록에 평문으로 남는다)
 // ⚠️ 응답을 문자열로 누적하지 말 것 — 청크 경계에서 한글 UTF-8이 쪼개져 U+FFFD로 조용히 깨진다.
 const fs = require("fs"), path = require("path");
 const { login, authedGet } = require("./lib_auth");
