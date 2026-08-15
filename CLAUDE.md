@@ -554,6 +554,11 @@ Windows 작업 사본은 CRLF, 리포 blob은 LF라 작업 사본과 비교하�
 브라우저 없이 인라인 JS를 확인하는 법: 마지막 `<script>` 블록을 추출 → `new Function`/`Module._compile`에 stub(supabase·Chart·document·localStorage) 주입해 파싱/순수함수 단위테스트. `node`로 실행.
 - 빠른 문법 검사(복붙용): `node -e "const fs=require('fs');const c=[...fs.readFileSync('public/index.html','utf8').matchAll(/<script>([\s\S]*?)<\/script>/g)].pop()[1];try{new Function(c);console.log('JS OK')}catch(e){console.error(e.message);process.exit(1)}"`
 - 순수함수 단위테스트: 헬퍼를 **손으로 복사하지 말고** `public/index.html`에서 정규식으로 뽑아 `new Function(code+'return {…}')`으로 실행 — 복사본은 원본이 바뀌어도 옛 코드를 검증한다. 상태 매트릭스(경계값 9종)로 불변식을 돌리는 게 값 1~2개 대조보다 훨씬 잘 잡힌다(`tyNeed` 검증에 사용)
+- 상태까지 바꾸려면 `new Function(code + 'return (expr)=>eval(expr)')` — 돌려받은 eval 훅으로 내부 스코프의 **전역 대입**이 된다(`sb`를 가짜로 갈아끼워 `fetchTransactions` 페이지네이션을 테스트했다). `return {…}`로는 함수만 꺼내져 상태를 못 바꾼다
+- 가짜 `sb`는 **thenable + `.range()`** 형태여야 한다(supabase 빌더가 thenable). `then`에 지연을 넣으면 직렬/병렬을 **시간으로** 가를 수 있다 — "10,000행 10요청이 왕복 2회분(220ms)에 끝난다"가 병렬화의 증거
+- 성능 개선은 **개선 전 파일로 같은 시나리오를 돌려 대조**할 것: `git show HEAD:public/index.html > old.html` 후 동일 하네스로 측정. 절대값만 보면 "빨라진 것 같다"에서 못 벗어난다(11,692ms → 668ms를 이렇게 확정)
+- ⚠️ CPU 스로틀 측정은 **±20% 편차** — 1회로 결론내지 말 것(같은 조건에서 771ms/991ms가 나왔다)
+- 검사 스크립트(`check_*.js`)를 고쳤으면 **일부러 깨서 FAIL이 나는지** 확인할 것 — `check_authgate.js`가 문자열 앵커라 그 문자열이 주석에만 남아도 '우연히 통과'하고 있었다(2026-08-15)
 - **실 DB 검증**: 복사본에 mock 없이 `localStorage` 기기사용자 + `goTab()`만 주입하면 실제 Supabase로 렌더된다. 목은 "숫자가 나온다"까지만 보장 — 실제 매핑·데이터로 띄워야 결론이 맞는지 알 수 있다
   - ⚠️ **2026-08-07 이후로는 세션도 필요하다.** 로그인 게이트가 세션 없으면 `loadAll()`을 아예 호출하지 않으므로,
     빈 프로필로 띄우면 로그인 카드만 나온다(빈 화면이 아니라 **로그인 화면**으로 보이는 게 정상). 실데이터로 띄우려면
