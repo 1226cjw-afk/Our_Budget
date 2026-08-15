@@ -108,6 +108,20 @@ CSS · JS 모두 `public/index.html` 안에 인라인. 외부 의존성 (모두 
 > **'앱 시작'은 `load`가 아니라 DOMContentLoaded 시점**이다 — 여기서 `getSession`→`loadAll`이 출발한다.
 > 로그인된 상태면 여기에 REST 왕복(6쿼리 병렬, 거래 134KB JSON, 실측 RTT 0.15~0.19s)이 더 붙는다.
 > 회귀 의심 시: 총 바이트가 1MB를 넘거나 DCL이 load에 가까워지면 폰트/시작점을 먼저 볼 것.
+
+**데이터가 늘 때** (2026-08-15 실측, 실제 DB 분포로 합성한 행 기준):
+- **전송량은 문제가 아니다** — gzip이 11배 먹는다(카테고리·계좌가 반복되는 데이터라). 515건 10KB / 5,000건 92KB / 10,000건 183KB
+- **집계 함수는 전부 O(n)** — 10,000건에서도 데스크톱 기준 주기 버킷팅 29ms, 분류 집계 0.8ms, 연말정산 0.4ms, 짝없는이동 1.6ms. 이차 복잡도 없음
+- **급소는 내역 '전체'의 DOM 주입**이었다(행당 노드 16개). CPU 4배 스로틀 · 동일 시나리오 비교:
+
+  | 표시 행 수 | 개선 전 | 개선 후 | 노드 수 |
+  |---|---|---|---|
+  | 379행 (오늘) | 1,406~1,468ms | 771~991ms | 6,300 → 2,521 |
+  | 3,718행 | 11,692ms | 668ms | 61,493 → 2,521 |
+  | 7,473행 | (추정 24초) | 647ms | → 2,521 |
+
+  점진 렌더링이라 **첫 화면 비용이 행 수와 무관하게 고정**된다. 기본 화면(이번 주기, 28건)은 청크에 다 들어가
+  감시자조차 안 생기므로 개선 전후가 완전히 동일하다(실측으로 확인).
 - `cdn.jsdelivr.net`·`fonts.gstatic.com` `preconnect`로 연결 핸드셰이크 선점
 - 숫자 포맷 `comma()`는 `Intl.NumberFormat` 인스턴스 1회 캐시 재사용(렌더당 수백 회 호출 — 매 호출 `toLocaleString` 금지)
 
@@ -353,12 +367,14 @@ Supabase Auth 공유 계정 1개. Worker 프록시도, 자체 인증 코드도 �
 | `openPwChange() / doPwChange(ev)` | 설정 탭 비밀번호 변경. **현재 비밀번호를 재확인한 뒤** `updateUser` (위 '로그인 게이트' 절의 이유) |
 | `isAuthErr(e)` | 인증 실패를 일반 로드 오류와 구분 (`401`·`JWT`·`PGRST301`·`Invalid Refresh Token`) — 화면 분기의 기준 |
 | `loadAll()` | members·transactions·category_limits·master_data·app_settings 병렬 로드. 끝에서 `rebuildCatOrder()` |
-| `fetchTransactions()` | 거래 전량 수신 — `count:"exact"`의 전체 행 수와 실수신 건수를 대조해 모자라면 `.range()`로 이어 받는다. PostgREST `max-rows` 상한에 걸리면 **에러 없이 잘려** 모든 집계가 조용히 틀어지므로 (507행/2026-08-14 기준 미도달, 연 ~650건 페이스) |
+| `fetchTransactions()` | 거래 전량 수신 — `count:"exact"`의 전체 행 수와 실수신 건수를 대조해 모자라면 `.range()`로 이어 받는다. PostgREST `max-rows` 상한에 걸리면 **에러 없이 잘려** 모든 집계가 조용히 틀어지므로 (515행/2026-08-15 기준 미도달, 실측 712건/년 페이스 → 1,000행 돌파는 2027년 중). ⚠️**남은 페이지는 `Promise.all`로 한 번에** — 첫 응답의 `count`로 개수를 이미 알므로 순차 `await`로 왕복을 쌓지 말 것(옛 방식은 1,000행마다 왕복 1회 직렬, 10,000행이면 +9회). ⚠️`.range`는 오프셋 기반이라 받는 도중 다른 기기가 입력하면 경계에서 행이 겹친다 → **id로 중복 제거**(1건만 겹쳐도 집계가 조용히 부푼다) |
 | `warnBanner()` | 부분 로드 실패(`loadWarn`) 배너 — `render()`가 모든 탭 본문 앞에 붙임 |
 | `orphanTransfers() / orphanBanner()` | 짝 없는 계좌간 이동 leg 탐지 / 계좌 탭 경고 배너. 짝 판정 기준은 **`delEntry`의 mate 탐색과 동일하게 유지**(같은 멤버·날짜·금액의 반대 type) |
 | `rebuildCatOrder()` | 카테고리 색 배정 순서를 ROWS+MASTER 합집합의 로케일 정렬로 고정 (`loadAll` 끝에서 1회) |
 | `refreshData()` | 헤더 ↻ 버튼 — 수동 재로드 (다른 기기 입력 동기화) |
-| `setSearch(v)` / `listResultsHtml(all?)` | 내역 검색 — 200ms 디바운스 후 **`#listResults`만** 부분 갱신(`listResultsHtml`가 결과 목록 HTML만 반환). ⚠️`render()`로 전체 재렌더하면 조합 중인 input 노드까지 교체돼 한글 IME가 자모로 flush된다('ㅇㅣㅂㄹㅕㄱ'). 모바일 IME는 compositionstart/end를 신뢰성 있게 쏘지 않아 조합 가드로는 못 막음 — **포커스·커서 복원 방식으로 되돌리지 말 것** |
+| `setSearch(v)` / `listResultsHtml(all?)` | 내역 검색 — 200ms 디바운스 후 **`#listResults`만** 부분 갱신(`listResultsHtml`가 결과 목록 HTML만 반환). ⚠️`render()`로 전체 재렌더하면 조합 중인 input 노드까지 교체돼 한글 IME가 자모로 flush된다('ㅇㅣㅂㄹㅕㄱ'). 모바일 IME는 compositionstart/end를 신뢰성 있게 쏘지 않아 조합 가드로는 못 막음 — **포커스·커서 복원 방식으로 되돌리지 말 것**. 목록을 주입한 뒤엔 **반드시 `armListMore()`** (아래) |
+| `dayGroupHtml(date,rows)` / `listChunkHtml()` / `listMoreHtml()` | 내역 목록 점진 렌더링 — 날짜 그룹 1개 HTML / 다음 `LIST_CHUNK`(150)행어치를 **그룹 단위로** / 하단 감시자(`#listMore`). ⚠️자르는 단위는 '행'이 아니라 **'날짜 그룹'**이다 — 행으로 자르면 경계에서 같은 날짜 헤더가 두 번 나온다 |
+| `growList()` / `armListMore()` | 감시자 위치에 다음 청크를 이어 붙임 / `IntersectionObserver` 장착. ⚠️**목록을 새로 주입한 곳마다 `armListMore()`를 불러야 한다**(`render()`의 `after` 훅 + `setSearch` 부분갱신). ⚠️청크를 넣어도 감시자가 화면 안이면 IntersectionObserver엔 '교차 변화'가 없어 다시 안 쏜다 → `growList`가 화면 찰 때까지 직접 이어 그린다(빼면 스크롤할 것도 없이 멈춰 보임). 재렌더마다 옛 observer를 `disconnect` — 안 하면 detached 노드를 잡고 샌다 |
 | `setDeviceUser(name) / openDeviceUser()` | 기기 기본 사용자 설정·선택 모달 (헤더 👤 칩에서도 열림) |
 | `saveBillingStart(member)` | 멤버별 결제 주기 시작일 저장 |
 | `saveAppSetting(key,elId,min,max,def,unit)` | 전역 앱 설정 upsert (warn_threshold·analysis_periods) |
@@ -403,7 +419,7 @@ Supabase Auth 공유 계정 1개. Worker 프록시도, 자체 인증 코드도 �
 ### 탭 구성
 | 탭 | 설명 |
 |----|------|
-| 내역 (list) | 날짜별 거래 목록, 주기(◀▶ 과거 주기 탐색)/멤버 필터 + 검색바(searchQ)·건수 표시 |
+| 내역 (list) | 날짜별 거래 목록, 주기(◀▶ 과거 주기 탐색)/멤버 필터 + 검색바(searchQ)·건수 표시. **'전체' 필은 점진 렌더링**(150행씩, 스크롤하면 이어짐) — 건수 라벨은 '그린 것'이 아니라 **걸린 것 전체**를 보여준다 |
 | 분류 (cat) | 카테고리별/결제수단별 집계(catBy 토글 필), 주기(◀▶)/멤버 필터, 카드 클릭 시 내역 드릴다운 |
 | 한도 (limit) | 멤버별 한도 설정 및 진행률 (warn 임계값=WARN_TH) + 상단 '전체 한도 요약' 카드 |
 | 분석 (analysis) | 상단 세그먼트 2개(`anView`) — **지출분석**: 최근 AN_PERIODS주기 차트·반복지출·요약 / **연말정산**: 아래 참조 |
