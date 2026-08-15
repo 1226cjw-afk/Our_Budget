@@ -96,6 +96,18 @@ CSS · JS 모두 `public/index.html` 안에 인라인. 외부 의존성 (모두 
     첫 페인트만 데스크톱 ~150ms·4G ~520ms 늦추고 있었다. CSS 폰트 스택엔 이름이 남아 있는데 그건 **로컬 설치본 폴백**이다
   - `font-family` 1순위는 `'Pretendard Variable'` — dynamic-subset의 실제 패밀리명이 그것이다.
     `'Pretendard'`로만 적으면 웹폰트가 안 잡히고 조용히 시스템 폰트로 떨어진다
+
+**초기 로딩 기준선** (2026-08-15 배포본 실측, 콜드 캐시·세션 없음. Edge 헤드리스+CDP 워터폴):
+
+| | 앱 시작(DCL) | FCP | 총 바이트 |
+|---|---|---|---|
+| 데스크톱 | 730ms | 752ms | 462KB |
+| 4G+CPU4배 | 1,432ms | 1,176ms | 462KB |
+
+> 바꾸기 전엔 앱 시작이 각각 1,506ms / 4,274ms에 3.45MB였다.
+> **'앱 시작'은 `load`가 아니라 DOMContentLoaded 시점**이다 — 여기서 `getSession`→`loadAll`이 출발한다.
+> 로그인된 상태면 여기에 REST 왕복(6쿼리 병렬, 거래 134KB JSON, 실측 RTT 0.15~0.19s)이 더 붙는다.
+> 회귀 의심 시: 총 바이트가 1MB를 넘거나 DCL이 load에 가까워지면 폰트/시작점을 먼저 볼 것.
 - `cdn.jsdelivr.net`·`fonts.gstatic.com` `preconnect`로 연결 핸드셰이크 선점
 - 숫자 포맷 `comma()`는 `Intl.NumberFormat` 인스턴스 1회 캐시 재사용(렌더당 수백 회 호출 — 매 호출 `toLocaleString` 금지)
 
@@ -511,7 +523,7 @@ git add public/index.html
 git commit -m "..."
 git push
 # Cloudflare Workers 자동 배포 (1~2분 소요)
-node scripts/poll_deploy.js "<이번 변경에만 있는 문자열>"   # 반영을 기다림
+node scripts/poll_deploy.js "<이번 변경에만 있는 문자열>"   # 반영을 기다림 (인자: [최대라운드] [마커], 마커만 줘도 됨)
 node scripts/check_live.js                              # 반영 확인 (배포본 sha256 == origin/main blob)
 ```
 > GAS 백업 코드를 고쳤다면 `backup_appscript.gs`도 함께 커밋. (단 실제 반영은 Apps Script "새 버전" 재배포 필요)

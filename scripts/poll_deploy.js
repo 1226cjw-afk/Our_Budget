@@ -3,11 +3,16 @@
 //
 // ⚠️ 도착 판정은 반드시 '이번 변경에만 있는 콘텐츠 마커'로 할 것.
 //    상태코드만 보면 이전 배포에서 이미 참이던 조건을 '반영됨'으로 오독한다(실제로 겪음).
-// 사용법: node poll_deploy.js [최대라운드] [마커문자열]
+// 사용법: node poll_deploy.js [최대라운드] [마커문자열]   (마커만 줘도 됨)
+// ⚠️ 마커를 첫 인자로 주면 예전엔 Number(마커)=NaN이라 루프가 0회 돌고 곧장
+//    "시간 내 미반영"을 찍었다 — 배포가 안 된 것처럼 보이는 조용한 오작동이었다.
+//    이제 첫 인자가 숫자가 아니면 마커로 받는다.
 const https = require("https");
 const HOST = "ourbudget.1226cjw.workers.dev";
-const MAX = Number(process.argv[2] || 12), GAP = 20000;
-const MARKER = process.argv[3] || "";
+const a2 = process.argv[2], a3 = process.argv[3];
+const numFirst = a2 !== undefined && a2 !== "" && Number.isFinite(Number(a2));
+const MAX = numFirst ? Number(a2) : 12, GAP = 20000;
+const MARKER = (numFirst ? a3 : a2) || "";
 
 function get(p){
   return new Promise((res, rej) => {
