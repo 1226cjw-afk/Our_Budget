@@ -71,6 +71,7 @@ Our_Budget/
 │   ├── check_authgate.js#   로그인 게이트 배선이 소스에 들어갔는가
 │   ├── check_live.js    #   배포본이 커밋한 것과 동일한가 (sha256)
 │   ├── shot_auth.js     #   헤드리스 렌더 확인
+│   ├── measure_load.js  #   초기 로딩 실측 + 폰트·바이트 회귀 검사 (아래 기준선 표를 재현)
 │   └── poll_deploy.js   #   배포 반영 폴링
 ├── docs/superpowers/    # 스펙·플랜 (배포 안 됨)
 ├── backup_appscript.gs  # 구글 시트 백업용 GAS 코드 (참고용, 배포는 Apps Script에 수동 반영)
@@ -97,7 +98,8 @@ CSS · JS 모두 `public/index.html` 안에 인라인. 외부 의존성 (모두 
   - `font-family` 1순위는 `'Pretendard Variable'` — dynamic-subset의 실제 패밀리명이 그것이다.
     `'Pretendard'`로만 적으면 웹폰트가 안 잡히고 조용히 시스템 폰트로 떨어진다
 
-**초기 로딩 기준선** (2026-08-15 배포본 실측, 콜드 캐시·세션 없음. Edge 헤드리스+CDP 워터폴):
+**초기 로딩 기준선** — 재측정: `node scripts/measure_load.js [--4g]`
+(2026-08-15 배포본 실측, 콜드 캐시·세션 없음. Edge 헤드리스+CDP 워터폴):
 
 | | 앱 시작(DCL) | FCP | 총 바이트 |
 |---|---|---|---|
@@ -108,6 +110,9 @@ CSS · JS 모두 `public/index.html` 안에 인라인. 외부 의존성 (모두 
 > **'앱 시작'은 `load`가 아니라 DOMContentLoaded 시점**이다 — 여기서 `getSession`→`loadAll`이 출발한다.
 > 로그인된 상태면 여기에 REST 왕복(6쿼리 병렬, 거래 134KB JSON, 실측 RTT 0.15~0.19s)이 더 붙는다.
 > 회귀 의심 시: 총 바이트가 1MB를 넘거나 DCL이 load에 가까워지면 폰트/시작점을 먼저 볼 것.
+> `measure_load.js`가 그 판정을 대신한다 — **시간이 아니라 구조를 검사**한다(총 바이트 1MB 미만 /
+> Pretendard가 dynamic-subset인가 / Google Fonts가 되살아났는가). 시간은 환경 편차가 커서 기준선의 2배까지만 본다.
+> 통제 실험은 `--block='<패턴>'`(그 리소스만 빼고 재측정). 회귀본에 대고 3개가 FAIL 나는 것까지 확인해 뒀다.
 
 **데이터가 늘 때** (2026-08-15 실측, 실제 DB 분포로 합성한 행 기준):
 - **전송량은 문제가 아니다** — gzip이 11배 먹는다(카테고리·계좌가 반복되는 데이터라). 515건 10KB / 5,000건 92KB / 10,000건 183KB
@@ -541,6 +546,7 @@ git push
 # Cloudflare Workers 자동 배포 (1~2분 소요)
 node scripts/poll_deploy.js "<이번 변경에만 있는 문자열>"   # 반영을 기다림 (인자: [최대라운드] [마커], 마커만 줘도 됨)
 node scripts/check_live.js                              # 반영 확인 (배포본 sha256 == origin/main blob)
+node scripts/measure_load.js                            # 로딩 회귀 검사 (렌더·폰트를 건드렸다면)
 ```
 > GAS 백업 코드를 고쳤다면 `backup_appscript.gs`도 함께 커밋. (단 실제 반영은 Apps Script "새 버전" 재배포 필요)
 
