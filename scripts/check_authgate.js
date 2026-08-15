@@ -19,6 +19,9 @@ const must = [
 
 const forbid = [
   ["비밀번호 하드코딩",           /signInWithPassword\(\{[^}]*password\s*:\s*["'][^"']/],
+  // load는 폰트·이미지까지 기다려 첫 DB 요청이 그 뒤로 밀린다(2026-08-15 실측 +817ms/데스크톱).
+  // 주석 속 'window.onload' 언급은 오탐이므로 대입(=)까지 있어야 잡는다.
+  ["시작점이 window.onload",      /window\.onload\s*=/],
 ];
 
 // ESC 핸들러가 로그인 게이트를 닫으면 안 된다(닫히면 게이트가 아니다).
@@ -31,10 +34,12 @@ function escHandlerCode(s){
   return s.slice(i, end).replace(/\/\/[^\n]*/g, "");
 }
 
-// window.onload 본문 안에서 loadAll을 직접 부르면 안 된다 — 세션 없이 데이터를 긁게 된다.
+// 시작 핸들러 본문 안에서 loadAll을 직접 부르면 안 된다 — 세션 없이 데이터를 긁게 된다.
 // (startApp 안의 loadAll은 정상이므로 '근처 문자열' 매칭으로는 판정할 수 없다. 본문을 잘라내 확인)
-function onloadBody(s){
-  const i = s.indexOf("window.onload");
+// ⚠️ 앵커는 실제 시작점이어야 한다. 예전엔 "window.onload"로 찾았는데, 그 문자열이 주석에만 남아도
+//    엉뚱한 위치가 잡혀 검사가 '우연히' 통과한다 — 시작점을 옮길 땐 이 앵커도 같이 옮길 것.
+function bootBody(s){
+  const i = s.indexOf('document.addEventListener("DOMContentLoaded"');
   if(i < 0) return null;
   const open = s.indexOf("{", i);
   let d = 0;
@@ -65,12 +70,12 @@ else {
   console.log(`${hit ? "FAIL" : "ok  "} ESC가 로그인 게이트를 닫음 (없어야 함)`);
 }
 
-const body = onloadBody(src);
-if(body === null){ bad++; console.log("FAIL window.onload 본문을 못 찾음"); }
+const body = bootBody(src);
+if(body === null){ bad++; console.log("FAIL DOMContentLoaded 시작 핸들러 본문을 못 찾음"); }
 else {
   const hit = /loadAll\(/.test(body);
   if(hit) bad++;
-  console.log(`${hit ? "FAIL" : "ok  "} onload가 loadAll을 직접 호출 (없어야 함)`);
+  console.log(`${hit ? "FAIL" : "ok  "} 시작 핸들러가 loadAll을 직접 호출 (없어야 함)`);
 }
 
 console.log(bad ? `\n${bad} FAILED` : "\nALL PASS");

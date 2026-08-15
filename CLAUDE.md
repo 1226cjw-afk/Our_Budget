@@ -84,8 +84,18 @@ Our_Budget/
 검증: `node scripts/check_assets.js` — 앱 외 경로가 404인지, `/`가 200인지 함께 본다.
 
 CSS · JS 모두 `public/index.html` 안에 인라인. 외부 의존성 (모두 `<head>`에서 논블로킹 로드):
-- `@supabase/supabase-js@2` · `chart.js` (CDN, `defer` — 파싱 비차단. 둘 다 `window.onload` 이후에만 사용하므로 안전)
-- Pretendard (jsdelivr `<link>`) / Noto Sans KR (Google Fonts) — ⚠️ Pretendard를 CSS `@import`로 되돌리면 직렬·렌더블로킹이 됨(금지)
+- `@supabase/supabase-js@2` · `chart.js` (CDN, `defer` — 파싱 비차단. 둘 다 `DOMContentLoaded` 이후에만 사용하므로 안전.
+  `defer`는 명세상 DOMContentLoaded **직전**에 실행이 끝나므로 시작 시점에 `window.supabase`·`Chart`가 이미 있다)
+- Pretendard (jsdelivr `<link>`, **variable + dynamic-subset**) — 폰트는 이것 하나뿐이다
+  - ⚠️ CSS `@import`로 되돌리면 직렬·렌더블로킹이 됨(금지)
+  - ⚠️ **`static/pretendard.min.css`로 되돌리지 말 것** — 서브셋이 아니라 weight마다 한글 전체 woff2를 받는다.
+    앱이 5개 weight를 쓰므로 4파일 **3.15MB**였다(2026-08-15 실측). dynamic-subset은 유니코드 92조각 중 쓰는 것만
+    받고 variable 한 파일이 45~920 전 weight를 담당 → 실측 **9조각 244KB**
+  - ⚠️ Noto Sans KR(Google Fonts) `<link>`는 **제거됨**(2026-08-15). `@font-face` 496개짜리 93KB CSS를
+    렌더블로킹으로 받으면서 정작 `font-family` 1순위가 Pretendard라 폴백으로만 쓰였다 —
+    첫 페인트만 데스크톱 ~150ms·4G ~520ms 늦추고 있었다. CSS 폰트 스택엔 이름이 남아 있는데 그건 **로컬 설치본 폴백**이다
+  - `font-family` 1순위는 `'Pretendard Variable'` — dynamic-subset의 실제 패밀리명이 그것이다.
+    `'Pretendard'`로만 적으면 웹폰트가 안 잡히고 조용히 시스템 폰트로 떨어진다
 - `cdn.jsdelivr.net`·`fonts.gstatic.com` `preconnect`로 연결 핸드셰이크 선점
 - 숫자 포맷 `comma()`는 `Intl.NumberFormat` 인스턴스 1회 캐시 재사용(렌더당 수백 회 호출 — 매 호출 `toLocaleString` 금지)
 
@@ -294,8 +304,11 @@ memberVal    // 입력 시트의 '누가' 선택값
 Supabase Auth 공유 계정 1개. Worker 프록시도, 자체 인증 코드도 만들지 않았다 —
 `supabase-js`가 세션·토큰 갱신을, Supabase가 레이트리밋을 처리한다. `sb.from(...)` 호출부는 그대로다.
 
-- **시작 흐름**: `window.onload`가 `getSession()`으로 분기 → 세션 없으면 `showAuth()`하고 **끝**(`loadAll()`을 호출하지 않는다),
+- **시작 흐름**: `DOMContentLoaded` 핸들러가 `getSession()`으로 분기 → 세션 없으면 `showAuth()`하고 **끝**(`loadAll()`을 호출하지 않는다),
   있으면 `startApp()`이 기존 초기화(로드·렌더·기기사용자 모달)를 그대로 수행
+  - ⚠️ **`window.onload`로 되돌리지 말 것**(2026-08-15). `load`는 폰트·이미지까지 다 기다리므로 첫 DB 요청이
+    폰트 다운로드 뒤에 줄을 선다 — 실측으로 앱 시작이 데스크톱 **+817ms**, 4G **+3,164ms** 늦었다.
+    `check_authgate.js`가 `window.onload =` 대입을 금지 항목으로 잡는다(주석 속 언급은 오탐이라 `=`까지 봐야 한다)
 - 세션은 `localStorage["ourbudget.auth"]`에 유지(`persistSession`·`autoRefreshToken`) → 한 번 로그인하면 다시 안 묻는다
 - `onAuthStateChange`의 `SIGNED_OUT`에서 `showAuth()`로 복귀. **이게 없으면 세션 만료 시 빨간 '데이터 연결 오류' 카드가 떠서
   원인을 RLS 문제로 오도한다** — 인증 실패는 로드 실패와 다른 화면이어야 한다. 같은 이유로 `loadAll` 실패는 `isAuthErr(e)`로 갈라 처리
@@ -322,7 +335,7 @@ Supabase Auth 공유 계정 1개. Worker 프록시도, 자체 인증 코드도 �
 ### 주요 함수
 | 함수 | 역할 |
 |------|------|
-| `startApp()` | 세션 확보 뒤의 시작 절차 — `loadAll`·`renderMemberSeg`·`render`·기기사용자 모달. `onload`와 `doLogin` 양쪽에서 호출 |
+| `startApp()` | 세션 확보 뒤의 시작 절차 — `loadAll`·`renderMemberSeg`·`render`·기기사용자 모달. `DOMContentLoaded` 핸들러와 `doLogin` 양쪽에서 호출 |
 | `showAuth() / hideAuth()` | 로그인 오버레이 토글. `.picker-ov`를 재사용하되 ESC 핸들러에 넣지 않아 **닫히지 않는다** |
 | `doLogin(ev) / doLogout()` | 공용 계정 로그인 / 로그아웃(`signOut` 후 `location.reload()`로 전역 상태를 확실히 비움) |
 | `openPwChange() / doPwChange(ev)` | 설정 탭 비밀번호 변경. **현재 비밀번호를 재확인한 뒤** `updateUser` (위 '로그인 게이트' 절의 이유) |
@@ -523,7 +536,12 @@ Windows 작업 사본은 CRLF, 리포 blob은 LF라 작업 사본과 비교하�
 - **차트가 실제로 그려졌는지**: 스크린샷을 눈으로 보는 대신 `getImageData`의 알파 채널에 0 아닌 픽셀이 있는지 세어 `document.title`에 `"CANVAS 3/3"`처럼 찍고 `--dump-dom | grep '<title>'`로 회수. 빈 캔버스가 배경색과 같아 '그려진 것처럼' 보이는 경우를 잡는다
 - 헤드리스 chrome은 **Bash 툴로 실행**할 것. PowerShell에서 `& $chrome ... 2>$null`로 돌리면 파일은 생성되는데 출력이 사라져 실패로 오인함
 - 차트·UI 시각 확인(헤드리스 Chrome): `public/index.html` 복사본에 mock(`window.supabase.createClient`→체이너블 thenable `{data,error}`)+`localStorage` 기기사용자 주입, `goTab()`로 탭 강제 후 `chrome --headless=new --screenshot=<절대경로>.png --force-device-scale-factor=2 --virtual-time-budget=8000`(탭 강제 setTimeout이 돌 시간 확보 — 없으면 탭 전환 전에 찍힘). `--screenshot`은 절대경로 필수(상대경로면 "액세스 거부(0x5)"로 파일 미생성). Chrome 경로: `C:\Program Files\Google\Chrome\Application\chrome.exe`
-  - ⚠️ **mock은 `window.addEventListener('load', …)` 안에서 주입할 것.** supabase CDN이 `<script defer>`라 인라인 mock보다 **나중에** 실행돼 `window.supabase`를 덮어쓴다 → CDN 태그 뒤에 인라인으로 두면 mock이 무시되고 조용히 실서비스 DB를 조회한다(스크린샷은 그럴듯하게 나와서 알아채기 어려움). 앱의 `window.onload` 대입보다 먼저 등록되므로 load 리스너가 먼저 돈다
+  - ⚠️ **mock은 `<head>`의 인라인 `<script>`에서 `document.addEventListener('DOMContentLoaded', 주입)`으로 걸 것**(2026-08-15 변경).
+    supabase CDN이 `<script defer>`라 인라인 mock보다 **나중에** 실행돼 `window.supabase`를 덮어쓴다 → CDN 태그 뒤에 그냥 인라인으로 두면
+    mock이 무시되고 조용히 실서비스 DB를 조회한다(스크린샷은 그럴듯하게 나와서 알아채기 어려움).
+    DOMContentLoaded 시점엔 defer가 이미 끝나 있고, 리스너는 **등록 순서대로** 돌므로 `<head>`(23행대)에 건 mock이
+    본체 스크립트(931행~)의 시작 핸들러보다 먼저 실행된다.
+    ⚠️ 예전 방식인 `window.addEventListener('load', …)`은 **이제 늦다** — 앱이 load를 기다리지 않고 DOMContentLoaded에 이미 시작한다
   - ⚠️ **`--window-size`가 뷰포트 *폭*엔 안 먹는다**(clientWidth가 485로 고정). 그 폭으로 스크린샷을 찍으면 오른쪽이 잘려 나가 오버플로 버그처럼 보인다. 특정 폰 폭 검증은 `<iframe src="mock.html" width="360">`로 감싼 래퍼를 찍을 것
   - **높이는 먹는다** → 긴 화면 한 장에 담기: 래퍼에 `<iframe width="360" height="1500">` + `--window-size=400,1520`. 스크린샷은 뷰포트만 찍히므로 window 높이를 늘리는 게 유일한 방법(`--screenshot`엔 full-page 옵션 없음)
   - 실측·수치 회수는 **iframe 안쪽 문서**에서(래퍼를 재면 래퍼 폭이 나옴). 헤드리스는 콘솔이 안 보이므로 `document.title` 또는 `<pre id="DUMP">`에 JSON을 찍고 `--dump-dom | grep`으로 회수. 오버플로는 `documentElement.scrollWidth` vs `clientWidth` + 넘치는 엘리먼트 목록
