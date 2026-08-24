@@ -793,7 +793,7 @@ body.sheet-open{overflow:hidden}
 <div class="app" id="appView">
   <header class="hd">
     <div class="hd-l">
-      <div class="logo-s">💰</div>
+      <div class="logo-s">₩</div>
       <div class="hd-t">우리집 가계부</div>
     </div>
     <div class="hd-r">
@@ -1729,16 +1729,21 @@ async function retryLoad(){
 function memberFilterPills(){
   return pills(["전체",...MEMBERS], memberFilter, "setMemberFilter");
 }
+// 주기 탐색은 필 4개가 아니라 위아래 룰선 사이의 한 줄(.pnav)이다.
+// ⚠️ 옛 구조는 '전체'(기간 스코프) 필 바로 아래에 '전체'(멤버) 필이 와서
+//    같은 글자의 다른 뜻이 세로로 붙어 있었다 → 기간 쪽을 '전체 기간'으로 분리했다.
 function filterBar(){
+  const allOn = scope === "all";
   const _pLabel = memberFilter!=="전체" ? viewedPeriod(memberFilter).label
                 : (periodOffset ? `${-periodOffset}주기 전 · 각자` : "각자 기준");
-  const curLb = periodOffset ? `📅 ${_pLabel}` : `이번 주기 (${_pLabel})`;
-  return `<div class="filter">
-    <span class="pill" onclick="movePeriod(-1)">◀</span>
-    <span class="pill${scope==='current'?' on':''}" onclick="resetPeriod()">${curLb}</span>
-    <span class="pill${periodOffset<0?'':' dis'}" onclick="movePeriod(1)">▶</span>
-    <span class="pill${scope==='all'?' on':''}" onclick="setScope('all')">전체</span>
-  </div>${memberFilterPills()}`;
+  const label = allOn ? "전체 기간" : (periodOffset ? _pLabel : `이번 주기 · ${_pLabel}`);
+  const arrow = d => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg>`;
+  return `<div class="pnav">
+    <button onclick="movePeriod(-1)" aria-label="이전 주기"${allOn?" disabled":""}>${arrow("m15 18-6-6 6-6")}</button>
+    <div class="pnav-t" onclick="resetPeriod()">${esc(label)}</div>
+    <button onclick="movePeriod(1)" aria-label="다음 주기"${(allOn||periodOffset>=0)?" disabled":""}>${arrow("m9 18 6-6-6-6")}</button>
+  </div>${memberFilterPills().replace(/<\/div>$/,
+    `<span class="pill${allOn?" on":""}" onclick="setScope('all')">전체 기간</span></div>`)}`;
 }
 // 주기 이동 (◀ 과거 / ▶ 미래, 이번 주기까지) — 누르면 '이번 주기' 스코프로 전환
 function movePeriod(d){ periodOffset=Math.min(0,periodOffset+d); scope="current"; render(); }
