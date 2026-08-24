@@ -166,19 +166,26 @@ check("고아 class 가 없다", orphans.length === 0,
   orphans.length + "개: " + orphans.join(" "));
 
 /* ══════ 6. 차트 규칙 (dataviz 계약) ══════ */
+// ⚠️ 주석을 먼저 걷어낸다. '되돌리지 말 것' 류의 경고 주석에 옛 식별자를 적어두면
+//    검사기가 그걸 코드로 오인한다(실제로 CAT_PALETTE 주석에 걸려 오탐이 났다).
+const jsCode = js.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+
 check("카테고리 색을 순환시키지 않는다",
-  !/CAT_PALETTE\s*\[[^\]]*%/.test(js),
-  "팔레트를 % 로 감고 있다 — 안전한 색은 6개뿐이라 같은 차트에 같은 색이 두 번 나온다");
-check("차트 계열 상한이 5(+기타)다", /\bTOPN\s*=\s*5\b/.test(js),
-  "TOPN 이 5 가 아니다 — 기타까지 6슬롯을 넘으면 순환이 생긴다");
-check("도넛에도 상한이 걸렸다", /donut\s*:\s*donutArr\b/.test(js),
+  !/CAT_PALETTE/.test(jsCode) && /_catSlots/.test(jsCode),
+  "팔레트 인덱스 순환이 살아 있다 — 안전한 색은 6개뿐이라 같은 차트에 같은 색이 두 번 나온다");
+check("차트 계열 상한이 6(+기타)다", /\bTOPN\s*=\s*6\b/.test(jsCode),
+  "TOPN 이 6 이 아니다 — 검증된 슬롯은 6개뿐이라 넘으면 순환이 생긴다");
+check("도넛에도 상한이 걸렸다", /donut\s*:\s*donutArr\b/.test(jsCode),
   "도넛이 curCatArr 전량을 넘긴다 — 슬라이스가 카테고리 수만큼 생긴다");
-check("차트 색이 CSS 변수를 읽는다", /cssVar\s*\(\s*["']--s1["']\s*\)/.test(js),
-  "차트 색이 하드코딩이라 다크모드에서 따라오지 않는다");
-check("이중 축이 없다", !/\byInc\s*:/.test(js),
+// 하드코딩 hex 가 한 개도 없는 것이 'CSS 변수를 읽는다'의 진짜 증거다.
+// (cssVar("--s1") 같은 리터럴 앵커는 cssVar("--s"+n) 형태를 못 잡아 오탐이 났다.)
+const jsHex = [...new Set(jsCode.match(/#[0-9a-fA-F]{6}\b/g) || [])];
+check("차트·인라인에 하드코딩 hex 가 없다", jsHex.length === 0 && /const\s+cssVar\s*=/.test(jsCode),
+  jsHex.length ? "남은 색: " + jsHex.join(" ") : "cssVar 헬퍼가 없다");
+check("이중 축이 없다", !/\byInc\s*:/.test(jsCode),
   "보조축 yInc 가 남아 있다 — 두 축은 없는 상관관계를 만든다");
 check("OS 테마 전환에 반응한다",
-  /matchMedia\s*\(\s*["']\(\s*prefers-color-scheme\s*:\s*dark\s*\)["']\s*\)[\s\S]{0,120}addEventListener/.test(js),
+  /matchMedia\s*\(\s*["']\(\s*prefers-color-scheme\s*:\s*dark\s*\)["']\s*\)[\s\S]{0,120}addEventListener/.test(jsCode),
   "테마가 바뀌어도 차트가 옛 색으로 남는다");
 
 /* ══════ 결과 ══════ */

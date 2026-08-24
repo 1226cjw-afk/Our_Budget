@@ -381,6 +381,7 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .dlg-dot{width:9px;height:9px;border-radius:2px;flex-shrink:0}
 .dlg-nm{color:var(--ink);font-weight:450;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dlg-v{color:var(--ink);font-weight:600;letter-spacing:-.02em}
+.dlg-p{color:var(--ink-3);font-weight:550;font-size:.75rem;min-width:34px;text-align:right}
 
 /* 스마트 분석 인사이트 */
 .ins{display:flex;gap:11px;padding:14px 0;border-bottom:1px solid var(--line)}
@@ -962,7 +963,10 @@ const CAT_ICON     = {생활비:"🛒",고정비:"🏠",월급:"💵",이자:"�
 const TY_KINDS     = {credit:"신용", check:"체크", cash:"현금", none:"제외"};   // 지출: 결제수단별 공제 구분
 const TY_CAT_KINDS = {income:"소득", none:"제외"};                              // 소득: 카테고리별 총급여 산입 여부
 const TY_RATE  = {credit:.15, check:.30, cash:.30, none:0};
-const TY_COLOR = {credit:"#F05470", check:"#2EC890", cash:"#E8961E"};
+/* 연말정산 3색 — 한 스택 막대에 함께 놓이므로 all-pairs 검증을 통과해야 한다.
+   ⚠️ s4(노랑)를 쓰지 말 것: s2(주황)와 함께 두면 정상 시력으로도 구분이 안 된다
+   (validate_palette.js 실측 ΔE 13.7 라이트 / 10.6 다크 → FAIL). s1·s2·s3 은 PASS. */
+const tyColor = k => cssVar({credit:"--s2", check:"--s1", cash:"--s3"}[k] || "--ink-3");
 const SALARY_RE = /월급|급여|상여|보너스/;   // 소득 카테고리 '추천'에만 사용 — 집계는 CTMAP(사용자 매핑)만 따른다
 // 앱에서 DDL을 실행할 권한이 없어(anon key), 테이블이 없으면 화면에 이 SQL을 띄워 직접 실행하게 한다.
 // ⚠️ 이 SQL은 사용자가 그대로 붙여넣어 실행한다 → 나머지 5개 테이블과 **똑같은 경계**여야 한다.
@@ -1082,26 +1086,29 @@ function orphanTransfers(){
 // 합계 헬퍼 (지출/수입) — 여러 뷰에서 반복되던 filter+reduce 통합. 이동은 합계에서 제외
 const expOf = rs => rs.reduce((s,r)=>s+((r.type!=="입금"&&!isTransfer(r))?r.amount:0),0);
 const incOf = rs => rs.reduce((s,r)=>s+((r.type==="입금"&&!isTransfer(r))?r.amount:0),0);
-// 카테고리 색상 — 이름 기반 고정 해시(같은 카테고리는 항상 같은 색)
-// 다크모드에서 또렷이 구분되는 12색(웜/쿨 교차, 초록 계열 최소화). 도넛·스택·추이 공통.
-const CAT_PALETTE = ["#FF6B6B","#4DABF7","#FFA94D","#9775FA","#51CF66","#F06595","#FFD43B","#22B8CF","#DA77F2","#C99A5B","#20C997","#5C7CFA"];
-// 카테고리 색은 팔레트 인덱스 배정 → 서로 다른 카테고리는 항상 다른 색.
-// 목록을 로드 직후 로케일 정렬해 고정한다 — '처음 등장 순서'로 잡으면 어느 탭을 먼저 열었는지·
-// 멤버 필터가 무엇인지에 따라 같은 카테고리가 기기·세션마다 다른 색으로 보였다.
-// (그보다 앞선 이름 해시 방식은 카페·문화·데이트·이자·기타가 같은 칸[4]에 몰려 전부 초록으로 보였음 — 되돌리지 말 것)
-let _catOrder = [];
-function rebuildCatOrder(){
-  const s = new Set();
-  ROWS.forEach(r => { if(r.category) s.add(String(r.category)); });
-  Object.values(MASTER).forEach(md => (md.categories||[]).forEach(c => s.add(String(c))));
-  _catOrder = [...s].sort((a,b) => a.localeCompare(b,"ko"));
+// CSS 커스텀 프로퍼티를 읽는다 — 차트 색을 하드코딩하면 OS 다크모드에서 따라오지 않는다.
+const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+
+/* 카테고리 색 — 슬롯 6개 + '기타'(무채색).
+   ⚠️ 옛 방식(CAT_PALETTE[i % 12])으로 되돌리지 말 것. 라이트·다크 양쪽에서
+   색각이상 분리도(ΔE)를 통과하는 색은 6개뿐이라, 순환시키면 같은 차트 안에서
+   서로 다른 카테고리가 같은 색이 된다. 대신 '그리는 계열 수'를 5로 제한하고
+   나머지는 '기타'로 접는다 — 순환할 일 자체를 없앤다.
+   팔레트 검증: dataviz 스킬의 validate_palette.js (6검사 전 항목 PASS).
+
+   슬롯 배정은 viewAnalysis 가 표시 주기 전체합 상위 6으로 한 번 정하고,
+   도넛·스택막대·추이라인 세 차트가 그 매핑을 공유한다(한 화면에서 같은 색 = 같은 항목).
+   ⚠️ 남은 트레이드오프: 멤버 필터를 바꿔 상위 6의 '구성원'이 달라지면 색이 이동할 수 있다.
+   범례가 이름+금액을 직접 라벨로 달고 있어 오독으로 이어지지는 않는다. */
+const ETC_CAT = "기타";
+let _catSlots = {};                       // { 카테고리: 1..5 }
+function setCatSlots(rankedCats){
+  _catSlots = {};
+  rankedCats.slice(0,6).forEach((c,i) => { _catSlots[String(c)] = i+1; });
 }
 function catColor(c){
-  const s = String(c);
-  let i = _catOrder.indexOf(s);
-  // 로드 이후 새로 생긴 값(예: 저장 직후)만 뒤에 덧붙는다 — 다음 로드 때 정렬 목록에 합류
-  if(i < 0){ i = _catOrder.length; _catOrder.push(s); }
-  return CAT_PALETTE[i % CAT_PALETTE.length];
+  const s = _catSlots[String(c)];
+  return s ? cssVar("--s"+s) : cssVar("--ink-3");
 }
 // 고정성 지출 카테고리 (절약 팁/고정·변동 분석에서 '고정'으로 분류)
 const FIXED_CATS = new Set(["고정비","통신","보험","이자","월세","관리비","교육","구독","월급"]);
@@ -1380,7 +1387,8 @@ async function loadAll(){
   });
   MEMBERS.forEach(m=>{if(!(m in BILLING_STARTS))BILLING_STARTS[m]=_globalBS;});
 
-  rebuildCatOrder();  // 카테고리 색 배정을 이번 데이터 기준으로 고정 (ROWS·MASTER가 다 채워진 뒤여야 함)
+  // (옛 rebuildCatOrder 는 사라졌다 — 색 배정이 로케일 정렬 인덱스가 아니라
+  //  viewAnalysis 의 지출 상위 5 슬롯으로 바뀌었다. setCatSlots 참조)
 }
 
 /* 데이터 재로드 + 재렌더 — CRUD 후 공통 마무리 */
@@ -1696,7 +1704,7 @@ function render(){
   else if(tab==="cat")      body = filterBar() + viewCategory();
   else if(tab==="limit")    body = viewLimit();
   else if(tab==="analysis"){
-    const seg = pills([["spend","📊 지출분석"],["tax","🧾 연말정산"]], anView, "setAnView");
+    const seg = pills([["spend","지출분석"],["tax","연말정산"]], anView, "setAnView");
     // 연말정산은 개인 단위라 '전체' 없는 멤버 바를 쓴다 (합산하면 각자의 25% 문턱이 뒤섞임)
     // chart.js는 지연 로드라 아직 없을 수 있다 — drawWhenChartReady가 도착을 기다렸다 그린다
     if(anView==="tax"){ body = seg + memberBar(tyMember,"setTyMember") + viewTaxYear(); after = ()=>drawWhenChartReady(drawTaxChart); }
@@ -1998,19 +2006,29 @@ function viewAnalysis(){
   rowsByPeriod.forEach((rs,pi)=>rs.filter(r=>r.type!=="입금"&&!isTransfer(r))
     .forEach(r=>{(catByPeriod[r.category]=catByPeriod[r.category]||Array(periods.length).fill(0))[pi]+=r.amount;}));
   const catTotals = Object.entries(catByPeriod).map(([c,a])=>[c,a.reduce((s,x)=>s+x,0)]).sort((a,b)=>b[1]-a[1]);
+  // ⚠️ 상한은 6이다(검증된 슬롯 전부). '기타'는 슬롯이 아니라 무채색이라 7번째 색이 아니다. 안전한 색이 6개뿐이라 이걸 넘기면 색이 순환한다.
+  //    도넛·스택막대·추이라인이 '같은' 상위 6을 쓰고 같은 슬롯 색을 받는다 —
+  //    한 화면 안에서 같은 색이 같은 항목을 뜻해야 하므로.
   const TOPN=6;
-  const stackSeries = catTotals.slice(0,TOPN).map(([c])=>({cat:c,data:catByPeriod[c]}));
+  const topCats = catTotals.slice(0,TOPN).map(([c])=>c);
+  setCatSlots(topCats);
+
+  const stackSeries = topCats.map(c=>({cat:c,data:catByPeriod[c]}));
   if(catTotals.length>TOPN){
     const etc=Array(periods.length).fill(0);
     catTotals.slice(TOPN).forEach(([c])=>catByPeriod[c].forEach((v,i)=>etc[i]+=v));
-    stackSeries.push({cat:"기타",data:etc});
+    stackSeries.push({cat:ETC_CAT,data:etc});
   }
 
-  // 카테고리별 추이 (라인, 현재 지출 상위 5 / 없으면 전체합 상위)
-  const topCats = (curCatArr.length ? curCatArr.map(([c])=>c) : catTotals.map(([c])=>c)).slice(0,5);
+  // 도넛도 같은 상한을 받는다 — 예전엔 curCatArr 전량이 넘어가 카테고리 수만큼 슬라이스가 생겼다
+  const donutTop = curCatArr.filter(([c])=>_catSlots[c]);
+  const donutEtc = curCatArr.filter(([c])=>!_catSlots[c]).reduce((s,[,a])=>s+a,0);
+  const donutArr = donutEtc>0 ? [...donutTop,[ETC_CAT,donutEtc]] : donutTop;
+
+  // 카테고리별 추이 (라인) — 같은 5개
   const trend = topCats.map(c => ({cat:c, data: rowsByPeriod.map(rs => expOf(rs.filter(r=>r.category===c)))}));
 
-  _anStash = {labels, period, incomeByPeriod, stackSeries, donut:curCatArr, totExp, trend};
+  _anStash = {labels, period, incomeByPeriod, stackSeries, donut:donutArr, totExp, trend};
 
   // 요약 스탯
   const avg  = Math.round(period.reduce((s,d)=>s+d.exp,0)/(period.length||1));
@@ -2047,7 +2065,7 @@ function viewAnalysis(){
 
   // 2) 주기별 지출 구성 — 카테고리 스택 막대 + 수입 막대 (한눈에 주기별 카테고리 지출/수입)
   if(catTotals.length || incomeByPeriod.some(v=>v>0)){
-    h+=`<div class="panel"><div class="p-t">📊 주기별 지출 구성<span class="p-sub">카테고리별 · 수입</span></div>
+    h+=`<div class="panel"><div class="p-t">주기별 지출 구성<span class="p-sub">카테고리 누적</span></div>
       <canvas id="chartPeriod" height="200"></canvas>${mixedPeriods()
         ? `<div style="font-size:.7rem;color:var(--ink-3);margin-top:10px;line-height:1.6">※ 멤버마다 결제주기 시작일이 달라, 가로축 라벨은 ${esc(_anMem)} 기준이고 집계는 각자의 주기로 나눴어요.</div>`
         : ``}</div>`;
@@ -2055,28 +2073,30 @@ function viewAnalysis(){
 
   // 3) 카테고리별 지출 비중 (도넛, 이번 주기)
   if(totExp>0){
-    h+=`<div class="panel"><div class="p-t">🍩 카테고리별 지출 비중<span class="p-sub">이번 주기</span></div>
+    h+=`<div class="panel"><div class="p-t">카테고리별 지출 비중<span class="p-sub">이번 주기</span></div>
       <div class="donut-wrap"><canvas id="chartDonut" height="220"></canvas>
         <div class="donut-center"><div class="dc-l">총 지출</div><div class="dc-v">${wonShort(totExp)}</div></div></div>
-      <div class="dlegend">${curCatArr.map(([c,a])=>`<div class="dlg"><span class="dlg-dot" style="background:${catColor(c)}"></span><span class="dlg-nm">${esc(c)}</span><span class="dlg-v">${Math.round(a/totExp*100)}%</span></div>`).join("")}</div>
+      <!-- 범례 = 직접 라벨. 라이트에서 슬롯 3개가 흰 배경 대비 3:1 미만이라
+           식별이 색에만 의존하면 안 된다(dataviz relief rule) → 이름·금액·비중을 모두 적는다 -->
+      <div class="dlegend">${donutArr.map(([c,a])=>`<div class="dlg"><span class="dlg-dot" style="background:${catColor(c)}"></span><span class="dlg-nm">${esc(c)}</span><span class="dlg-v">${won(a)}</span><span class="dlg-p">${Math.round(a/totExp*100)}%</span></div>`).join("")}</div>
     </div>`;
   }
 
   // 4) 카테고리별 추이 (라인)
   if(trend.length && catTotals.length){
-    h+=`<div class="panel"><div class="p-t">📉 카테고리별 지출 추이<span class="p-sub">상위 ${trend.length}개</span></div><canvas id="chartTrend" height="190"></canvas></div>`;
+    h+=`<div class="panel"><div class="p-t">카테고리별 지출 추이<span class="p-sub">상위 ${trend.length}개</span></div><canvas id="chartTrend" height="190"></canvas></div>`;
   }
 
   // 5) 스마트 분석 & 절약 팁
-  h+=`<div class="panel"><div class="p-t">💡 스마트 분석 & 절약 팁</div>
+  h+=`<div class="panel"><div class="p-t">스마트 분석 & 절약 팁</div>
     ${insights.map(x=>`<div class="ins ${x.tone||''}"><div class="ins-ic">${x.ic}</div><div class="ins-bd"><div class="ins-t">${esc(x.t)}</div><div class="ins-b">${esc(x.b)}</div></div></div>`).join("")}
   </div>`;
 
   // 6) 반복 지출
-  h+=`<div class="panel"><div class="p-t">🔁 반복 지출<span class="p-sub">2주기 이상</span></div>${rec.length?rec.map(x=>`<div class="arow"><span class="a-mo">${icon(x.cat)} ${esc(x.memo)}</span><span class="a-tag rec">${x.span}주기</span><span class="a-v">${won(x.total)}</span></div>`).join(''):'<div class="p-body">없음</div>'}</div>`;
+  h+=`<div class="panel"><div class="p-t">반복 지출<span class="p-sub">2주기 이상</span></div>${rec.length?rec.map(x=>`<div class="arow"><span class="a-mo">${icon(x.cat)} ${esc(x.memo)}</span><span class="a-tag rec">${x.span}주기</span><span class="a-v">${won(x.total)}</span></div>`).join(''):'<div class="p-body">없음</div>'}</div>`;
 
   // 7) 일회성 큰 지출 — 자기 카테고리 평소 금액 대비 크게 튄 항목만
-  h+=`<div class="panel"><div class="p-t">💥 일회성 큰 지출<span class="p-sub">평소 대비 튄 항목</span></div>${
+  h+=`<div class="panel"><div class="p-t">일회성 큰 지출<span class="p-sub">평소 대비 튄 항목</span></div>${
     anom.length?anom.map(x=>`<div class="anom"><div class="anom-ic">${icon(x.category)}</div>
       <div class="anom-bd"><div class="anom-t"><span class="anom-tt">${esc(x.memo?x.memo:x.category)}</span><span class="anom-x">${x.ratio.toFixed(1)}배</span></div>
         <div class="anom-s">${esc(x.category)} · 평소 ${wonShort(Math.round(x.med))}원대 · ${_md(x.date)}</div></div>
@@ -2177,26 +2197,34 @@ function drawWhenChartReady(fn){
   const seq=_renderSeq;
   ensureChart().then(ok=>{ if(ok && seq===_renderSeq) fn(); });
 }
+/* OS 테마가 켜지고 꺼질 때 — CSS 토큰은 알아서 바뀌지만 캔버스는 이미 칠해진 픽셀이다.
+   분석 탭에 있을 때만 다시 그린다(render 가 destroyCharts 부터 하므로 인스턴스도 정리된다). */
+try {
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => {
+    if(tab === "analysis") render();
+  });
+} catch(e) { /* addEventListener 미지원 구형 사파리 — 테마 전환 시 차트만 옛 색으로 남는다 */ }
 function drawAnalysisCharts(){
   if(!_anStash || typeof Chart==="undefined") return;  // Chart.js CDN 실패 시 차트만 생략
   destroyCharts();
-  const tickC="#6E6C8A", gridC="#12141F", subC="#32304E";
-  const axes={x:{ticks:{color:tickC,font:{size:11}},grid:{display:false}},y:{ticks:{color:subC,font:{size:10},callback:v=>wonShort(v)},grid:{color:gridC}}};
+  // 색은 CSS 토큰에서 읽는다 — 하드코딩하면 OS 다크모드에서 축·격자가 옛 색으로 남는다
+  const tickC=cssVar("--ink-2"), gridC=cssVar("--line"), subC=cssVar("--ink-3"), surface=cssVar("--bg");
+  const axes={x:{ticks:{color:tickC,font:{size:11}},grid:{display:false}},y:{ticks:{color:subC,font:{size:10},maxTicksLimit:5,callback:v=>wonShort(v)},grid:{color:gridC}}};
 
-  // 지출은 카테고리 스택 막대(왼축), 수입은 그 옆 초록 막대(오른축).
-  // → 수입이 지출보다 훨씬 커도 한 축에 눌리지 않도록 축을 분리(왼축 지출 / 오른축 수입)
+  // 카테고리 스택 막대 — 지출만, 축 하나.
+  // ⚠️ 수입을 오른쪽 보조축으로 되돌리지 말 것. 두 축은 배율을 임의로 정하는 순간
+  //    없는 상관관계를 만들어낸다(차트 실수 1순위). 수입은 아래 요약 스탯과 내역·계좌 탭에 있다.
   const pc=$("chartPeriod");
   if(pc && _anStash.stackSeries){
-    const ds=_anStash.stackSeries.map(s=>({type:"bar",label:s.cat,data:s.data,backgroundColor:catColor(s.cat),stack:"exp",borderRadius:3,borderSkipped:false,maxBarThickness:38,yAxisID:"yExp"}));
-    ds.push({type:"bar",label:"수입",data:_anStash.incomeByPeriod,backgroundColor:"rgba(46,200,144,.85)",stack:"inc",borderRadius:3,borderSkipped:false,maxBarThickness:22,yAxisID:"yInc"});
+    const ds=_anStash.stackSeries.map(s=>({type:"bar",label:s.cat,data:s.data,backgroundColor:catColor(s.cat),stack:"exp",borderRadius:3,borderSkipped:false,maxBarThickness:38,
+      borderColor:surface,borderWidth:{top:2,right:0,bottom:0,left:0}}));  // 세그먼트 사이 2px 서피스 갭
     _charts.push(new Chart(pc,{type:"bar",data:{labels:_anStash.labels,datasets:ds},
       options:{responsive:true,interaction:{mode:"index",intersect:false},
         plugins:{legend:{labels:{color:tickC,font:{size:10},boxWidth:8,padding:6}},
           tooltip:{callbacks:{label:ctx=>` ${ctx.dataset.label}: ${won(ctx.parsed.y)}`}}},
         scales:{
           x:{ticks:{color:tickC,font:{size:11}},grid:{display:false},stacked:true},
-          yExp:{position:"left",stacked:true,beginAtZero:true,ticks:{color:subC,font:{size:10},callback:v=>wonShort(v)},grid:{color:gridC},title:{display:true,text:"지출(왼쪽 막대)",color:subC,font:{size:9}}},
-          yInc:{position:"right",beginAtZero:true,ticks:{color:"#2EC890",font:{size:10},callback:v=>wonShort(v)},grid:{display:false},title:{display:true,text:"수입(오른쪽 막대)",color:"#2EC890",font:{size:9}}}
+          y:{stacked:true,beginAtZero:true,ticks:{color:subC,font:{size:10},callback:v=>wonShort(v)},grid:{color:gridC}}
         }}}));
   }
 
@@ -2204,7 +2232,7 @@ function drawAnalysisCharts(){
   const dc=$("chartDonut");
   if(dc && _anStash.donut.length){
     const labels=_anStash.donut.map(([c])=>c), data=_anStash.donut.map(([,a])=>a);
-    _charts.push(new Chart(dc,{type:"doughnut",data:{labels,datasets:[{data,backgroundColor:labels.map(catColor),borderColor:"#0E1020",borderWidth:2,hoverOffset:6}]},
+    _charts.push(new Chart(dc,{type:"doughnut",data:{labels,datasets:[{data,backgroundColor:labels.map(catColor),borderColor:surface,borderWidth:2,hoverOffset:6}]},
       options:{responsive:true,cutout:"64%",plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>` ${ctx.label}: ${won(ctx.parsed)} (${Math.round(ctx.parsed/_anStash.totExp*100)}%)`}}}}}));
   }
 
@@ -2424,7 +2452,7 @@ function viewTaxYear(){
   // 0) 테이블 미설치 안내 — 이게 없으면 매핑이 저장되지 않아 모든 집계가 0원이 된다
   if(!TAX_READY){
     h+=`<div class="m-section" style="border-color:rgba(240,84,112,.3)">
-      <div class="m-title">🛠️ 설치 안내 <span style="font-size:.66rem;color:var(--exp);font-weight:700">필수</span></div>
+      <div class="m-title">설치 안내 <span style="font-size:.66rem;color:var(--exp);font-weight:700">필수</span></div>
       <div style="font-size:.8rem;color:var(--ink-2);line-height:1.75;margin-bottom:12px">
         <b style="color:var(--exp)">tax_map 테이블이 없어 매핑을 저장할 수 없습니다.</b> 그래서 지금은 모든 집계가 0원으로 나와요.<br>
         Supabase 대시보드 → SQL Editor에서 아래를 한 번 실행해주세요.
@@ -2437,7 +2465,7 @@ function viewTaxYear(){
 
   // 1) 총급여 — 자동 추정이 기본, 어긋나면 수동 입력이 우선
   h+=`<div class="m-section">
-    <div class="m-title">💰 총급여 (연봉)</div>
+    <div class="m-title">총급여 (연봉)</div>
     <div class="ty-sal">
       <span class="ty-sal-v">${t.salary>0?won(t.salary):"미설정"}</span>
       <span class="ty-bdg ${t.manual?'man':'auto'}">${t.manual?'수동 입력':'자동 추정'}</span>
@@ -2471,18 +2499,18 @@ function viewTaxYear(){
   const wpc=x=>Math.max(0,x/scaleMax*100);
   // 수단별 실제 사용액은 세로 리스트로 — 큰 숫자는 '지금까지', 아래 작은 글씨가 연환산 예측
   const lg=(k,lb)=>`<div class="tyu-i">
-      <span class="tyu-d" style="background:${TY_COLOR[k]}"></span>
+      <span class="tyu-d" style="background:${tyColor(k)}"></span>
       <span class="tyu-n">${lb}</span>
-      <span class="tyu-r" style="color:${TY_COLOR[k]};background:${TY_COLOR[k]}1F">공제 ${R(TY_RATE[k]*100)}%</span>
+      <span class="tyu-r">공제 ${R(TY_RATE[k]*100)}%</span>
       <span class="tyu-x"><span class="tyu-v">${won(t.ytd[k])}</span>
         <div class="tyu-s">연환산 ${won(R(t.projK[k]))}</div></span></div>`;
   h+=`<div class="panel">
-    <div class="p-t">📈 올해 사용액<span class="p-sub">${t.m}월까지 → 연환산</span></div>
+    <div class="p-t">올해 사용액<span class="p-sub">${t.m}월까지 → 연환산</span></div>
     <div class="tybar-o">
       <div class="tybar-w">
-        <div class="tybar-s" style="width:${wpc(t.projK.credit)}%;background:${TY_COLOR.credit}"></div>
-        <div class="tybar-s" style="width:${wpc(t.projK.check)}%;background:${TY_COLOR.check}"></div>
-        <div class="tybar-s" style="width:${wpc(t.projK.cash)}%;background:${TY_COLOR.cash}"></div>
+        <div class="tybar-s" style="width:${wpc(t.projK.credit)}%;background:${tyColor("credit")}"></div>
+        <div class="tybar-s" style="width:${wpc(t.projK.check)}%;background:${tyColor("check")}"></div>
+        <div class="tybar-s" style="width:${wpc(t.projK.cash)}%;background:${tyColor("cash")}"></div>
       </div>
       ${t.th>0&&t.th<scaleMax?`<div class="tymk" style="left:${t.th/scaleMax*100}%" data-l="25% 문턱"></div>`:``}
     </div>
@@ -2518,7 +2546,7 @@ function viewTaxYear(){
       same :`신용 사용액 ${won(t.C)}이 아직 문턱(${won(R(t.th))}) 아래라, 지금 더 쓰는 돈은 어디에 쓰든 한계 공제율이 30%로 같아요. 신용으로 ${won(R(t.th-t.C))}를 더 채워 문턱을 넘긴 뒤부터 체크·현금으로 갈아타는 게 최적이에요.`,
       split:`신용 사용액이 문턱을 넘겨서, 같은 100만원을 써도 신용은 15만원·체크·현금은 30만원 공제로 정확히 2배 차이가 나요. 지금부터는 체크카드나 현금영수증을 쓰세요.`
     }[mr.why]||"";
-    h+=`<div class="panel"><div class="p-t">🎯 남은 공제 여력<span class="p-sub">연환산 총급여 기준</span></div>
+    h+=`<div class="panel"><div class="p-t">남은 공제 여력<span class="p-sub">연환산 총급여 기준</span></div>
       <div class="tyrm-l"><span>지금까지 확정 <b>${won(R(t.dedNow))}</b></span><span>한도 <b>${won(t.limit)}</b></span></div>
       <div class="tyrm-bw"><div class="tyrm-b" style="width:${Math.min(100,t.dedNow/t.limit*100)}%"></div></div>
       <div style="font-size:.73rem;color:var(--ink-2);margin-top:10px;line-height:1.7">
@@ -2527,15 +2555,15 @@ function viewTaxYear(){
       </div>
       <div style="font-size:.66rem;font-weight:700;color:var(--ink-3);margin:15px 0 -5px;letter-spacing:.3px">지금부터 1원의 공제 효과</div>
       <div class="tyn">
-        ${nCard("신용카드", mr.credit, t.need15, TY_COLOR.credit, mr.credit>mr.thirty)}
-        ${nCard("체크·현금", mr.thirty, t.need30, TY_COLOR.check, mr.thirty>mr.credit)}
+        ${nCard("신용카드", mr.credit, t.need15, tyColor("credit"), mr.credit>mr.thirty)}
+        ${nCard("체크·현금", mr.thirty, t.need30, tyColor("check"), mr.thirty>mr.credit)}
       </div>
       <div style="font-size:.75rem;color:var(--ink-2);margin-top:13px;line-height:1.7;padding-top:12px;border-top:1px solid var(--line)">${whyTxt}</div>
     </div>`;
   }
 
   // 4) 핵심 조언 + 연말 예상 공제액
-  h+=`<div class="panel"><div class="p-t">🧭 앞으로 뭘 쓸까<span class="p-sub">현 추세 기준</span></div>
+  h+=`<div class="panel"><div class="p-t">앞으로 뭘 쓸까<span class="p-sub">현 추세 기준</span></div>
     ${[adv,...tyNotes(t)].map(x=>`<div class="ins ${x.tone}"><div class="ins-ic">${x.ic}</div>
       <div class="ins-bd"><div class="ins-t">${esc(x.t)}</div><div class="ins-b">${esc(x.b)}</div></div></div>`).join("")}`;
   if(t.salary>0){
@@ -2553,13 +2581,13 @@ function viewTaxYear(){
     const bar=(nm,v,col)=>`<div class="tysc-r">
       <div class="tysc-t"><span class="tysc-n">${nm}</span><span class="tysc-v" style="color:${col}">${won(R(v))}</span></div>
       <div class="tysc-bw"><div class="tysc-b" style="width:${Math.max(2,v/mx*100)}%;background:${col}"></div></div></div>`;
-    h+=`<div class="panel"><div class="p-t">⚖️ 남은 ${t.remain}개월 비교<span class="p-sub">연말 공제액</span></div>
+    h+=`<div class="panel"><div class="p-t">남은 ${t.remain}개월 비교<span class="p-sub">연말 공제액</span></div>
       <div style="font-size:.75rem;color:var(--ink-3);line-height:1.7;margin:-4px 0 13px">
         지금 페이스(월 ${wonShort(R(t.pace))})로 남은 ${t.remain}개월에 ${won(R(t.future))}를 더 쓴다고 볼 때
       </div>
       <div class="tysc">
-        ${bar("전부 체크·현금으로", t.scCheck, TY_COLOR.check)}
-        ${bar("전부 신용카드로", t.scCredit, TY_COLOR.credit)}
+        ${bar("전부 체크·현금으로", t.scCheck, tyColor("check"))}
+        ${bar("전부 신용카드로", t.scCredit, tyColor("credit"))}
       </div>
       <div style="font-size:.78rem;color:var(--ink-2);margin-top:13px;line-height:1.7;padding-top:12px;border-top:1px solid var(--line)">
         ${gap>0
@@ -2582,7 +2610,7 @@ function viewTaxYear(){
       cash  :t.byMonth.cash.slice(0,t.m),
       pace  :t.salary>0 ? t.th/12 : 0
     };
-    h+=`<div class="panel"><div class="p-t">📊 월별 사용 추이<span class="p-sub">신용·체크·현금</span></div>
+    h+=`<div class="panel"><div class="p-t">월별 사용 추이<span class="p-sub">신용·체크·현금</span></div>
       <canvas id="chartTyMonth" height="200"></canvas>
       ${t.salary>0?`<div style="font-size:.7rem;color:var(--ink-3);margin-top:10px;line-height:1.6">점선 = 문턱을 12개월로 나눈 월 적정 페이스 ${won(R(t.th/12))}</div>`:``}
     </div>`;
@@ -2618,7 +2646,7 @@ function taxMapSection(member, kind, t){
   };
 
   let h=`<div class="m-section">
-    <div class="m-title">${isCat?'💵 소득 카테고리 매핑':'🗂️ 결제수단 매핑'} <span style="font-size:.66rem;color:var(--ink-3);font-weight:600">${esc(member)}</span></div>
+    <div class="m-title">${isCat?'소득 카테고리 매핑':'결제수단 매핑'} <span style="font-size:.66rem;color:var(--ink-3);font-weight:600">${esc(member)}</span></div>
     <div style="font-size:.75rem;color:var(--ink-2);line-height:1.75;margin-bottom:12px">
       ${isCat
         ? `어떤 입금을 <b style="color:var(--ink)">급여(총급여)</b>로 볼지 지정합니다. 여기서 소득으로 지정한 카테고리만 25% 문턱 계산에 들어가요.`
@@ -2647,13 +2675,14 @@ function drawTaxChart(){
   if(!_tyStash || typeof Chart==="undefined") return;
   destroyCharts();
   const c=$("chartTyMonth"); if(!c) return;
-  const tickC="#6E6C8A", gridC="#12141F", subC="#32304E";
+  const tickC=cssVar("--ink-2"), gridC=cssVar("--line"), subC=cssVar("--ink-3"), surface=cssVar("--bg");
   const ds=[["credit","신용"],["check","체크"],["cash","현금"]].map(([k,lb])=>({
-    type:"bar", label:lb, data:_tyStash[k], backgroundColor:TY_COLOR[k],
-    stack:"use", borderRadius:3, borderSkipped:false, maxBarThickness:30
+    type:"bar", label:lb, data:_tyStash[k], backgroundColor:tyColor(k),
+    stack:"use", borderRadius:3, borderSkipped:false, maxBarThickness:30,
+    borderColor:surface, borderWidth:{top:2,right:0,bottom:0,left:0}
   }));
   if(_tyStash.pace>0) ds.push({type:"line", label:"월 적정 페이스",
-    data:_tyStash.labels.map(()=>_tyStash.pace), borderColor:"#EDE8F8", borderDash:[5,4],
+    data:_tyStash.labels.map(()=>_tyStash.pace), borderColor:cssVar("--ink"), borderDash:[5,4],
     borderWidth:1.5, pointRadius:0, fill:false});
   _charts.push(new Chart(c,{type:"bar",data:{labels:_tyStash.labels,datasets:ds},
     options:{responsive:true,interaction:{mode:"index",intersect:false},
@@ -2760,13 +2789,13 @@ function viewAccount(){
 
 /* ── 설정 탭 ── */
 function viewMaster(){
-  const icons={categories:"🏷️",methods:"💳",accounts:"🏦"};
+  // (섹션 제목의 이모지는 제거됐다 — 카테고리 아이콘은 사용자 데이터라 목록 안에 그대로 있다)
   const mdata=MASTER[masterMember]||{categories:[],methods:[],accounts:[]};
   let h=`<div class="sec" style="padding-top:14px">`;
 
   // 멤버 관리 섹션
   h+=`<div class="m-section">
-    <div class="m-title">👥 멤버 관리</div>
+    <div class="m-title">멤버 관리</div>
     <div class="m-list">`;
   if(MEMBERS.length){
     MEMBERS.forEach(m=>h+=`<div class="m-item"><span class="m-nm">👤 ${esc(m)}</span><button class="m-del" onclick="delMember('${jsq(m)}')">삭제</button></div>`);
@@ -2782,7 +2811,7 @@ function viewMaster(){
 
   // 이 기기 사용자 (localStorage 기반, 멤버별 기본값)
   h+=`<div class="m-section">
-    <div class="m-title">📱 이 기기 사용자</div>
+    <div class="m-title">이 기기 사용자</div>
     <div style="font-size:.8rem;color:var(--ink-2);margin-bottom:12px;line-height:1.7">
       이 기기에서 입력·필터의 <b style="color:var(--ink)">기본 사용자</b>입니다. 각자 폰에서 한 번만 선택하면 돼요.
     </div>
@@ -2801,7 +2830,7 @@ function viewMaster(){
 
   // 앱 설정 (전역 — app_settings)
   h+=`<div class="m-section">
-    <div class="m-title">🛠️ 앱 설정 <span style="font-size:.66rem;color:var(--ink-3);font-weight:600">전체 공통</span></div>
+    <div class="m-title">앱 설정 <span style="font-size:.66rem;color:var(--ink-3);font-weight:600">전체 공통</span></div>
     <div class="set-row">
       <div style="flex:1;min-width:0">
         <div class="set-nm">한도 경고 임계값</div>
@@ -2826,7 +2855,7 @@ function viewMaster(){
 
   // 데이터 내보내기 (전역)
   h+=`<div class="m-section">
-    <div class="m-title">💾 데이터 내보내기</div>
+    <div class="m-title">데이터 내보내기</div>
     <div style="font-size:.8rem;color:var(--ink-2);margin-bottom:12px;line-height:1.7">
       전체 거래내역 <b style="color:var(--ink)">${ROWS.length}건</b>을 CSV 파일로 저장합니다. 엑셀·구글시트에서 바로 열 수 있어요.
     </div>
@@ -2851,7 +2880,7 @@ function viewMaster(){
   const _bs=BILLING_STARTS[masterMember]||25;
   const _edTxt=_bs>1?`다음달 <b style="color:var(--ink)">${_bs-1}일</b>`:`<b style="color:var(--ink)">말일</b>`;
   h+=`<div class="m-section">
-    <div class="m-title">📅 결제 주기 설정</div>
+    <div class="m-title">결제 주기 설정</div>
     <div style="font-size:.82rem;color:var(--ink-2);margin-bottom:14px;line-height:1.8">
       <b style="color:var(--ink)">${esc(masterMember)}</b> 현재: 매월 <b style="color:var(--ink)">${_bs}일</b> ~ ${_edTxt}
     </div>
@@ -2869,7 +2898,7 @@ function viewMaster(){
     // 연말정산 매핑을 여기서도 관리 (categories=소득 여부, methods=공제 구분)
     const tKind = key==="categories" ? "category" : key==="methods" ? "method" : null;
     const tBag  = tKind ? ((tKind==="category"?CTMAP:MTMAP)[masterMember]||{}) : {};
-    h+=`<div class="m-section"><div class="m-title">${icons[key]} ${label} 관리</div>`;
+    h+=`<div class="m-section"><div class="m-title">${label} 관리</div>`;
     if(key==="categories") h+=`<div style="font-size:.72rem;color:var(--ink-3);margin:-6px 0 8px;line-height:1.6">💡 아이콘을 누르면 이모지를 바꿀 수 있어요 (모든 멤버 공통 적용)<br>💵 오른쪽 선택은 <b style="color:var(--ink-2)">연말정산에서 이 카테고리 입금을 소득으로 볼지</b>입니다</div>`;
     if(key==="methods")    h+=`<div style="font-size:.72rem;color:var(--ink-3);margin:-6px 0 8px;line-height:1.6">💳 오른쪽 선택은 <b style="color:var(--ink-2)">연말정산 공제 구분</b>입니다 (신용 15% · 체크/현금 30% · 제외)</div>`;
     h+=`<div class="m-list">`;

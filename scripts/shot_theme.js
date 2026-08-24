@@ -29,9 +29,12 @@ const PORT = 9414;
 const EDGE = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
 const PROFILE = path.join(os.tmpdir(), "ourbudget-shot-theme");
 
+// "탭" 또는 "탭:세그먼트". 연말정산은 분석 탭 안의 세그먼트라 따로 찍지 않으면
+// tyColor 8곳이 아예 렌더되지 않는다.
 const SHOTS = [
   ["list", "내역"], ["cat", "분류"], ["limit", "한도"],
-  ["analysis", "분석"], ["acct", "계좌"], ["master", "설정"],
+  ["analysis", "지출분석"], ["analysis:tax", "연말정산"],
+  ["acct", "계좌"], ["master", "설정"],
 ];
 
 /* ══════ 가짜 데이터 — 실제 분포를 닮게 합성한다 (가족 실데이터를 쓰지 않는다) ══════ */
@@ -190,11 +193,13 @@ const EXPECT = {
       await sleep(2400);
       await send("Runtime.evaluate", { expression: "document.fonts.ready", awaitPromise: true });
       // 기기사용자 모달이 떠 있으면 닫고(이미 localStorage 로 정했지만 방어), 탭 전환
+      const [tab, seg] = tabKey.split(":");
       await send("Runtime.evaluate", {
         expression: `(function(){try{closeDeviceUser&&closeDeviceUser();}catch(e){}
-          goTab(${JSON.stringify(tabKey)});})()`,
+          goTab(${JSON.stringify(tab)});
+          ${seg ? `setAnView(${JSON.stringify(seg)});` : ""}})()`,
       });
-      await sleep(tabKey === "analysis" ? 2600 : 700);   // 분석 탭은 chart.js 지연 로드를 기다린다
+      await sleep(tab === "analysis" ? 2600 : 700);   // 분석 탭은 chart.js 지연 로드를 기다린다
 
       const probe = await send("Runtime.evaluate", {
         returnByValue: true,
@@ -243,7 +248,7 @@ const EXPECT = {
         format: "png", clip: { x: 0, y: 0, width: 390, height: h, scale: 2 },
       });
       await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
-      const file = path.join(OUTDIR, `${mode}-${tabKey}.png`);
+      const file = path.join(OUTDIR, mode + "-" + tabKey.replace(":", "-") + ".png");
       fs.writeFileSync(file, Buffer.from(shot.data, "base64"));
       console.log("   shot  " + path.basename(file) + "  390x" + h + "  (행 " + p.rows + ")");
     }
