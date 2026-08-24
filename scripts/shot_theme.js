@@ -35,6 +35,7 @@ const SHOTS = [
   ["list", "내역"], ["cat", "분류"], ["limit", "한도"],
   ["analysis", "지출분석"], ["analysis:tax", "연말정산"],
   ["acct", "계좌"], ["master", "설정"],
+  ["list:sheet", "입력 시트"], ["list:picker", "피커"],
 ];
 
 /* ══════ 가짜 데이터 — 실제 분포를 닮게 합성한다 (가족 실데이터를 쓰지 않는다) ══════ */
@@ -194,10 +195,13 @@ const EXPECT = {
       await send("Runtime.evaluate", { expression: "document.fonts.ready", awaitPromise: true });
       // 기기사용자 모달이 떠 있으면 닫고(이미 localStorage 로 정했지만 방어), 탭 전환
       const [tab, seg] = tabKey.split(":");
+      // 오버레이(입력 시트·피커)는 탭이 아니라 상태다. ⚠️ 저장 함수는 절대 호출하지 않는다.
+      const open = seg === "sheet" ? "openSheet();"
+                 : seg === "picker" ? "openSheet(); openPicker('fCategory','카테고리');"
+                 : seg ? `setAnView(${JSON.stringify(seg)});` : "";
       await send("Runtime.evaluate", {
         expression: `(function(){try{closeDeviceUser&&closeDeviceUser();}catch(e){}
-          goTab(${JSON.stringify(tab)});
-          ${seg ? `setAnView(${JSON.stringify(seg)});` : ""}})()`,
+          goTab(${JSON.stringify(tab)}); ${open}})()`,
       });
       await sleep(tab === "analysis" ? 2600 : 700);   // 분석 탭은 chart.js 지연 로드를 기다린다
 
