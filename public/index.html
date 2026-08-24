@@ -274,7 +274,9 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 }
 .ccard.link{cursor:pointer}
 .ccard.link:active{opacity:.6}
-.c-h{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.c-h{display:flex;align-items:center;gap:10px;margin-bottom:0}
+.c-sub{font-size:.75rem;color:var(--ink-3);margin-top:5px;font-weight:450}
+.c-pct{font-size:.75rem;font-weight:600;color:var(--ink-3);min-width:30px;text-align:right}
 .c-l{display:flex;align-items:center;gap:10px;min-width:0;flex:1}
 .c-ic{
   width:30px;height:30px;min-width:30px;
@@ -285,10 +287,7 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 /* 증감은 색 배지가 아니라 텍스트로 — 액센트 무채색 원칙 */
 .c-bd{font-size:.75rem;font-weight:600;white-space:nowrap;padding:0;border-radius:0;background:none}
 .bg{color:var(--inc)}.br{color:var(--exp)}
-.c-st{display:flex;align-items:center;gap:9px;margin-bottom:0}
-.st{flex:1;background:none;border:none;border-radius:0;padding:0}
-.st-l{font-size:.6875rem;font-weight:600;color:var(--ink-3);margin-bottom:2px;letter-spacing:.01em}
-.st-v{font-size:.8125rem;font-weight:600}
+.c-st{display:flex;align-items:center;gap:9px;margin-top:9px}
 .barw{flex:1;height:3px;background:var(--fill-2);border-radius:2px;overflow:hidden}
 .bar{height:3px;border-radius:2px;background:var(--ink-2);transition:width .4s}
 .sec-t{
@@ -328,11 +327,13 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
   outline:none;transition:border-color .15s;
 }
 .l-edit input:focus{border-color:var(--ink)}
+/* 반복되는 보조 액션은 아웃라인 — 솔리드 잉크는 주 액션(저장하기·로그인)에만 남긴다.
+   한 화면에 검정 버튼이 7개 뜨면 어느 것이 주 액션인지 사라진다. */
 .l-edit button{
-  padding:9px 15px;border-radius:8px;background:var(--ink);color:var(--on-ink);
-  font-weight:600;font-size:.78rem;border:1px solid var(--ink);transition:opacity .15s;
+  padding:9px 15px;border-radius:8px;background:transparent;color:var(--ink);
+  font-weight:600;font-size:.78rem;border:1px solid var(--line-2);transition:border-color .15s;
 }
-.l-edit button:hover{opacity:.85}
+.l-edit button:hover{border-color:var(--ink)}
 
 /* ── 분석 ── */
 .panel{
@@ -404,6 +405,7 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .at-l{font-size:.6875rem;font-weight:600;color:var(--ink-3);margin-bottom:5px;letter-spacing:.01em}
 .at-v{font-size:2.125rem;font-weight:700;color:var(--ink);letter-spacing:-.045em;line-height:1.1}
 .acct-grid{display:flex;gap:18px;margin:14px 0 0}
+.acct-note{font-size:.75rem;color:var(--ink-3);margin-top:5px;font-weight:450}
 .am{background:none;border:none;border-radius:0;padding:0}
 .am-l{font-size:.6875rem;font-weight:600;color:var(--ink-3);margin-bottom:2px;letter-spacing:.01em}
 .am-v{font-size:.9375rem;font-weight:600;letter-spacing:-.02em}
@@ -558,17 +560,17 @@ body.sheet-open{overflow:hidden}
 }
 .m-add input:focus{border-color:var(--ink)}
 .m-add button{
-  padding:10px 15px;border-radius:8px;background:var(--ink);color:var(--on-ink);
-  font-weight:600;font-size:.82rem;border:1px solid var(--ink);
-  transition:opacity .15s;white-space:nowrap;
+  padding:10px 15px;border-radius:8px;background:transparent;color:var(--ink);
+  font-weight:600;font-size:.82rem;border:1px solid var(--line-2);
+  transition:border-color .15s;white-space:nowrap;
 }
-.m-add button:hover{opacity:.85}
+.m-add button:hover{border-color:var(--ink)}
 .m-save{
-  padding:9px 13px;border-radius:8px;background:var(--ink);color:var(--on-ink);
-  font-weight:600;font-size:.78rem;border:1px solid var(--ink);
-  transition:opacity .15s;white-space:nowrap;
+  padding:9px 13px;border-radius:8px;background:transparent;color:var(--ink);
+  font-weight:600;font-size:.78rem;border:1px solid var(--line-2);
+  transition:border-color .15s;white-space:nowrap;
 }
-.m-save:hover{opacity:.85}
+.m-save:hover{border-color:var(--ink)}
 /* 카테고리 아이콘 편집 버튼 (설정 탭) */
 .m-ico{
   width:34px;height:34px;min-width:34px;border-radius:8px;
@@ -1862,15 +1864,14 @@ function listResultsHtml(all){
 function aggCat(rs, field="category"){ const o={}; rs.forEach(r=>{ if(isTransfer(r)) return; const k=r[field]||"미지정"; (o[k]=o[k]||{inc:0,exp:0}); r.type==="입금"?o[k].inc+=r.amount:o[k].exp+=r.amount;}); return o; }
 function catCard(cat,v,pct,drill){
   const net=v.inc-v.exp;
-  let st="";
-  if(v.inc>0||v.exp>0){
-    st=`<div class="c-st">`;
-    if(v.inc>0) st+=`<div class="st"><div class="st-l">수입</div><div class="st-v g">+${won(v.inc)}</div></div>`;
-    if(v.exp>0) st+=`<div class="st"><div class="st-l">지출</div><div class="st-v r">-${won(v.exp)}</div></div>`;
-    st+=`</div>`;
-  }
+  // ⚠️ 수입·지출이 함께 있는 항목만 둘을 따로 적는다.
+  //    한쪽뿐이면 위 합계와 같은 값이라 화면에 같은 금액이 두 번 나온다(옛 동작).
+  const sub = (v.inc>0 && v.exp>0)
+    ? `<div class="c-sub">수입 +${won(v.inc)} · 지출 -${won(v.exp)}</div>` : "";
+  const meter = pct>0
+    ? `<div class="c-st"><div class="barw"><div class="bar" style="width:${pct}%"></div></div><span class="c-pct">${pct}%</span></div>` : "";
   const clk=drill?` class="ccard link" onclick="drillTo('${jsq(cat)}')"`:` class="ccard"`;
-  return `<div${clk}><div class="c-h"><div class="c-l"><div class="c-ic">${icon(cat)}</div><div class="c-nm">${esc(cat)}</div></div><span class="c-bd ${net>=0?'bg':'br'}">${net>=0?'+':''}${won(net)}</span></div>${st}${pct>0?`<div class="barw"><div class="bar" style="width:${pct}%"></div></div>`:""}</div>`;
+  return `<div${clk}><div class="c-h"><div class="c-l"><div class="c-ic">${icon(cat)}</div><div class="c-nm">${esc(cat)}</div></div><span class="c-bd ${net>=0?'bg':'br'}">${net>=0?'+':''}${won(net)}</span></div>${sub}${meter}</div>`;
 }
 // 분류 카드 → 내역 탭 드릴다운 (검색어로 해당 항목만 필터, 주기·멤버 필터 유지)
 function drillTo(q){ tab="list"; searchQ=q; buildNav(); render(); }
@@ -1890,7 +1891,8 @@ function viewCategory(){
     for(let i=ps.length-1;i>=0;i--){
       const ma=aggCat(buckets[i],field);
       if(!Object.keys(ma).length) continue;
-      h+=`<div class="sec-t">📅 ${ps[i].label}${mixed?' <span style="text-transform:none;letter-spacing:0">· 각자 주기 기준</span>':''}</div>`;
+      // .sec-t 가 더는 uppercase 가 아니라 그 상쇄용 인라인 style 이 필요 없어졌다
+      h+=`<div class="sec-t">${ps[i].label}${mixed?'<span>각자 주기 기준</span>':''}</div>`;
       Object.entries(ma).sort((a,b)=>b[1].exp-a[1].exp).forEach(([c,v])=>h+=catCard(c,v,0));
     }
   }
@@ -2732,21 +2734,24 @@ function orphanBanner(){
 function viewAccount(){
   const rows = myRows();
   // 잔액(acct)엔 이동 포함(계좌 간 돈 흐름), 총 수입·지출 표시엔 이동 제외(같은 금액이 양쪽에 잡혀 부풀어 보임)
-  let inc=0, exp=0, bal=0, acct={};
+  let inc=0, exp=0, bal=0, acct={}, cnt={};
   rows.forEach(r=>{
     const a=r.account||"미분류";
+    cnt[a]=(cnt[a]||0)+1;
     if(r.type==="입금"){ if(!isTransfer(r))inc+=r.amount; bal+=r.amount; acct[a]=(acct[a]||0)+r.amount; }
     else{ if(!isTransfer(r))exp+=r.amount; bal-=r.amount; acct[a]=(acct[a]||0)-r.amount; }
   });
   let h=`${memberFilterPills()}<div class="sec">${orphanBanner()}
     <div class="acct-tot"><div class="at-l">${memberFilter==="전체"?"전체 합산 잔액":esc(memberFilter)+"의 잔액"}</div><div class="at-v">${won(bal)}</div></div>
     <div class="acct-grid">
-      <div class="am"><div class="am-l">총 수입</div><div class="am-v g">+${won(inc)}</div><div class="a-sub">계좌간 이동 제외</div></div>
-      <div class="am"><div class="am-l">총 지출</div><div class="am-v r">-${won(exp)}</div><div class="a-sub">계좌간 이동 제외</div></div>
+      <div class="am"><div class="am-l">총 수입</div><div class="am-v g">+${won(inc)}</div></div>
+      <div class="am"><div class="am-l">총 지출</div><div class="am-v r">-${won(exp)}</div></div>
     </div>
-    <div class="sec-t">계좌별 잔액</div>`;
+    <div class="acct-note">계좌간 이동 제외</div>
+    <div class="sec-t">계좌별 잔액<span>${Object.keys(acct).length}개 · 이동 포함</span></div>`;
   if(Object.keys(acct).length){
-    Object.entries(acct).forEach(([nm,b])=>h+=`<div class="acard"><div><div class="a-nm">🏦 ${esc(nm)}</div><div class="a-sub">잔액</div></div><div class="a-bal ${b>=0?'g':'r'}">${b>=0?'+':''}${won(b)}</div></div>`);
+    // 행마다 '잔액' 라벨을 다시 적으면 바로 위 섹션 제목과 중복된다 → 건수를 대신 보여준다
+    Object.entries(acct).forEach(([nm,b])=>h+=`<div class="acard"><div><div class="a-nm">${esc(nm)}</div><div class="a-sub">${cnt[nm]}건</div></div><div class="a-bal ${b>=0?'g':'r'}">${b>=0?'+':''}${won(b)}</div></div>`);
   } else {
     h+=empty("🏦","계좌 데이터가 없어요.");
   }

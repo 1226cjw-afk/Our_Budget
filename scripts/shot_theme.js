@@ -231,22 +231,18 @@ const EXPECT = {
         }
       }
 
-      // position:fixed 는 풀페이지 캡처에서 뷰포트에 박혀 본문을 가린다 → 문서 바닥으로
-      await send("Runtime.evaluate", {
-        expression: `(function(){
-          document.body.style.position='relative';
-          var n=document.querySelector('.nav'), f=document.querySelector('.fab');
-          if(n){n.style.position='absolute';n.style.bottom='0';n.style.left='0';n.style.right='0';n.style.transform='none';n.style.margin='0 auto';}
-          if(f){f.style.position='absolute';}
-        })()`,
-      });
+      // ⚠️ captureBeyondViewport 는 position:fixed 요소의 오래된 타일을 합성해
+      //    탭바 잔상이 화면 중간에 찍힌다(실제로 겪음). 대신 뷰포트 자체를 늘린다 —
+      //    그러면 fixed 탭바는 늘어난 뷰포트의 바닥, sticky 헤더는 맨 위에 자연히 앉는다.
       const m = await send("Page.getLayoutMetrics", {});
       // --h 로 상한을 주면 위에서부터 그만큼만 — 긴 화면을 눈으로 볼 때 쓴다
       const h = Math.min(Number(argOf("--h")) || 6000, Math.ceil((m.cssContentSize || m.contentSize).height));
+      await send("Emulation.setDeviceMetricsOverride", { width: 390, height: h, deviceScaleFactor: 2, mobile: true });
+      await sleep(500);
       const shot = await send("Page.captureScreenshot", {
-        format: "png", captureBeyondViewport: true,
-        clip: { x: 0, y: 0, width: 390, height: h, scale: 2 },
+        format: "png", clip: { x: 0, y: 0, width: 390, height: h, scale: 2 },
       });
+      await send("Emulation.setDeviceMetricsOverride", { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
       const file = path.join(OUTDIR, `${mode}-${tabKey}.png`);
       fs.writeFileSync(file, Buffer.from(shot.data, "base64"));
       console.log("   shot  " + path.basename(file) + "  390x" + h + "  (행 " + p.rows + ")");
