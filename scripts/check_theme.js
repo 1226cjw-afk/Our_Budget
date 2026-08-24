@@ -124,6 +124,33 @@ const strayHex = [...new Set(rest.match(/#[0-9a-fA-F]{3,8}\b/g) || [])];
 check("토큰 밖에 생 hex 가 없다", strayHex.length === 0,
   "셀렉터 안에서 직접 쓴 색: " + strayHex.join(" "));
 
+/* ══════ 4b. 옛 토큰이 인라인 스타일에 남아 있는가 ══════ */
+// ⚠️ 이 검사가 없었을 때 JS 템플릿의 style="color:var(--t3)" 57건이 그대로 살아남았다.
+// <style> 만 보면 안 된다 — 이 앱은 인라인 스타일을 많이 쓴다.
+const LEGACY = ["--t1","--t2","--t3","--bg2","--bg3","--card","--bd","--bd2",
+                "--ac","--ac2","--acg","--acg2","--g","--gb","--r","--rb",
+                "--amber","--amberg","--shadow","--glow"];
+const legacyFound = LEGACY.filter(t =>
+  new RegExp("var\\(\\s*" + t + "\\s*\\)").test(html));
+check("옛 토큰 참조가 없다 (인라인 포함)", legacyFound.length === 0,
+  "아직 쓰이는 옛 토큰: " + legacyFound.join(" ") + "  — 정의가 없어 색이 상속으로 떨어진다");
+
+/* ══════ 4c. 금지 패턴이 인라인 스타일에도 없는가 ══════ */
+// <style> 밖(정적 마크업 + JS 템플릿)도 같은 규칙을 받는다.
+const outside = html.slice(0, html.indexOf("<style>")) + html.slice(html.indexOf("</style>"));
+for (const [name, re] of [
+  ["font-weight:900", /font-weight\s*:\s*900/g],
+  ["text-transform:uppercase", /text-transform\s*:\s*uppercase/g],
+  ["linear-gradient", /linear-gradient\s*\(/g],
+]) {
+  const n = (outside.match(re) || []).length;
+  check("인라인에도 금지: " + name, n === 0, n + "건 남아 있다");
+}
+// 골드는 브랜드에서 빠졌다 — 어디에도 남으면 안 된다
+const gold = (html.match(/rgba\(\s*201\s*,\s*147\s*,\s*58/g) || []).length
+           + (html.match(/#C9933A/gi) || []).length;
+check("골드 잔재가 없다", gold === 0, gold + "건 (rgba(201,147,58) 또는 #C9933A)");
+
 /* ══════ 5. 고아 class — 마크업이 참조하는데 CSS 에 없는 것 ══════ */
 // 정적 <body> 와 JS 템플릿 문자열의 class="..." 를 모두 모은다.
 // ${...} 보간이 든 값은 이름을 확정할 수 없으므로 건너뛴다.

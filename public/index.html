@@ -245,8 +245,10 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .i-top{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
 .i-cat{font-size:.9375rem;font-weight:500;line-height:1.35;letter-spacing:-.01em}
 .i-amt{font-size:.9375rem;font-weight:600;white-space:nowrap;letter-spacing:-.02em}
-/* 서브텍스트 한 줄 — 옛 칩 3개를 가운뎃점으로 이었다 */
-.i-sub{font-size:.8125rem;color:var(--ink-3);margin-top:1px;font-weight:450;line-height:1.5}
+/* 서브텍스트 한 줄 — 옛 칩 3개를 가운뎃점으로 이었다.
+   수정·삭제는 별도 행이 아니라 이 줄의 오른쪽 끝에 붙어 행을 2줄로 유지한다. */
+.i-foot{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;margin-top:1px}
+.i-sub{flex:1;min-width:0;font-size:.8125rem;color:var(--ink-3);font-weight:450;line-height:1.5}
 .i-sub .memo{color:var(--ink-2)}
 .chips{display:flex;flex-wrap:wrap;gap:4px}
 .chip{
@@ -256,12 +258,14 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .chip.mem{color:var(--ink-2);font-weight:550}
 .chip.trf{color:var(--s1);font-weight:600}
 .i-memo{font-size:.8125rem;color:var(--ink-2);margin-top:2px;line-height:1.5}
-.i-act{display:flex;gap:6px;margin-top:9px}
-.b-edit,.b-del{padding:5px 12px;font-size:.75rem;font-weight:600;border-radius:8px;border:1px solid;transition:background .15s}
-.b-edit{border-color:var(--line-2);color:var(--ink-2);background:transparent}
-.b-edit:hover{background:var(--fill)}
-.b-del{border-color:color-mix(in srgb,var(--exp) 30%,transparent);color:var(--exp);background:transparent}
-.b-del:hover{background:color-mix(in srgb,var(--exp) 8%,transparent)}
+/* 테두리 없는 텍스트 버튼 — 행마다 상자가 2개씩 뜨면 룰선 리스트가 도로 카드처럼 보인다.
+   ⚠️ 없애지는 말 것: 계좌간 이동은 수정이 막혀 있어 여기 삭제가 유일한 제거 수단이다. */
+.i-act{display:flex;gap:10px;flex-shrink:0;padding-bottom:1px}
+.b-edit,.b-del{padding:2px 0;font-size:.75rem;font-weight:550;border:none;background:none;transition:color .15s}
+.b-edit{color:var(--ink-3)}
+.b-edit:hover{color:var(--ink)}
+.b-del{color:var(--ink-3)}
+.b-del:hover{color:var(--exp)}
 
 /* ── 분류 행 ── */
 .ccard{
@@ -831,8 +835,8 @@ body.sheet-open{overflow:hidden}
       <span class="picker-t">이 기기는 누구의 폰인가요?</span>
       <button class="picker-cl" onclick="closeDeviceUser()">나중에</button>
     </div>
-    <div style="padding:12px 22px 4px;font-size:.78rem;color:var(--t2);line-height:1.7">
-      선택하면 이 기기에서 <b style="color:var(--ac)">입력·필터의 기본 사용자</b>가 그 사람으로 맞춰집니다. (설정 탭에서 언제든 변경)
+    <div style="padding:12px 22px 4px;font-size:.78rem;color:var(--ink-2);line-height:1.7">
+      선택하면 이 기기에서 <b style="color:var(--ink)">입력·필터의 기본 사용자</b>가 그 사람으로 맞춰집니다. (설정 탭에서 언제든 변경)
     </div>
     <div class="picker-opts" id="duOpts"></div>
   </div>
@@ -1534,7 +1538,7 @@ function openIconPicker(cat){
      <div style="padding:6px 18px 18px;display:flex;gap:8px">
        <input class="search-inp" id="emoCustom" placeholder="직접 입력 (이모지)" maxlength="12" style="flex:1;padding-right:15px">
        <button class="m-save" onclick="saveIcon($('emoCustom').value.trim())">적용</button>
-       <button class="m-save" style="color:var(--t2);background:var(--bg3);border-color:var(--bd)" onclick="saveIcon('')">기본</button>
+       <button class="m-save" style="color:var(--ink-2);background:var(--fill);border-color:var(--line)" onclick="saveIcon('')">기본</button>
      </div>`;
   document.body.classList.add("sheet-open");  // 배경(설정 탭) 스크롤 잠금
   $("pickerOv").classList.add("open");
@@ -1669,18 +1673,18 @@ function render(){
   const m=$("main");
   if(loadError){
     m.innerHTML=`<div class="sec"><div class="err-card">
-      <div style="font-size:1.05rem;font-weight:900;color:var(--r);margin-bottom:8px">⚠️ 데이터 연결 오류</div>
-      <div style="font-size:.82rem;color:var(--t2);margin-bottom:14px;line-height:1.75">${loadError}</div>
-      <div style="font-size:.76rem;color:var(--t3);line-height:1.9">
-        <b style="color:var(--t2)">해결 방법</b><br>
+      <div style="font-size:1.05rem;font-weight:700;color:var(--exp);margin-bottom:8px">⚠️ 데이터 연결 오류</div>
+      <div style="font-size:.82rem;color:var(--ink-2);margin-bottom:14px;line-height:1.75">${loadError}</div>
+      <div style="font-size:.76rem;color:var(--ink-3);line-height:1.9">
+        <b style="color:var(--ink-2)">해결 방법</b><br>
         1. 인터넷 연결을 확인하고 아래 '다시 시도'를 눌러보세요.<br>
         2. 계속되면 로그아웃 후 다시 로그인해보세요 (세션 만료일 수 있어요).<br>
         3. 그래도 안 되면 Supabase 대시보드 → Table Editor → RLS Policies에서
-        가계부 6개 테이블에 <code style="background:var(--bg3);padding:2px 6px;border-radius:4px">family_only</code> 정책이 남아 있는지 확인:
-        <code style="background:var(--bg3);padding:2px 6px;border-radius:4px">FOR ALL TO authenticated USING (true) WITH CHECK (true)</code><br>
-        <b style="color:var(--r)">⚠️ <code>TO authenticated</code>를 빼면 로그인 없이도 데이터가 열립니다</b> — 이 부분은 지우지 마세요.
+        가계부 6개 테이블에 <code style="background:var(--fill);padding:2px 6px;border-radius:4px">family_only</code> 정책이 남아 있는지 확인:
+        <code style="background:var(--fill);padding:2px 6px;border-radius:4px">FOR ALL TO authenticated USING (true) WITH CHECK (true)</code><br>
+        <b style="color:var(--exp)">⚠️ <code>TO authenticated</code>를 빼면 로그인 없이도 데이터가 열립니다</b> — 이 부분은 지우지 마세요.
       </div>
-      <button onclick="retryLoad()" style="margin-top:14px;padding:10px 20px;background:var(--acg);color:var(--ac);border:1px solid rgba(201,147,58,.25);border-radius:11px;font-weight:700;font-size:.84rem">다시 시도</button>
+      <button onclick="retryLoad()" style="margin-top:14px;padding:10px 20px;background:var(--fill);color:var(--ink);border:1px solid var(--line-2);border-radius:11px;font-weight:700;font-size:.84rem">다시 시도</button>
     </div></div>`;
     return;
   }
@@ -1759,7 +1763,7 @@ function viewList(){
   const all=scoped();
   if(!all.length) return `<div class="sec">${empty("📭","내역이 없어요.\n＋ 버튼으로 추가해보세요.")}</div>`;
   const searchBar=`<div class="searchw"><div>
-    <input class="search-inp" id="searchBox" placeholder="🔍 메모·카테고리·계좌 검색" value="${esc(searchQ)}" oninput="setSearch(this.value)">
+    <input class="search-inp" id="searchBox" placeholder="메모·카테고리·계좌 검색" value="${esc(searchQ)}" oninput="setSearch(this.value)">
     <button class="search-x" id="searchClear" onclick="setSearch('')" aria-label="검색 지우기" style="display:${searchQ?'flex':'none'}">✕</button>
   </div></div>`;
   return searchBar+`<div id="listResults">${listResultsHtml(all)}</div>`;
@@ -1778,14 +1782,21 @@ let _listObs = null;   // IntersectionObserver — 재렌더마다 갈아끼운�
 function dayGroupHtml(date, dr){
   const days=["일","월","화","수","목","금","토"];
   const d=parseDate(date), de=expOf(dr);
-  let h=`<div class="dgroup"><div class="dhead"><span>${d.getMonth()+1}월 ${d.getDate()}일 (${days[d.getDay()]})</span><span class="dtot">${de>0?'-'+won(de):''}</span></div>`;
+  let h=`<div class="dgroup"><div class="dhead"><span>${d.getMonth()+1}월 ${d.getDate()}일 (${days[d.getDay()]})</span><span class="dtot">${de>0?'지출 '+won(de):''}</span></div>`;
   dr.forEach(r=>{
     const cls=r.type==="입금"?"g":"r", pf=r.type==="입금"?"+":"-";
+    // 옛 칩 3개 나열 → 가운뎃점으로 이은 한 줄. 이동 leg 배지만 색으로 남긴다.
+    // ⚠️ 사용자 문자열은 전부 esc() 를 통과해야 한다 (계좌명·메모에 < 나 따옴표가 들어올 수 있다).
+    const sub=[];
+    if(isTransfer(r)) sub.push(`<span class="chip trf">${r.type==="입금"?"입금":"출금"} · 이동</span>`);
+    sub.push(esc(r.account));
+    if(r.method) sub.push(esc(r.method));
+    if(r.member) sub.push(`<span class="chip mem">${esc(r.member)}</span>`);
+    if(r.memo)   sub.push(`<span class="memo">${esc(r.memo)}</span>`);
     h+=`<div class="item"><div class="i-ic">${icon(r.category)}</div><div class="i-bd">
       <div class="i-top"><span class="i-cat">${esc(r.category)}</span><span class="i-amt ${cls}">${pf}${won(r.amount)}</span></div>
-      <div class="chips">${r.member?`<span class="chip mem">${esc(r.member)}</span>`:""}<span class="chip">${esc(r.account)}</span>${r.method?`<span class="chip">${esc(r.method)}</span>`:""}${isTransfer(r)?`<span class="chip trf">${r.type==="입금"?"입금":"출금"}·이동</span>`:""}</div>
-      ${r.memo?`<div class="i-memo">${esc(r.memo)}</div>`:""}
-      <div class="i-act"><button class="b-edit" onclick="editEntry('${r.id}')">수정</button><button class="b-del" onclick="delEntry('${r.id}')">삭제</button></div>
+      <div class="i-foot"><div class="i-sub">${sub.join(" · ")}</div>
+        <div class="i-act"><button class="b-edit" onclick="editEntry('${r.id}')">수정</button><button class="b-del" onclick="delEntry('${r.id}')">삭제</button></div></div>
     </div></div>`;
   });
   return h+`</div>`;
@@ -1802,7 +1813,7 @@ function listChunkHtml(){
 }
 function listMoreHtml(){
   return LIST_I < LIST_G.length
-    ? `<div id="listMore" style="text-align:center;padding:18px 0;font-size:.76rem;color:var(--t3);font-weight:600">남은 ${comma(listRestCount())}건 불러오는 중…</div>`
+    ? `<div id="listMore" style="text-align:center;padding:18px 0;font-size:.76rem;color:var(--ink-3);font-weight:600">남은 ${comma(listRestCount())}건 불러오는 중…</div>`
     : "";
 }
 function growList(){
@@ -1841,7 +1852,7 @@ function listResultsHtml(all){
     <div class="card exp"><div class="c-lb">지출</div><div class="c-v r">-${won(exp)}</div></div>
   </div>`;
   // 건수는 '그린 것'이 아니라 '걸린 것' 전체를 보여준다 — 점진 렌더링이 집계를 줄인 것처럼 보이면 안 된다
-  h+=`<div style="font-size:.72rem;color:var(--t3);font-weight:600;text-align:right;padding:0 2px">${q?`'${esc(searchQ)}' 검색 결과 · 지출 ${won(exp)} · `:""}${rows.length}건</div>`;
+  h+=`<div style="font-size:.72rem;color:var(--ink-3);font-weight:600;text-align:right;padding:0 2px">${q?`'${esc(searchQ)}' 검색 결과 · 지출 ${won(exp)} · `:""}${rows.length}건</div>`;
   h+=listChunkHtml();
   return h+listMoreHtml()+`</div>`;
 }
@@ -1917,7 +1928,7 @@ function viewLimit(){
     h+=`<div class="lcard ${st}">
       <div class="l-h"><div class="c-l"><div class="c-ic">📦</div><div class="c-nm">전체 한도 요약</div></div><div class="l-pct ${st}">${tp}%</div></div>
       <div class="l-bar-w"><div class="l-bar ${st}" style="width:${Math.min(tp,100)}%"></div></div>
-      <div class="l-meta"><span>${won(tu)}</span><span class="l-lim">/ ${won(tl)}</span><span style="margin-left:auto;font-size:.76rem;color:${tu<=tl?'var(--g)':'var(--r)'}">${tu<=tl?'남음 '+won(tl-tu):'초과 '+won(tu-tl)}</span></div>
+      <div class="l-meta"><span>${won(tu)}</span><span class="l-lim">/ ${won(tl)}</span><span style="margin-left:auto;font-size:.76rem;color:${tu<=tl?'var(--inc)':'var(--exp)'}">${tu<=tl?'남음 '+won(tl-tu):'초과 '+won(tu-tl)}</span></div>
     </div>`;
   }
 
@@ -2027,16 +2038,16 @@ function viewAnalysis(){
 
   // 1) 메트릭 카드 (지출 / 수입 / 평균 대비)
   h+=`<div class="astat">
-    <div class="am"><div class="am-l">이번 주기 지출</div><div class="am-v r">${won(last)}</div>${prev?`<div class="am-sub">${trChip(trPct)} <span style="color:var(--t3)">전 주기</span></div>`:`<div class="am-sub" style="color:var(--t3)">기록 시작</div>`}</div>
-    <div class="am"><div class="am-l">이번 주기 수입</div><div class="am-v g">${won(lastInc)}</div><div class="am-sub" style="color:var(--t3)">순 ${net>=0?'+':'-'}${wonShort(Math.abs(net))}</div></div>
-    <div class="am"><div class="am-l">평균 대비</div><div class="am-v ${avgPct>0?'r':avgPct<0?'g':''}">${avgPct>=0?'+':''}${avgPct}%</div><div class="am-sub" style="color:var(--t3)">평균 ${wonShort(avg)}</div></div>
+    <div class="am"><div class="am-l">이번 주기 지출</div><div class="am-v r">${won(last)}</div>${prev?`<div class="am-sub">${trChip(trPct)} <span style="color:var(--ink-3)">전 주기</span></div>`:`<div class="am-sub" style="color:var(--ink-3)">기록 시작</div>`}</div>
+    <div class="am"><div class="am-l">이번 주기 수입</div><div class="am-v g">${won(lastInc)}</div><div class="am-sub" style="color:var(--ink-3)">순 ${net>=0?'+':'-'}${wonShort(Math.abs(net))}</div></div>
+    <div class="am"><div class="am-l">평균 대비</div><div class="am-v ${avgPct>0?'r':avgPct<0?'g':''}">${avgPct>=0?'+':''}${avgPct}%</div><div class="am-sub" style="color:var(--ink-3)">평균 ${wonShort(avg)}</div></div>
   </div>`;
 
   // 2) 주기별 지출 구성 — 카테고리 스택 막대 + 수입 막대 (한눈에 주기별 카테고리 지출/수입)
   if(catTotals.length || incomeByPeriod.some(v=>v>0)){
     h+=`<div class="panel"><div class="p-t">📊 주기별 지출 구성<span class="p-sub">카테고리별 · 수입</span></div>
       <canvas id="chartPeriod" height="200"></canvas>${mixedPeriods()
-        ? `<div style="font-size:.7rem;color:var(--t3);margin-top:10px;line-height:1.6">※ 멤버마다 결제주기 시작일이 달라, 가로축 라벨은 ${esc(_anMem)} 기준이고 집계는 각자의 주기로 나눴어요.</div>`
+        ? `<div style="font-size:.7rem;color:var(--ink-3);margin-top:10px;line-height:1.6">※ 멤버마다 결제주기 시작일이 달라, 가로축 라벨은 ${esc(_anMem)} 기준이고 집계는 각자의 주기로 나눴어요.</div>`
         : ``}</div>`;
   }
 
@@ -2406,17 +2417,17 @@ function viewTaxYear(){
   const R=Math.round;
 
   let h=`<div class="sec">`;
-  h+=`<div class="ty-cap">${t.year}년 1월~12월(역년) 기준 · 현재 ${t.m}월까지의 실적을 <b style="color:var(--t2)">연환산</b>해 연말을 예측합니다. 결제주기와 무관해요.</div>`;
+  h+=`<div class="ty-cap">${t.year}년 1월~12월(역년) 기준 · 현재 ${t.m}월까지의 실적을 <b style="color:var(--ink-2)">연환산</b>해 연말을 예측합니다. 결제주기와 무관해요.</div>`;
 
   // 0) 테이블 미설치 안내 — 이게 없으면 매핑이 저장되지 않아 모든 집계가 0원이 된다
   if(!TAX_READY){
     h+=`<div class="m-section" style="border-color:rgba(240,84,112,.3)">
-      <div class="m-title">🛠️ 설치 안내 <span style="font-size:.66rem;color:var(--r);font-weight:700">필수</span></div>
-      <div style="font-size:.8rem;color:var(--t2);line-height:1.75;margin-bottom:12px">
-        <b style="color:var(--r)">tax_map 테이블이 없어 매핑을 저장할 수 없습니다.</b> 그래서 지금은 모든 집계가 0원으로 나와요.<br>
+      <div class="m-title">🛠️ 설치 안내 <span style="font-size:.66rem;color:var(--exp);font-weight:700">필수</span></div>
+      <div style="font-size:.8rem;color:var(--ink-2);line-height:1.75;margin-bottom:12px">
+        <b style="color:var(--exp)">tax_map 테이블이 없어 매핑을 저장할 수 없습니다.</b> 그래서 지금은 모든 집계가 0원으로 나와요.<br>
         Supabase 대시보드 → SQL Editor에서 아래를 한 번 실행해주세요.
       </div>
-      <pre style="background:var(--bg3);border:1px solid var(--bd);border-radius:11px;padding:12px;overflow-x:auto;font-size:.68rem;line-height:1.6;color:var(--t2)">${esc(TAX_MAP_DDL)}</pre>
+      <pre style="background:var(--fill);border:1px solid var(--line);border-radius:11px;padding:12px;overflow-x:auto;font-size:.68rem;line-height:1.6;color:var(--ink-2)">${esc(TAX_MAP_DDL)}</pre>
       <button class="m-save" style="width:100%;margin-top:10px;padding:11px" onclick="copyTaxDDL()">📋 SQL 복사</button>
     </div></div>`;
     return h;   // 설정 전에는 0원짜리 계산 화면을 보여주지 않는다 (오해의 소지)
@@ -2429,11 +2440,11 @@ function viewTaxYear(){
       <span class="ty-sal-v">${t.salary>0?won(t.salary):"미설정"}</span>
       <span class="ty-bdg ${t.manual?'man':'auto'}">${t.manual?'수동 입력':'자동 추정'}</span>
     </div>
-    <div style="font-size:.74rem;color:var(--t3);line-height:1.7;margin-bottom:12px">
+    <div style="font-size:.74rem;color:var(--ink-3);line-height:1.7;margin-bottom:12px">
       ${t.salaryCnt
-        ? `소득으로 지정한 카테고리의 올해 입금 <b style="color:var(--t2)">${t.salaryCnt}건 ${won(R(t.autoSalary/12*t.m))}</b>을 ${t.m}개월로 나눠 ×12 → 추정 ${won(t.autoSalary)}`
+        ? `소득으로 지정한 카테고리의 올해 입금 <b style="color:var(--ink-2)">${t.salaryCnt}건 ${won(R(t.autoSalary/12*t.m))}</b>을 ${t.m}개월로 나눠 ×12 → 추정 ${won(t.autoSalary)}`
         : `소득으로 지정된 카테고리가 없어 자동 추정이 불가능해요. 아래 '소득 카테고리 매핑'에서 지정해주세요.`}
-      ${t.manual?`<br>수동값 <b style="color:var(--ac)">${won(t.manual)}</b>이 적용 중입니다.`:``}
+      ${t.manual?`<br>수동값 <b style="color:var(--ink)">${won(t.manual)}</b>이 적용 중입니다.`:``}
     </div>
     ${!t.manual&&t.salaryCnt>0&&t.salaryCnt<t.m
       ? `<div class="alert" style="margin-bottom:12px">⚠️ 월급 입금이 ${t.salaryCnt}건뿐이라 ${t.m}개월치를 다 반영하지 못했어요. 추정이 실제보다 낮을 수 있으니 연봉을 직접 입력해주세요.</div>`
@@ -2446,7 +2457,7 @@ function viewTaxYear(){
     ${t.manual?`<button class="m-save" style="width:100%;margin-top:9px;padding:9px" onclick="resetTySalary('${jsq(tyMember)}')">↩︎ 자동 추정값으로 되돌리기</button>`:``}`;
   if(t.salary>0){
     h+=`<div class="ty-facts">
-      <div class="ty-fact"><div class="ty-fact-l">25% 문턱</div><div class="ty-fact-v" style="color:var(--amber)">${won(R(t.th))}</div></div>
+      <div class="ty-fact"><div class="ty-fact-l">25% 문턱</div><div class="ty-fact-v" style="color:var(--warn)">${won(R(t.th))}</div></div>
       <div class="ty-fact"><div class="ty-fact-l">공제 한도</div><div class="ty-fact-v">${won(t.limit)}</div></div>
     </div>`;
   }
@@ -2479,7 +2490,7 @@ function viewTaxYear(){
         <span class="tyu-x"><span class="tyu-v">${won(t.S)}</span>
           <div class="tyu-s">연환산 ${won(R(t.Sp))}</div></span></div>
     </div>
-    <div style="font-size:.7rem;color:var(--t3);margin-top:9px;line-height:1.65">
+    <div style="font-size:.7rem;color:var(--ink-3);margin-top:9px;line-height:1.65">
       큰 숫자는 ${t.m}월까지 실제 사용액, 아래는 이 추세의 연말 예상치 · 막대는 연환산 기준${t.ytd.none>0?` · 공제 제외 ${won(t.ytd.none)}`:``}
     </div>`;
   if(unmapArr.length){
@@ -2496,7 +2507,7 @@ function viewTaxYear(){
     const nCard=(nm,rate,need,col,on)=>`<div class="tyn-i${on?' on':''}">
       ${on?`<div class="tyn-tag">유리</div>`:``}
       <div class="tyn-l"><span class="tyu-d" style="background:${col}"></span>${nm}</div>
-      <div class="tyn-v" style="color:${rate>0?col:'var(--t3)'}">${pc(rate)}</div>
+      <div class="tyn-v" style="color:${rate>0?col:'var(--ink-3)'}">${pc(rate)}</div>
       <div class="tyn-s">${t.room<=0 ? '더 써도 공제 증가 없음'
         : `한도까지 <b>${won(need)}</b> 더 쓰면 완성`}</div></div>`;
     const whyTxt={
@@ -2508,16 +2519,16 @@ function viewTaxYear(){
     h+=`<div class="panel"><div class="p-t">🎯 남은 공제 여력<span class="p-sub">연환산 총급여 기준</span></div>
       <div class="tyrm-l"><span>지금까지 확정 <b>${won(R(t.dedNow))}</b></span><span>한도 <b>${won(t.limit)}</b></span></div>
       <div class="tyrm-bw"><div class="tyrm-b" style="width:${Math.min(100,t.dedNow/t.limit*100)}%"></div></div>
-      <div style="font-size:.73rem;color:var(--t2);margin-top:10px;line-height:1.7">
-        남은 공제 여력 <b style="color:var(--g)">${won(R(t.room))}</b>${t.toTh>0
-          ? ` · 그전에 25% 문턱까지 <b style="color:var(--amber)">${won(R(t.toTh))}</b>를 더 써야 공제가 시작돼요`:``}
+      <div style="font-size:.73rem;color:var(--ink-2);margin-top:10px;line-height:1.7">
+        남은 공제 여력 <b style="color:var(--inc)">${won(R(t.room))}</b>${t.toTh>0
+          ? ` · 그전에 25% 문턱까지 <b style="color:var(--warn)">${won(R(t.toTh))}</b>를 더 써야 공제가 시작돼요`:``}
       </div>
-      <div style="font-size:.66rem;font-weight:700;color:var(--t3);margin:15px 0 -5px;letter-spacing:.3px">지금부터 1원의 공제 효과</div>
+      <div style="font-size:.66rem;font-weight:700;color:var(--ink-3);margin:15px 0 -5px;letter-spacing:.3px">지금부터 1원의 공제 효과</div>
       <div class="tyn">
         ${nCard("신용카드", mr.credit, t.need15, TY_COLOR.credit, mr.credit>mr.thirty)}
         ${nCard("체크·현금", mr.thirty, t.need30, TY_COLOR.check, mr.thirty>mr.credit)}
       </div>
-      <div style="font-size:.75rem;color:var(--t2);margin-top:13px;line-height:1.7;padding-top:12px;border-top:1px solid var(--bd)">${whyTxt}</div>
+      <div style="font-size:.75rem;color:var(--ink-2);margin-top:13px;line-height:1.7;padding-top:12px;border-top:1px solid var(--line)">${whyTxt}</div>
     </div>`;
   }
 
@@ -2527,7 +2538,7 @@ function viewTaxYear(){
       <div class="ins-bd"><div class="ins-t">${esc(x.t)}</div><div class="ins-b">${esc(x.b)}</div></div></div>`).join("")}`;
   if(t.salary>0){
     h+=`<div class="ty-facts" style="margin-top:13px">
-      <div class="ty-fact"><div class="ty-fact-l">연말 예상 공제액</div><div class="ty-fact-v" style="color:var(--g)">${won(R(t.ded))}</div></div>
+      <div class="ty-fact"><div class="ty-fact-l">연말 예상 공제액</div><div class="ty-fact-v" style="color:var(--inc)">${won(R(t.ded))}</div></div>
       <div class="ty-fact"><div class="ty-fact-l">지금까지 확정</div><div class="ty-fact-v">${won(R(t.dedNow))}</div></div>
     </div>`;
   }
@@ -2541,16 +2552,16 @@ function viewTaxYear(){
       <div class="tysc-t"><span class="tysc-n">${nm}</span><span class="tysc-v" style="color:${col}">${won(R(v))}</span></div>
       <div class="tysc-bw"><div class="tysc-b" style="width:${Math.max(2,v/mx*100)}%;background:${col}"></div></div></div>`;
     h+=`<div class="panel"><div class="p-t">⚖️ 남은 ${t.remain}개월 비교<span class="p-sub">연말 공제액</span></div>
-      <div style="font-size:.75rem;color:var(--t3);line-height:1.7;margin:-4px 0 13px">
+      <div style="font-size:.75rem;color:var(--ink-3);line-height:1.7;margin:-4px 0 13px">
         지금 페이스(월 ${wonShort(R(t.pace))})로 남은 ${t.remain}개월에 ${won(R(t.future))}를 더 쓴다고 볼 때
       </div>
       <div class="tysc">
         ${bar("전부 체크·현금으로", t.scCheck, TY_COLOR.check)}
         ${bar("전부 신용카드로", t.scCredit, TY_COLOR.credit)}
       </div>
-      <div style="font-size:.78rem;color:var(--t2);margin-top:13px;line-height:1.7;padding-top:12px;border-top:1px solid var(--bd)">
+      <div style="font-size:.78rem;color:var(--ink-2);margin-top:13px;line-height:1.7;padding-top:12px;border-top:1px solid var(--line)">
         ${gap>0
-          ? `체크·현금으로 돌리면 공제가 <b style="color:var(--g)">${won(gap)}</b> 더 늘어요.`
+          ? `체크·현금으로 돌리면 공제가 <b style="color:var(--inc)">${won(gap)}</b> 더 늘어요.`
           : `지금 상황에선 어느 쪽을 써도 공제 차이가 없어요 — ${
               t.ded>=t.limit-1 ? '이미 공제 한도를 채우기 때문'
               : t.Sp<=t.th     ? '연말까지 써도 25% 문턱에 못 미치기 때문'
@@ -2571,7 +2582,7 @@ function viewTaxYear(){
     };
     h+=`<div class="panel"><div class="p-t">📊 월별 사용 추이<span class="p-sub">신용·체크·현금</span></div>
       <canvas id="chartTyMonth" height="200"></canvas>
-      ${t.salary>0?`<div style="font-size:.7rem;color:var(--t3);margin-top:10px;line-height:1.6">점선 = 문턱을 12개월로 나눈 월 적정 페이스 ${won(R(t.th/12))}</div>`:``}
+      ${t.salary>0?`<div style="font-size:.7rem;color:var(--ink-3);margin-top:10px;line-height:1.6">점선 = 문턱을 12개월로 나눈 월 적정 페이스 ${won(R(t.th/12))}</div>`:``}
     </div>`;
   } else { _tyStash=null; }
 
@@ -2598,19 +2609,19 @@ function taxMapSection(member, kind, t){
     const cur=bag[v]||"", a=amt[v]||0;
     return `<div class="tym">
       <div class="tym-bd">
-        <div class="tym-nm">${v?esc(v):'<span style="color:var(--t3)">(미지정)</span>'}${isReg?'':' <span class="tym-tag">미등록</span>'}</div>
+        <div class="tym-nm">${v?esc(v):'<span style="color:var(--ink-3)">(미지정)</span>'}${isReg?'':' <span class="tym-tag">미등록</span>'}</div>
         <div class="tym-a">${tyAmtLabel(a,isCat,cur)}</div>
       </div>
       ${taxSelect(member,kind,v,cur)}</div>`;
   };
 
   let h=`<div class="m-section">
-    <div class="m-title">${isCat?'💵 소득 카테고리 매핑':'🗂️ 결제수단 매핑'} <span style="font-size:.66rem;color:var(--t3);font-weight:600">${esc(member)}</span></div>
-    <div style="font-size:.75rem;color:var(--t2);line-height:1.75;margin-bottom:12px">
+    <div class="m-title">${isCat?'💵 소득 카테고리 매핑':'🗂️ 결제수단 매핑'} <span style="font-size:.66rem;color:var(--ink-3);font-weight:600">${esc(member)}</span></div>
+    <div style="font-size:.75rem;color:var(--ink-2);line-height:1.75;margin-bottom:12px">
       ${isCat
-        ? `어떤 입금을 <b style="color:var(--ac)">급여(총급여)</b>로 볼지 지정합니다. 여기서 소득으로 지정한 카테고리만 25% 문턱 계산에 들어가요.`
-        : `'~~카드'만으로는 신용인지 체크인지 알 수 없어서, 수단마다 공제 구분을 지정해야 집계됩니다. <b style="color:var(--ac)">현금</b>은 현금영수증을 발행한 금액만 공제 대상이에요.`}
-      <br><span style="color:var(--t3)">설정 탭 → ${isCat?'카테고리':'결제수단'} 관리에서도 같은 값을 바꿀 수 있어요.</span>
+        ? `어떤 입금을 <b style="color:var(--ink)">급여(총급여)</b>로 볼지 지정합니다. 여기서 소득으로 지정한 카테고리만 25% 문턱 계산에 들어가요.`
+        : `'~~카드'만으로는 신용인지 체크인지 알 수 없어서, 수단마다 공제 구분을 지정해야 집계됩니다. <b style="color:var(--ink)">현금</b>은 현금영수증을 발행한 금액만 공제 대상이에요.`}
+      <br><span style="color:var(--ink-3)">설정 탭 → ${isCat?'카테고리':'결제수단'} 관리에서도 같은 값을 바꿀 수 있어요.</span>
     </div>`;
   if(nUnmapped){
     h+=`<button class="m-save" style="width:100%;padding:11px;margin-bottom:12px" onclick="applyTaxSuggest('${jsq(member)}','${kind}')">✨ 미분류 ${nUnmapped}개 추천값으로 일괄 분류</button>`;
@@ -2709,13 +2720,13 @@ function orphanBanner(){
   if(!os.length) return "";
   const li = os.slice(0,5).map(r=>
     `<div style="margin-top:6px">· ${r.date} · <b>${won(Number(r.amount))}</b> · ${esc(r.account||"미분류")}
-     <span style="color:var(--t3)">(${r.type==="입금"?"입금":"출금"}만 있음${r.memo?" · "+esc(r.memo):""})</span></div>`).join("");
+     <span style="color:var(--ink-3)">(${r.type==="입금"?"입금":"출금"}만 있음${r.memo?" · "+esc(r.memo):""})</span></div>`).join("");
   return `<div class="warn-card">
     <div class="wc-t">🔗 짝 없는 계좌간 이동 ${os.length}건</div>
     <div class="wc-b">이동은 출금·입금 2건이 한 쌍이어야 해요. 한쪽만 있으면 <b>그 계좌 잔액이 그만큼 틀어지고</b>,
       이동은 수입·지출 통계에서도 빠지기 때문에 그 금액이 화면 어디에도 잡히지 않습니다.<br>
       내역 탭(◀로 해당 주기 이동)에서 짝을 추가하거나, 실제 이동이 아니면 카테고리를 바꿔주세요.
-      ${li}${os.length>5?`<div style="margin-top:6px;color:var(--t3)">…외 ${os.length-5}건</div>`:""}</div>
+      ${li}${os.length>5?`<div style="margin-top:6px;color:var(--ink-3)">…외 ${os.length-5}건</div>`:""}</div>
   </div>`;
 }
 function viewAccount(){
@@ -2767,15 +2778,15 @@ function viewMaster(){
   // 이 기기 사용자 (localStorage 기반, 멤버별 기본값)
   h+=`<div class="m-section">
     <div class="m-title">📱 이 기기 사용자</div>
-    <div style="font-size:.8rem;color:var(--t2);margin-bottom:12px;line-height:1.7">
-      이 기기에서 입력·필터의 <b style="color:var(--ac)">기본 사용자</b>입니다. 각자 폰에서 한 번만 선택하면 돼요.
+    <div style="font-size:.8rem;color:var(--ink-2);margin-bottom:12px;line-height:1.7">
+      이 기기에서 입력·필터의 <b style="color:var(--ink)">기본 사용자</b>입니다. 각자 폰에서 한 번만 선택하면 돼요.
     </div>
     <div class="seg">
       ${segBtns(MEMBERS, DEVICE_USER, "setDeviceUser")}
       <button class="${!DEVICE_USER?'on':''}" onclick="setDeviceUser('')">공용</button>
     </div>
-    <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--bd);display:flex;justify-content:space-between;align-items:center">
-      <span style="font-size:.78rem;color:var(--t3)">가족 공용 계정으로 로그인됨</span>
+    <div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center">
+      <span style="font-size:.78rem;color:var(--ink-3)">가족 공용 계정으로 로그인됨</span>
       <span style="display:flex;gap:8px">
         <button class="picker-cl" onclick="openPwChange()">비밀번호 변경</button>
         <button class="m-del" onclick="doLogout()">로그아웃</button>
@@ -2785,7 +2796,7 @@ function viewMaster(){
 
   // 앱 설정 (전역 — app_settings)
   h+=`<div class="m-section">
-    <div class="m-title">🛠️ 앱 설정 <span style="font-size:.66rem;color:var(--t3);font-weight:600">전체 공통</span></div>
+    <div class="m-title">🛠️ 앱 설정 <span style="font-size:.66rem;color:var(--ink-3);font-weight:600">전체 공통</span></div>
     <div class="set-row">
       <div style="flex:1;min-width:0">
         <div class="set-nm">한도 경고 임계값</div>
@@ -2811,8 +2822,8 @@ function viewMaster(){
   // 데이터 내보내기 (전역)
   h+=`<div class="m-section">
     <div class="m-title">💾 데이터 내보내기</div>
-    <div style="font-size:.8rem;color:var(--t2);margin-bottom:12px;line-height:1.7">
-      전체 거래내역 <b style="color:var(--ac)">${ROWS.length}건</b>을 CSV 파일로 저장합니다. 엑셀·구글시트에서 바로 열 수 있어요.
+    <div style="font-size:.8rem;color:var(--ink-2);margin-bottom:12px;line-height:1.7">
+      전체 거래내역 <b style="color:var(--ink)">${ROWS.length}건</b>을 CSV 파일로 저장합니다. 엑셀·구글시트에서 바로 열 수 있어요.
     </div>
     <button class="m-save" style="width:100%;padding:12px" onclick="exportCSV()">📥 CSV 다운로드</button>
   </div>`;
@@ -2823,28 +2834,28 @@ function viewMaster(){
 
   // 멤버 선택 바
   h+=`<div style="margin-bottom:16px">
-    <div style="font-size:.65rem;font-weight:700;color:var(--t3);letter-spacing:.8px;text-transform:uppercase;margin-bottom:10px">항목 관리할 멤버</div>
+    <div style="font-size:.65rem;font-weight:700;color:var(--ink-3);letter-spacing:.8px;margin-bottom:10px">항목 관리할 멤버</div>
     <div class="seg">${segBtns(MEMBERS, masterMember, "setMasterMember")}</div>
   </div>
-  <div style="display:flex;align-items:center;gap:10px;padding:12px 15px;background:var(--acg2);border:1px solid rgba(201,147,58,.18);border-radius:14px;margin-bottom:18px">
+  <div style="display:flex;align-items:center;gap:10px;padding:12px 15px;background:var(--fill);border:1px solid var(--line-2);border-radius:14px;margin-bottom:18px">
     <span style="font-size:1.05rem">👤</span>
-    <span style="font-size:.87rem;color:var(--t2)"><b style="color:var(--ac)">${esc(masterMember)}</b>의 항목을 관리합니다</span>
+    <span style="font-size:.87rem;color:var(--ink-2)"><b style="color:var(--ink)">${esc(masterMember)}</b>의 항목을 관리합니다</span>
   </div>`;
 
   // 결제 주기 설정 (멤버별)
   const _bs=BILLING_STARTS[masterMember]||25;
-  const _edTxt=_bs>1?`다음달 <b style="color:var(--ac)">${_bs-1}일</b>`:`<b style="color:var(--ac)">말일</b>`;
+  const _edTxt=_bs>1?`다음달 <b style="color:var(--ink)">${_bs-1}일</b>`:`<b style="color:var(--ink)">말일</b>`;
   h+=`<div class="m-section">
     <div class="m-title">📅 결제 주기 설정</div>
-    <div style="font-size:.82rem;color:var(--t2);margin-bottom:14px;line-height:1.8">
-      <b style="color:var(--ac)">${esc(masterMember)}</b> 현재: 매월 <b style="color:var(--ac)">${_bs}일</b> ~ ${_edTxt}
+    <div style="font-size:.82rem;color:var(--ink-2);margin-bottom:14px;line-height:1.8">
+      <b style="color:var(--ink)">${esc(masterMember)}</b> 현재: 매월 <b style="color:var(--ink)">${_bs}일</b> ~ ${_edTxt}
     </div>
     <div class="m-add">
       <input id="m_billing_start_${esc(masterMember)}" type="number" min="1" max="28" inputmode="numeric"
         value="${_bs}" placeholder="1~28" style="max-width:90px;text-align:center">
       <button onclick="saveBillingStart('${jsq(masterMember)}')">일로 변경</button>
     </div>
-    <div style="font-size:.72rem;color:var(--t3);margin-top:10px">※ 1~28일 입력 (2월 최소일수 기준)</div>
+    <div style="font-size:.72rem;color:var(--ink-3);margin-top:10px">※ 1~28일 입력 (2월 최소일수 기준)</div>
   </div>`;
 
   // 카테고리 / 결제수단 / 계좌 관리 (카테고리는 아이콘 편집 지원)
@@ -2854,8 +2865,8 @@ function viewMaster(){
     const tKind = key==="categories" ? "category" : key==="methods" ? "method" : null;
     const tBag  = tKind ? ((tKind==="category"?CTMAP:MTMAP)[masterMember]||{}) : {};
     h+=`<div class="m-section"><div class="m-title">${icons[key]} ${label} 관리</div>`;
-    if(key==="categories") h+=`<div style="font-size:.72rem;color:var(--t3);margin:-6px 0 8px;line-height:1.6">💡 아이콘을 누르면 이모지를 바꿀 수 있어요 (모든 멤버 공통 적용)<br>💵 오른쪽 선택은 <b style="color:var(--t2)">연말정산에서 이 카테고리 입금을 소득으로 볼지</b>입니다</div>`;
-    if(key==="methods")    h+=`<div style="font-size:.72rem;color:var(--t3);margin:-6px 0 8px;line-height:1.6">💳 오른쪽 선택은 <b style="color:var(--t2)">연말정산 공제 구분</b>입니다 (신용 15% · 체크/현금 30% · 제외)</div>`;
+    if(key==="categories") h+=`<div style="font-size:.72rem;color:var(--ink-3);margin:-6px 0 8px;line-height:1.6">💡 아이콘을 누르면 이모지를 바꿀 수 있어요 (모든 멤버 공통 적용)<br>💵 오른쪽 선택은 <b style="color:var(--ink-2)">연말정산에서 이 카테고리 입금을 소득으로 볼지</b>입니다</div>`;
+    if(key==="methods")    h+=`<div style="font-size:.72rem;color:var(--ink-3);margin:-6px 0 8px;line-height:1.6">💳 오른쪽 선택은 <b style="color:var(--ink-2)">연말정산 공제 구분</b>입니다 (신용 15% · 체크/현금 30% · 제외)</div>`;
     h+=`<div class="m-list">`;
     if(items.length) items.forEach(v=>{
       const ico=key==="categories"?`<button class="m-ico" onclick="openIconPicker('${jsq(v)}')" aria-label="아이콘 변경">${icon(v)}</button>`:"";
@@ -2873,7 +2884,7 @@ function viewMaster(){
       if(unreg.length){
         const tAmt = tyAmounts(masterMember, tKind);
         h+=`<div class="tym-grp">⚠️ 설정 목록엔 없지만 거래에 쓰인 ${label}</div>
-          <div style="font-size:.72rem;color:var(--t3);margin:6px 0 4px;line-height:1.6">
+          <div style="font-size:.72rem;color:var(--ink-3);margin:6px 0 4px;line-height:1.6">
             아래에서 바로 구분을 지정할 수 있어요. 계속 쓸 항목이면 이름 그대로 위에 추가해두면 목록이 정리됩니다.</div>
           <div class="m-list">`;
         unreg.forEach(v=>{
@@ -2990,7 +3001,7 @@ function openPicker(selId, title){
   const opts = Array.from(sel.options);
   $("pickerTitle").textContent = title;
   if(!opts.length){
-    $("pickerOpts").innerHTML = '<div style="padding:24px 20px;text-align:center;color:var(--t3);font-size:.85rem">항목이 없어요. 설정에서 추가해주세요.</div>';
+    $("pickerOpts").innerHTML = '<div style="padding:24px 20px;text-align:center;color:var(--ink-3);font-size:.85rem">항목이 없어요. 설정에서 추가해주세요.</div>';
   } else {
     $("pickerOpts").innerHTML = opts.map((o,i)=>
       `<div class="picker-opt${sel.value===o.value?' on':''}" onclick="pickOptIdx(${i})">${esc(o.text)}</div>`
