@@ -74,6 +74,8 @@ Our_Budget/
 │   ├── measure_load.js  #   초기 로딩 '구조' 회귀 검사 (폰트·바이트·chart.js — 아래 기준선 표를 재현)
 │   ├── measure_timeline.js # 첫 화면까지를 구간 분해 (HTML→supabase-js→DCL→첫 DB 요청→응답→렌더)
 │   ├── test_lazy_chart.js  # chart.js 지연 로드 단위테스트 + <head> 태그 순서 검사
+│   ├── check_theme.js   #   디자인 계약 검사 (토큰·금지패턴·고아클래스·차트규칙) ← 아래 '디자인' 절
+│   ├── shot_theme.js    #   라이트/다크 × 7화면 렌더 캡처 + 대비 실측 (가짜 DB, 실서비스 안 건드림)
 │   └── poll_deploy.js   #   배포 반영 폴링
 ├── docs/superpowers/    # 스펙·플랜 (배포 안 됨)
 ├── backup_appscript.gs  # 구글 시트 백업용 GAS 코드 (참고용, 배포는 Apps Script에 수동 반영)
@@ -115,6 +117,14 @@ CSS · JS 모두 `public/index.html` 안에 인라인. 외부 의존성:
 
 **초기 로딩 기준선** — 재측정: `node scripts/measure_load.js [--4g]` (구조 검사) ·
 `node scripts/measure_timeline.js [--4g]` (구간 분해)
+
+> 💡 **배포 전에 재려면 URL 인자를 준다**: `measure_load.js`는 기본이 배포본이라 그냥 돌리면 *옛 버전*을
+> 잰다. `public/`을 로컬 정적 서버로 띄우고 `node scripts/measure_load.js http://127.0.0.1:8787/`.
+> 개편 전/후를 비교할 땐 `git show <커밋>:public/index.html`을 다른 포트에 띄워 **같은 방법으로** 잰다 —
+> 2026-08-24에 "총 바이트가 왜 늘었지"를 이 방법으로 25KB짜리 폰트 서브셋 1개로 특정했다.
+> ⚠️ 로컬 서버는 gzip을 안 하므로 **절대값이 배포본 표와 다르다**(로컬 ~500KB ↔ 배포 ~384KB).
+> 로컬 수치는 *같은 방법끼리의 비교*에만 쓸 것. 디자인 전면 개편(2026-08-24)의 결과는
+> 같은 방법 기준 **505KB → 491KB**(아이콘 −23KB, 주석 +9KB)로 늘지 않았다.
 (2026-08-24 배포본 실측, 콜드 캐시. Edge 헤드리스+CDP 워터폴):
 
 | | 앱 시작(DCL) | FCP | 총 바이트 |
@@ -165,7 +175,8 @@ CSS · JS 모두 `public/index.html` 안에 인라인. 외부 의존성:
 - `cdn.jsdelivr.net`·`fonts.gstatic.com` `preconnect`로 연결 핸드셰이크 선점
 - 숫자 포맷 `comma()`는 `Intl.NumberFormat` 인스턴스 1회 캐시 재사용(렌더당 수백 회 호출 — 매 호출 `toLocaleString` 금지)
 
-웹 아이콘도 인라인: `<head>`에 SVG 파비콘(data URI) + `apple-touch-icon`(180×180 PNG base64, 헤드리스 Chrome 캔버스로 생성) + `theme-color`·standalone 메타. 별도 이미지 파일 없음 — 아이콘 교체 시 data URI를 다시 생성해 갈아끼울 것.
+웹 아이콘도 인라인: `<head>`에 SVG 파비콘(data URI) + `apple-touch-icon`(120×120 PNG base64, 헤드리스 캔버스로 생성) + `theme-color`(라이트/다크 2개, `media` 속성으로 분기)·standalone 메타. 별도 이미지 파일 없음 — 아이콘 교체 시 data URI를 다시 생성해 갈아끼울 것.
+현재 아이콘은 **잉크 배경 + 흰 ₩ 획**(헤더 로고 SVG와 같은 형태)이라 2,113바이트다 — 옛 이모지 PNG는 26KB였다. 이모지를 아이콘으로 되돌리면 그 23KB가 돌아온다.
 재생성법: canvas에 그린 뒤 `toDataURL()`을 `document.body.textContent`로 출력하는 임시 HTML을 Write 도구로 만들고 `chrome --headless=new --dump-dom --virtual-time-budget=4000 file:///<절대경로>`로 덤프해서 추출 (Node에 이미지 라이브러리 불필요).
 크기 주의: 이모지 PNG는 180px ≈ 57KB로 큼 → 120px로 생성(≈26KB)해 iOS가 확대하게 두는 게 절충안. ₩ 글리프+그림자는 오히려 더 커짐(blur가 압축 방해).
 
@@ -283,11 +294,11 @@ Supabase Auth 공유 계정 1개. Worker 프록시도, 자체 인증 코드도 �
 | `doLogin(ev) / doLogout()` | 공용 계정 로그인 / 로그아웃(`signOut` 후 `location.reload()`로 전역 상태를 확실히 비움) |
 | `openPwChange() / doPwChange(ev)` | 설정 탭 비밀번호 변경. **현재 비밀번호를 재확인한 뒤** `updateUser` (위 '로그인 게이트' 절의 이유) |
 | `isAuthErr(e)` | 인증 실패를 일반 로드 오류와 구분 (`401`·`JWT`·`PGRST301`·`Invalid Refresh Token`) — 화면 분기의 기준 |
-| `loadAll()` | members·transactions·category_limits·master_data·app_settings 병렬 로드. 끝에서 `rebuildCatOrder()` |
+| `loadAll()` | members·transactions·category_limits·master_data·app_settings 병렬 로드 |
 | `fetchTransactions()` | 거래 전량 수신 — `count:"exact"`의 전체 행 수와 실수신 건수를 대조해 모자라면 `.range()`로 이어 받는다. PostgREST `max-rows` 상한에 걸리면 **에러 없이 잘려** 모든 집계가 조용히 틀어지므로 (515행/2026-08-15 기준 미도달, 실측 712건/년 페이스 → 1,000행 돌파는 2027년 중). ⚠️**남은 페이지는 `Promise.all`로 한 번에** — 첫 응답의 `count`로 개수를 이미 알므로 순차 `await`로 왕복을 쌓지 말 것(옛 방식은 1,000행마다 왕복 1회 직렬, 10,000행이면 +9회). ⚠️`.range`는 오프셋 기반이라 받는 도중 다른 기기가 입력하면 경계에서 행이 겹친다 → **id로 중복 제거**(1건만 겹쳐도 집계가 조용히 부푼다) |
 | `warnBanner()` | 부분 로드 실패(`loadWarn`) 배너 — `render()`가 모든 탭 본문 앞에 붙임 |
 | `orphanTransfers() / orphanBanner()` | 짝 없는 계좌간 이동 leg 탐지 / 계좌 탭 경고 배너. 짝 판정 기준은 **`delEntry`의 mate 탐색과 동일하게 유지**(같은 멤버·날짜·금액의 반대 type) |
-| `rebuildCatOrder()` | 카테고리 색 배정 순서를 ROWS+MASTER 합집합의 로케일 정렬로 고정 (`loadAll` 끝에서 1회) |
+
 | `refreshData()` | 헤더 ↻ 버튼 — 수동 재로드 (다른 기기 입력 동기화) |
 | `setSearch(v)` / `listResultsHtml(all?)` | 내역 검색 — 200ms 디바운스 후 **`#listResults`만** 부분 갱신(`listResultsHtml`가 결과 목록 HTML만 반환). ⚠️`render()`로 전체 재렌더하면 조합 중인 input 노드까지 교체돼 한글 IME가 자모로 flush된다('ㅇㅣㅂㄹㅕㄱ'). 모바일 IME는 compositionstart/end를 신뢰성 있게 쏘지 않아 조합 가드로는 못 막음 — **포커스·커서 복원 방식으로 되돌리지 말 것**. 목록을 주입한 뒤엔 **반드시 `armListMore()`** (아래) |
 | `dayGroupHtml(date,rows)` / `listChunkHtml()` / `listMoreHtml()` | 내역 목록 점진 렌더링 — 날짜 그룹 1개 HTML / 다음 `LIST_CHUNK`(150)행어치를 **그룹 단위로** / 하단 감시자(`#listMore`). ⚠️자르는 단위는 '행'이 아니라 **'날짜 그룹'**이다 — 행으로 자르면 경계에서 같은 날짜 헤더가 두 번 나온다 |
@@ -318,7 +329,10 @@ Supabase Auth 공유 계정 1개. Worker 프록시도, 자체 인증 코드도 �
 | `setTaxMap / applyTaxSuggest / saveTySalary / resetTySalary / copyTaxDDL` | 매핑 단건 저장(빈값=삭제) / 미분류 일괄 추천 / 총급여 수동값(0이면 삭제=추정 복귀) / 설치 SQL 복사 |
 | `drawAnalysisCharts() / destroyCharts()` | 도넛 + 주기별 스택막대(지출=카테고리·왼축, 수입=오른 보조축) + 추이 라인 / 인스턴스 일괄 파괴 |
 | `ensureChart() / drawWhenChartReady(fn)` | chart.js 지연 로드(1회만 삽입, 실패 시 재시도 가능) / 도착을 기다렸다 그리기. ⚠️**기다리는 사이 화면이 바뀌면 그리지 않는다** — `render()`가 올리는 `_renderSeq`를 캡처해 대조한다. 빼면 없어진 캔버스에 그리거나, 새로 그린 차트를 다음 `destroyCharts()`가 지운다. `startApp()` 끝에서 idle에 미리 받아둬 분석 탭 첫 진입도 안 기다린다(크리티컬 패스 밖) |
-| `expOf(rs) / incOf(rs) / catColor(c)` | 지출·수입 합계 헬퍼(이동 제외), 카테고리 색 — `_catOrder` 인덱스로 팔레트 배정. ⚠️**이름해시 금지**(한글이 한 칸에 몰려 전부 초록), ⚠️**'처음 등장 순서'로도 되돌리지 말 것**(탭 여는 순서·멤버 필터에 따라 기기·세션마다 색이 달라짐) → `rebuildCatOrder()`의 로케일 정렬이 유일한 기준 |
+| `expOf(rs) / incOf(rs)` | 지출·수입 합계 헬퍼 (이동 제외) |
+| `cssVar(n)` | `getComputedStyle(document.documentElement).getPropertyValue(n)` — **차트 색은 전부 이걸로 읽는다.** 하드코딩하면 OS 다크모드에서 캔버스만 옛 색으로 남는다(캔버스는 이미 칠해진 픽셀이라 CSS가 못 바꾼다) |
+| `setCatSlots(ranked) / catColor(c) / ETC_CAT` | 카테고리 색 배정 — 지출 상위 **6개에만** 슬롯 `--s1`…`--s6`을 주고 나머지는 `기타`(무채색 `--ink-3`)로 접는다. ⚠️**`CAT_PALETTE[i % n]` 순환으로 되돌리지 말 것**: 라이트·다크 양쪽에서 색각이상 분리도를 통과하는 색은 6개뿐이라 순환시키면 같은 차트에 같은 색이 두 번 나온다. ⚠️이름해시·'처음 등장 순서'도 금지(옛 회귀 2건) |
+| `tyColor(kind)` | 연말정산 3색(신용 `--s2` / 체크 `--s1` / 현금 `--s3`). ⚠️**`--s4`(노랑)를 쓰지 말 것** — `--s2`(주황)와 한 막대에 있으면 정상 시력으로도 구분이 안 된다(실측 ΔE 13.7 라이트 / 10.6 다크로 FAIL) |
 | `isTransfer(r)` | 계좌간 이동 거래 판별(`r.category===TRANSFER_CAT`) — 통계 제외 필터에 공통 사용 |
 | `$(id) / parseDate(s) / todayStr() / amtVal(id)` | getElementById 축약 / 날짜 파싱(YYYY-MM-DD는 정오로 — 타임존 경계 안전) / 오늘 날짜 문자열 / 콤마 금액 input→숫자 |
 | `comma(n) / dbErr(res,pre?)` | 콤마 숫자 포맷 / Supabase 응답 에러 공통 처리(에러면 토스트 후 true — `if(dbErr(res))return;` 패턴) |
@@ -346,12 +360,55 @@ Supabase Auth 공유 계정 1개. Worker 프록시도, 자체 인증 코드도 �
 
 > 헤더 우측: 기기사용자 칩(누르면 openDeviceUser) + 새로고침(refreshData). 칩의 이름 텍스트는 `#hdUserName` span을 render()에서 갱신 (칩 innerHTML을 통째로 덮으면 SVG 아이콘이 사라지므로 금지).
 
-### 네비게이션·아이콘 (2026-07 모던 리디자인)
-- **네비는 하단 고정 탭바**: `.nav`가 `position:fixed; bottom:0` + 글래스 블러 + `env(safe-area-inset-bottom)` 패딩. z-index 30이라 입력 시트(z-50)·피커(z-60)가 위를 덮음. 활성 탭은 아이콘 뒤 골드 필(`.tab.on .tab-ic`)
-- FAB·토스트·`.app` padding-bottom은 하단 탭바 높이만큼 올려둠(모두 `env(safe-area-inset-bottom)` 반영) — 탭바 높이 바꾸면 셋 다 조정할 것
-- **구조 아이콘은 인라인 SVG** (Lucide 스타일, stroke=currentColor): 탭 아이콘은 `TABS` 상수의 `NI()` 헬퍼, 헤더 칩·새로고침·FAB·셀렉트 화살표(.sel-arr)는 HTML에 직접. 이모지를 구조 아이콘으로 되돌리지 말 것(OS별 렌더 제각각) — 단 **카테고리 이모지(icon()·cat_icon_*)는 사용자 설정 콘텐츠라 유지**
-- 숫자는 body에 `font-variant-numeric:tabular-nums`(금액 세로 정렬), 전역 `:focus-visible` 골드 링 있음
-- 텍스트 토큰 대비: `--t2` ≈4.5:1↑, `--t3` ≈3:1 (마이크로 라벨용) — 더 어둡게 내리면 WCAG 미달로 회귀
+### 디자인 (2026-08-24 전면 개편 — 라이트 기본 + 무채색 은행형)
+
+설계 원문 `docs/superpowers/specs/2026-08-24-light-redesign-design.md` ·
+승인 목업 `docs/superpowers/2026-08-24-light-redesign-mockup.html` ·
+**검사 `node scripts/check_theme.js`** (규칙) + `node scripts/shot_theme.js` (실렌더·대비 실측)
+
+> **왜 바꿨나**: `ui-ux-pro-max` DB가 "Personal Finance Tracker"에 1순위로 추천하는 스타일이
+> `Glassmorphism + Dark Mode (OLED)`였고, 옛 앱이 정확히 그 모습이었다 — 생성 도구가 "가계부 앱"에
+> 자동으로 뱉는 기본값. 그래서 그 DB는 *피할 것*의 근거로 쓰고, 방향은 같은 DB가 Banking/Traditional
+> Finance에 추천하는 `Minimalism + Accessible & Ethical`에서 가져왔다.
+
+**색 예산은 3종뿐이다. 늘리지 말 것.**
+
+| | 라이트 | 다크 | 대비(배경 대비) |
+|---|---|---|---|
+| `--exp` 지출 금액 | `#C0392B` | `#FF7A6B` | 5.44 / 7.37 |
+| `--inc` 수입 금액 | `#0F6B4F` | `#4FCB96` | 6.49 / 9.22 |
+| `--s1`…`--s6` 차트 카테고리 | 아래 참조 | 아래 참조 | — |
+| 나머지 전부 | 무채색 `--ink` / `--ink-2` / `--ink-3` | 〃 | 18.11 / 6.35 / 3.22 |
+
+- ⚠️ **액센트(선택된 탭·필·버튼·포커스)는 `--ink`, 즉 무채색이다.** 초록을 액센트로 쓰면
+  '수입'과 '선택됨' 두 뜻이 겹쳐 분류 배지·한도 바가 무엇을 뜻하는지 알 수 없어진다.
+  선택 상태는 **잉크 채움 · 상단 2px 인디케이터 · 굵기**로만 표시한다.
+- `--ink-3`가 라이트에서 3.22:1인 것은 의도다 — 마이크로 라벨·비텍스트 전용. **본문에 쓰지 말 것.**
+- 반투명이 필요하면 토큰을 늘리지 말고 `color-mix(in srgb, var(--ink) 8%, transparent)`.
+  덕분에 셀렉터 안에 생 hex가 한 개도 없다(검사 항목).
+
+**다크는 `@media (prefers-color-scheme: dark)` 안에서만.** 수동 토글을 만들지 말 것 — 요구가 "OS가
+다크일 때만"이었고 `check_theme.js`가 `data-theme` 흔적을 금지 항목으로 잡는다.
+
+**금지 패턴 (검사기가 0건을 강제)**: `backdrop-filter` · `background-clip:text` · `font-weight:900` ·
+한글에 `text-transform:uppercase` · `linear-gradient` · `radial-gradient`.
+⚠️ 이건 `<style>`뿐 아니라 **JS 템플릿의 인라인 style에도** 적용된다 — 옛 개편 때 `<style>`만 고치고
+인라인 `var(--t3)` 57건을 놓친 적이 있다(정의가 사라져 색이 상속으로 조용히 떨어졌다).
+
+**형태**: radius는 리스트 행 `0` / 입력·칩·버튼 `8px` / 하단 시트 `14px` / FAB `10px`.
+그림자는 FAB와 하단 시트 1단계뿐. 카드 박스 대신 `1px solid var(--line)` 룰선.
+타이포는 Pretendard Variable 하나로 **굵기 최대 700**(900 금지), 위계는 크기·색으로.
+
+- **네비는 하단 고정 탭바**: `.nav`가 `position:fixed; bottom:0` + `env(safe-area-inset-bottom)` 패딩.
+  z-index 30이라 입력 시트(z-50)·피커(z-60)가 위를 덮음. **활성 탭은 `--ink` 아이콘 + 상단 2px 인디케이터**
+- FAB·토스트·`.app` padding-bottom은 하단 탭바 높이만큼 올려둠 — 탭바 높이 바꾸면 셋 다 조정할 것
+- **구조 아이콘은 인라인 SVG** (Lucide 스타일, stroke=currentColor): 탭 아이콘은 `TABS` 상수의 `NI()`,
+  헤더 칩·새로고침·FAB·셀렉트 화살표·주기 네비(.pnav)·**로고**는 HTML에 직접.
+  이모지를 구조 아이콘으로 되돌리지 말 것 — 단 **카테고리 이모지(`icon()`·`cat_icon_*`)는 사용자 설정 콘텐츠라 유지**
+  - ⚠️ **로고를 `₩` 글자로 되돌리지 말 것.** Pretendard dynamic-subset이 그 글리프 하나 때문에
+    서브셋 조각을 더 받는다 — 실측 **+25KB·요청 +1**. 인라인 SVG면 0바이트다.
+- 섹션 제목(`.p-t`·`.m-title`)에는 이모지를 넣지 않는다(2026-08-24에 21건 제거).
+- 숫자는 body에 `font-variant-numeric:tabular-nums`, 전역 `:focus-visible`은 잉크 링
 
 > ⚠️ 한도 탭(`viewLimit`) 카테고리 목록은 `MASTER[멤버].categories`(master_data DB) 기준 + 기존 저장 한도. 지출 발생 카테고리(`spent`)로 만들면 '계좌간 이동'처럼 설정에 없는 항목까지 한도 UI가 떠서 안 됨.
 
@@ -459,8 +516,10 @@ git push
 # Cloudflare Workers 자동 배포 (1~2분 소요)
 node scripts/poll_deploy.js "<이번 변경에만 있는 문자열>"   # 반영을 기다림 (인자: [최대라운드] [마커], 마커만 줘도 됨)
 node scripts/check_live.js                              # 반영 확인 (배포본 sha256 == origin/main blob)
+node scripts/check_theme.js                             # 디자인 계약 (토큰·금지패턴·고아클래스·차트규칙)
 node scripts/measure_load.js                            # 로딩 '구조' 회귀 검사 (렌더·폰트·<head>를 건드렸다면)
 node scripts/test_lazy_chart.js                         # 차트 지연 로드 배선 (브라우저 불필요, 1초)
+node scripts/shot_theme.js                              # 라이트/다크 실렌더 + 대비 실측 (눈으로 볼 PNG를 남긴다)
 node scripts/measure_timeline.js --4g                   # 어디서 시간이 가는지 구간 분해 (성능 얘기는 이걸로)
 ```
 > GAS 백업 코드를 고쳤다면 `backup_appscript.gs`도 함께 커밋. (단 실제 반영은 Apps Script "새 버전" 재배포 필요)
