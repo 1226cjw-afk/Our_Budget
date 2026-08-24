@@ -75,7 +75,9 @@ Our_Budget/
 │   ├── measure_timeline.js # 첫 화면까지를 구간 분해 (HTML→supabase-js→DCL→첫 DB 요청→응답→렌더)
 │   ├── test_lazy_chart.js  # chart.js 지연 로드 단위테스트 + <head> 태그 순서 검사
 │   ├── check_theme.js   #   디자인 계약 검사 (토큰·금지패턴·고아클래스·차트규칙) ← 아래 '디자인' 절
-│   ├── shot_theme.js    #   라이트/다크 × 7화면 렌더 캡처 + 대비 실측 (가짜 DB, 실서비스 안 건드림)
+│   ├── shot_theme.js    #   라이트/다크 × 9화면 렌더 캡처 + 대비 실측 (가짜 DB, 실서비스 안 건드림)
+│   ├── lib_mock.js      #   위 두 스크립트가 공유하는 가짜 supabase 클라이언트 + 합성 데이터
+│   ├── test_date_field.js # 날짜 필드(투명 네이티브 입력 + 직접 그린 표시) 기능 검증
 │   └── poll_deploy.js   #   배포 반영 폴링
 ├── docs/superpowers/    # 스펙·플랜 (배포 안 됨)
 ├── backup_appscript.gs  # 구글 시트 백업용 GAS 코드 (참고용, 배포는 Apps Script에 수동 반영)
@@ -526,6 +528,7 @@ node scripts/check_theme.js                             # 디자인 계약 (토�
 node scripts/measure_load.js                            # 로딩 '구조' 회귀 검사 (렌더·폰트·<head>를 건드렸다면)
 node scripts/test_lazy_chart.js                         # 차트 지연 로드 배선 (브라우저 불필요, 1초)
 node scripts/shot_theme.js                              # 라이트/다크 실렌더 + 대비 실측 (눈으로 볼 PNG를 남긴다)
+node scripts/test_date_field.js                         # 날짜 필드 (입력 시트를 건드렸다면)
 node scripts/measure_timeline.js --4g                   # 어디서 시간이 가는지 구간 분해 (성능 얘기는 이걸로)
 ```
 > GAS 백업 코드를 고쳤다면 `backup_appscript.gs`도 함께 커밋. (단 실제 반영은 Apps Script "새 버전" 재배포 필요)
@@ -579,6 +582,15 @@ Windows 작업 사본은 CRLF, 리포 blob은 LF라 작업 사본과 비교하�
 
 ### 모바일 대응 주의사항
 - `<input list="datalist">` 사용 금지 → iOS Safari 미지원
+- **날짜 필드는 네이티브 `<input type=date>`를 투명하게 덮고 표시만 직접 그린다**(2026-08-24).
+  브라우저가 그리는 `yyyy. mm. dd.`(한국 로케일)는 **CSS·`lang` 속성으로 못 바꾼다** — 3종을 실측해 확인했다.
+  탭은 여전히 네이티브가 받으므로 폰의 날짜 휠/캘린더는 그대로 뜬다. 표시는 `2026년 8월 24일 (월)`.
+  - ⚠️ `.date-native`에 `pointer-events:none`을 붙이지 말 것 — 폰에서 날짜를 아예 못 고르게 된다
+  - ⚠️ `.date-disp`의 `pointer-events:none`도 지우지 말 것 — 지금은 DOM 순서 덕에 없어도 동작하지만,
+    이게 있어야 순서가 바뀌어도 안전하다(둘 다 실측으로 갈랐다)
+  - ⚠️ `$("fDate").value`를 코드로 바꾸는 곳(`openSheet`·`editEntry`)에서 **`syncDateDisp()`를 함께 부를 것**.
+    빠뜨리면 값은 들어 있는데 칸이 비어 보인다 — `test_date_field.js`가 이 경우로 FAIL 한다
+  - `input.value`는 여전히 `YYYY-MM-DD`라 저장·수정·시트 백업 로직은 영향 없다
 - 카테고리·결제수단·계좌는 **커스텀 하단 시트 피커**: 값은 숨김 `<select>`에 저장, 표시는 `*Disp` span, 열기는 `openPicker(selId,title)`
 - 피커 클래스 `.picker-ov`/`.picker-sht`는 입력 피커(`#pickerOv`)와 기기 사용자 모달(`#duOv`) **공용** — CSS 수정 시 둘 다 영향
 - 피커 시트(`.picker-sht`)는 높이를 `dvh`로(vh 금지 — 모바일 툴바에 하단 잘림) + `padding-bottom:env(safe-area-inset-bottom)` 필수. 열릴 때 배경 `#overlay` 스크롤 잠금(`overflow:hidden`)

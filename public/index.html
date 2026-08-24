@@ -491,6 +491,31 @@ body.sheet-open{overflow:hidden}
 .inp:focus{border-color:var(--ink);box-shadow:0 0 0 3px color-mix(in srgb,var(--ink) 9%,transparent)}
 .inp option{background:var(--bg)}
 
+/* 날짜 — 네이티브 <input type=date> 를 투명하게 덮고 표시는 .date-disp 가 담당한다.
+   브라우저가 그리는 'yyyy. mm. dd.' 는 OS 로케일 소관이라 CSS·lang 속성으로 못 바꾼다(실측).
+   검증: node scripts/test_date_field.js */
+.datew{position:relative}
+.date-native{
+  position:absolute;inset:0;width:100%;height:100%;
+  opacity:0;                    /* ⚠️ display:none·visibility:hidden 이면 탭을 못 받는다 */
+  /* ⚠️ 여기에 pointer-events:none 을 붙이지 말 것 — 폰에서 날짜를 아예 못 고르게 된다.
+     투명 입력을 '정리'하다 나기 쉬운 실수라, test_date_field.js 가 이 경우로 FAIL 하는 것을 확인해 뒀다. */
+  border:none;background:none;padding:0;margin:0;
+  font-size:16px;               /* iOS 가 16px 미만 입력에 포커스하면 화면을 확대한다 */
+  font-family:inherit;color:inherit;
+}
+.date-disp{
+  display:block;
+  /* 탭을 아래 네이티브 입력으로 통과시킨다. 지금은 입력이 DOM 뒤라 없어도 동작하지만,
+     이게 있어야 순서가 바뀌어도 안전하다(실측으로 확인) — 지우지 말 것. */
+  pointer-events:none;
+  min-height:calc(1.55em + 26px);      /* .inp 의 padding 12px×2 + line-height */
+}
+.date-disp.ph{color:var(--ink-3)}      /* 값이 없을 때 */
+.datew:focus-within .date-disp{
+  border-color:var(--ink);box-shadow:0 0 0 3px color-mix(in srgb,var(--ink) 9%,transparent);
+}
+
 .toggle{display:flex;gap:8px}
 .tg{
   flex:1;padding:12px;border:1px solid var(--line-2);border-radius:8px;
@@ -903,7 +928,15 @@ body.sheet-open{overflow:hidden}
         </div>
       </div>
       <div class="frow"><label class="flb">누가</label><div class="seg" id="memberSeg"></div></div>
-      <div class="frow"><label class="flb">날짜</label><input class="inp" type="date" id="fDate"></div>
+      <!-- 날짜: 네이티브 <input type=date> 를 투명하게 덮고 표시만 우리가 그린다.
+           브라우저가 그리는 'yyyy. mm. dd.' 는 OS 로케일 소관이라 CSS·속성으로 못 바꾼다.
+           탭은 여전히 네이티브가 받으므로 폰의 날짜 휠/캘린더는 그대로 뜬다. -->
+      <div class="frow"><label class="flb" for="fDate">날짜</label>
+        <div class="datew">
+          <span class="inp date-disp" id="fDateDisp"></span>
+          <input class="date-native" type="date" id="fDate" aria-label="날짜" onchange="syncDateDisp()" oninput="syncDateDisp()">
+        </div>
+      </div>
       <div class="frow"><label class="flb">금액</label><input class="inp" id="fAmount" inputmode="numeric" placeholder="0">
         <div class="qamt">
           <button type="button" onclick="bumpAmt(1000)">+1천</button>
@@ -1617,6 +1650,20 @@ function bumpAmt(n){
 }
 /* 숫자 입력 콤마 포맷 (한도 입력 등 동적 input용) */
 function fmtNum(el){ const r=el.value.replace(/[^0-9]/g,""); el.value=r?comma(r):""; }
+
+/* 날짜 표시 동기화.
+   네이티브 <input type=date> 는 투명(.date-native{opacity:0})이라 이 함수가 화면에 보이는
+   유일한 경로다. ⚠️ $("fDate").value 를 코드로 바꾸는 곳에서 반드시 함께 부를 것 —
+   빠뜨리면 값은 들어 있는데 칸이 비어 보인다(openSheet·editEntry 두 곳). */
+const DOW = ["일","월","화","수","목","금","토"];
+function syncDateDisp(){
+  const el=$("fDate"), d=$("fDateDisp");
+  if(!el || !d) return;
+  if(!el.value){ d.textContent="날짜 선택"; d.classList.add("ph"); return; }
+  const t=parseDate(el.value);   // YYYY-MM-DD를 정오로 파싱 — 타임존 경계 안전
+  d.textContent=`${t.getFullYear()}년 ${t.getMonth()+1}월 ${t.getDate()}일 (${DOW[t.getDay()]})`;
+  d.classList.remove("ph");
+}
 
 /* ── 마스터 데이터 추가/삭제 ── */
 async function addMaster(key){
@@ -2980,7 +3027,7 @@ function openSheet(){
   $("sheetTitle").textContent="내역 추가";
   $("saveBtn").textContent="저장하기";
   $("fMemo").value="";
-  $("fDate").value=todayStr();
+  $("fDate").value=todayStr(); syncDateDisp();
   $("fAmount").value="";
   $("tgTrf").style.display="";  // 신규 입력에서만 이동 허용
   setType("지출");
@@ -3002,7 +3049,7 @@ function editEntry(id){
   memberVal=r.member||MEMBERS[0];
   renderMemberSeg();
   refreshCatList();
-  $("fDate").value=r.date;
+  $("fDate").value=r.date; syncDateDisp();
   $("fAmount").value=comma(r.amount);
   ensureOpt("fCategory",r.category);
   ensureOpt("fMethod",r.method);
