@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>우리집 가계부 — 리디자인 목업</title>
+<link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" rel="stylesheet">
+<style>
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+
+/* ══════════ 토큰 — 라이트가 기본, 다크는 OS 설정일 때만 ══════════ */
+:root{
+  color-scheme:light;
+  --bg:#FFFFFF;
+  --fill:#F4F4F2;         /* 아이콘 웰·칩·트랙 */
+  --fill-2:#EAEAE7;
+  --ink:#14161A;
+  --ink-2:#5A6068;
+  --ink-3:#8A9099;
+  --line:#E4E5E7;
+  --line-2:#CFD2D6;
+  --exp:#C0392B;          /* 지출 — 이 색은 오직 이 뜻 */
+  --inc:#0F6B4F;          /* 수입 — 이 색은 오직 이 뜻 */
+  --warn:#9A5B14;
+  --on-ink:#FFFFFF;
+  /* 카테고리 차트 — validate_palette.js 전 항목 PASS (light, surface #FFFFFF) */
+  --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a; --s4:#eda100; --s5:#e87ba4; --s6:#4a3aa7;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    color-scheme:dark;
+    --bg:#101215;
+    --fill:#1E2126;
+    --fill-2:#262A30;
+    --ink:#E9EBEE;
+    --ink-2:#A2A8B0;
+    --ink-3:#767D86;
+    --line:#272B31;
+    --line-2:#373C44;
+    --exp:#FF7A6B;
+    --inc:#4FCB96;
+    --warn:#D9A054;
+    --on-ink:#101215;
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70; --s4:#c98500; --s5:#d55181; --s6:#9085e9;
+  }
+}
+
+html{font-size:16px;-webkit-text-size-adjust:100%}
+body{
+  font-family:'Pretendard Variable','Pretendard',-apple-system,sans-serif;
+  background:var(--bg);color:var(--ink);
+  line-height:1.55;-webkit-font-smoothing:antialiased;
+  font-variant-numeric:tabular-nums;
+}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+.app{max-width:480px;margin:0 auto;min-height:100vh;padding-bottom:150px}
+.screen{display:none}
+body[data-screen="list"] #s-list,
+body[data-screen="cat"] #s-cat,
+body[data-screen="analysis"] #s-analysis,
+body[data-screen="acct"] #s-acct{display:block}
+
+/* ══════════ 헤더 ══════════ */
+.hd{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:14px 20px;
+  background:var(--bg);
+  border-bottom:1px solid var(--line);
+  position:sticky;top:0;z-index:20;
+}
+.hd-l{display:flex;align-items:center;gap:10px}
+/* 로고: 그라디언트·글로우 제거. 잉크 정사각 + 흰 글리프 */
+.logo{
+  width:28px;height:28px;border-radius:7px;background:var(--ink);color:var(--on-ink);
+  display:flex;align-items:center;justify-content:center;
+  font-size:.9rem;font-weight:700;flex-shrink:0;
+}
+.hd-t{font-size:.9375rem;font-weight:650;letter-spacing:-.02em}
+.hd-r{display:flex;align-items:center;gap:6px}
+.hd-chip{
+  display:flex;align-items:center;gap:5px;padding:6px 10px;border-radius:8px;
+  border:1px solid var(--line-2);color:var(--ink-2);
+  font-size:.75rem;font-weight:550;white-space:nowrap;
+}
+.hd-chip svg{width:13px;height:13px}
+.hd-btn{
+  width:32px;height:32px;border-radius:8px;border:1px solid var(--line-2);color:var(--ink-2);
+  display:flex;align-items:center;justify-content:center;
+}
+.hd-btn svg{width:15px;height:15px}
+
+/* ══════════ 필 / 주기 ══════════ */
+.filter{display:flex;gap:6px;padding:14px 20px 0;overflow-x:auto;scrollbar-width:none}
+.filter::-webkit-scrollbar{display:none}
+.pill{
+  flex-shrink:0;padding:6px 13px;border-radius:8px;
+  font-size:.8125rem;font-weight:550;
+  border:1px solid var(--line-2);color:var(--ink-2);background:transparent;
+  white-space:nowrap;
+}
+.pill.on{background:var(--ink);border-color:var(--ink);color:var(--on-ink);font-weight:600}
+
+.pnav{
+  display:flex;align-items:center;justify-content:space-between;
+  margin:14px 20px 0;padding:9px 4px;
+  border-top:1px solid var(--line);border-bottom:1px solid var(--line);
+}
+.pnav button{width:30px;height:26px;display:flex;align-items:center;justify-content:center;color:var(--ink-2)}
+.pnav button svg{width:15px;height:15px}
+.pnav button[disabled]{color:var(--line-2)}
+.pnav-t{font-size:.8125rem;font-weight:600;letter-spacing:-.01em}
+
+/* ══════════ 요약 — 카드 박스 대신 세로 룰선 2칸 ══════════ */
+.sum{display:flex;margin:0 20px;border-bottom:1px solid var(--line)}
+.sum-i{flex:1;padding:16px 0 15px}
+.sum-i+.sum-i{border-left:1px solid var(--line);padding-left:16px}
+.sum-l{font-size:.6875rem;font-weight:600;color:var(--ink-3);letter-spacing:.01em;margin-bottom:3px}
+.sum-v{font-size:1.1875rem;font-weight:700;letter-spacing:-.03em}
+
+/* ══════════ 검색 ══════════ */
+.searchw{padding:14px 20px 0;position:relative}
+.search-inp{
+  width:100%;padding:10px 13px 10px 34px;
+  border:1px solid var(--line-2);border-radius:8px;
+  background:var(--bg);color:var(--ink);font-family:inherit;font-size:.875rem;
+  outline:none;
+}
+.search-inp::placeholder{color:var(--ink-3)}
+.search-ic{position:absolute;left:32px;top:50%;transform:translateY(-3px);color:var(--ink-3);pointer-events:none}
+.search-ic svg{width:15px;height:15px;display:block}
+
+/* ══════════ 내역 — 룰선 리스트 ══════════ */
+.sec{padding:0 20px}
+.dhead{
+  display:flex;justify-content:space-between;align-items:baseline;
+  padding:20px 0 7px;
+  border-bottom:1px solid var(--line-2);
+}
+.dhead-d{font-size:.8125rem;font-weight:650;letter-spacing:-.01em}
+.dhead-t{font-size:.75rem;font-weight:550;color:var(--ink-3)}
+.item{display:flex;gap:11px;align-items:flex-start;padding:13px 0;border-bottom:1px solid var(--line)}
+.i-ic{
+  width:34px;height:34px;min-width:34px;border-radius:8px;background:var(--fill);
+  display:flex;align-items:center;justify-content:center;font-size:1rem;
+}
+.i-bd{flex:1;min-width:0}
+.i-top{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+.i-cat{font-size:.9375rem;font-weight:500;letter-spacing:-.01em}
+.i-amt{font-size:.9375rem;font-weight:600;white-space:nowrap;letter-spacing:-.02em}
+.i-amt.e{color:var(--exp)}
+.i-amt.i{color:var(--inc)}
+.i-sub{font-size:.8125rem;color:var(--ink-3);margin-top:1px;font-weight:450}
+.i-sub .memo{color:var(--ink-2)}
+.i-sub .trf{color:var(--s1);font-weight:550}
+
+/* ══════════ 분류 — 순위 리스트 + 막대 ══════════ */
+.sec-t{
+  display:flex;justify-content:space-between;align-items:baseline;
+  font-size:.8125rem;font-weight:650;letter-spacing:-.01em;
+  padding:22px 0 8px;border-bottom:1px solid var(--line-2);
+}
+.sec-t span{font-size:.75rem;font-weight:500;color:var(--ink-3)}
+.crow{padding:13px 0;border-bottom:1px solid var(--line)}
+.crow-t{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+.crow-ic{width:30px;height:30px;min-width:30px;border-radius:8px;background:var(--fill);display:flex;align-items:center;justify-content:center;font-size:.9375rem}
+.crow-nm{font-size:.9375rem;font-weight:500;flex:1;letter-spacing:-.01em}
+.crow-v{font-size:.9375rem;font-weight:600;letter-spacing:-.02em}
+.crow-m{display:flex;align-items:center;gap:9px}
+.trk{flex:1;height:3px;background:var(--fill-2);border-radius:2px;overflow:hidden}
+.trk>i{display:block;height:100%;border-radius:2px;background:var(--ink-2)}
+.crow-p{font-size:.75rem;font-weight:600;color:var(--ink-3);min-width:32px;text-align:right}
+
+/* ══════════ 한도 ══════════ */
+.lrow{padding:15px 0;border-bottom:1px solid var(--line)}
+.l-t{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:9px}
+.l-nm{font-size:.9375rem;font-weight:500;letter-spacing:-.01em}
+.l-pct{font-size:.9375rem;font-weight:650;letter-spacing:-.02em}
+.l-pct.ok{color:var(--ink-2)}
+.l-pct.warn{color:var(--warn)}
+.l-pct.over{color:var(--exp)}
+.l-bw{height:5px;background:var(--fill-2);border-radius:3px;overflow:hidden;margin-bottom:7px}
+.l-b{height:100%;border-radius:3px}
+.l-b.ok{background:var(--ink-2)}
+.l-b.warn{background:var(--warn)}
+.l-b.over{background:var(--exp)}
+.l-m{display:flex;justify-content:space-between;font-size:.8125rem;font-weight:450;color:var(--ink-3)}
+.l-m b{color:var(--ink-2);font-weight:600}
+.l-msg{margin-top:5px;font-size:.75rem;font-weight:550;color:var(--warn)}
+.l-msg.over{color:var(--exp)}
+
+/* ══════════ 분석 ══════════ */
+.donutw{display:flex;flex-direction:column;align-items:center;padding:22px 0 4px}
+.donut{position:relative;width:190px;height:190px}
+.donut svg{transform:rotate(-90deg);display:block}
+.donut-c{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.dc-l{font-size:.6875rem;font-weight:600;color:var(--ink-3)}
+.dc-v{font-size:1.25rem;font-weight:700;letter-spacing:-.03em;margin-top:1px}
+/* 범례 = 직접 라벨. 카테고리 대비가 3:1 미만인 슬롯이 있어 relief rule 적용 */
+.dleg{width:100%;margin-top:18px}
+.dleg-i{display:flex;align-items:center;gap:9px;padding:9px 0;border-bottom:1px solid var(--line)}
+.dleg-d{width:9px;height:9px;border-radius:2px;flex-shrink:0}
+.dleg-n{font-size:.875rem;font-weight:450;flex:1;letter-spacing:-.01em}
+.dleg-v{font-size:.875rem;font-weight:600;letter-spacing:-.02em}
+.dleg-p{font-size:.75rem;font-weight:550;color:var(--ink-3);min-width:34px;text-align:right}
+
+/* 주기별 막대 — 단일 축(수입/지출 분리 대신 지출만), 2px 서피스 갭 */
+.bars{display:flex;align-items:flex-end;gap:14px;height:132px;padding:22px 4px 0}
+.barcol{flex:1;display:flex;flex-direction:column;justify-content:flex-end;gap:2px;height:100%}
+.barseg{width:100%;border-radius:0}
+.barseg:first-child{border-radius:4px 4px 0 0}
+.barx{display:flex;gap:14px;padding:8px 4px 0;border-top:1px solid var(--line)}
+.barx div{flex:1;text-align:center;font-size:.6875rem;font-weight:550;color:var(--ink-3)}
+.barv{display:flex;gap:14px;padding:5px 4px 0}
+.barv div{flex:1;text-align:center;font-size:.75rem;font-weight:600;letter-spacing:-.02em}
+
+.ins{display:flex;gap:11px;padding:14px 0;border-bottom:1px solid var(--line)}
+.ins-ic{width:30px;height:30px;min-width:30px;border-radius:8px;background:var(--fill);display:flex;align-items:center;justify-content:center;font-size:.9375rem}
+.ins-t{font-size:.875rem;font-weight:600;margin-bottom:2px;letter-spacing:-.01em}
+.ins-b{font-size:.8125rem;color:var(--ink-2);line-height:1.6;font-weight:450}
+
+/* ══════════ 계좌 ══════════ */
+.tot{padding:26px 0 22px;border-bottom:1px solid var(--line-2)}
+.tot-l{font-size:.6875rem;font-weight:600;color:var(--ink-3);margin-bottom:5px}
+.tot-v{font-size:2.125rem;font-weight:700;letter-spacing:-.045em;line-height:1.1}
+.tot-s{display:flex;gap:18px;margin-top:14px}
+.tot-s div{font-size:.8125rem;font-weight:450;color:var(--ink-3)}
+.tot-s b{display:block;font-size:.9375rem;font-weight:600;letter-spacing:-.02em;margin-top:1px}
+.arow{display:flex;justify-content:space-between;align-items:center;padding:14px 0;border-bottom:1px solid var(--line)}
+.a-nm{font-size:.9375rem;font-weight:500;letter-spacing:-.01em}
+.a-sub{font-size:.75rem;color:var(--ink-3);margin-top:1px;font-weight:450}
+.a-bal{font-size:.9375rem;font-weight:600;letter-spacing:-.02em}
+
+/* ══════════ 탭바 — 블러 제거, 선택은 잉크 + 상단 인디케이터 ══════════ */
+.nav{
+  position:fixed;bottom:0;left:50%;transform:translateX(-50%);
+  width:100%;max-width:480px;display:flex;
+  background:var(--bg);border-top:1px solid var(--line-2);
+  padding:0 4px 8px;z-index:30;
+}
+.tab{
+  flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:3px;
+  padding:9px 0 2px;font-size:.6875rem;font-weight:550;color:var(--ink-3);
+  border-top:2px solid transparent;margin-top:-1px;
+}
+.tab svg{width:19px;height:19px}
+.tab.on{color:var(--ink);border-top-color:var(--ink);font-weight:650}
+
+/* FAB — 그라디언트·글로우 제거, 솔리드 잉크 */
+.fab{
+  position:fixed;bottom:84px;right:calc(50% - 240px + 20px);
+  width:48px;height:48px;background:var(--ink);color:var(--on-ink);
+  border-radius:10px;z-index:30;display:flex;align-items:center;justify-content:center;
+  box-shadow:0 2px 8px rgba(0,0,0,.14);
+}
+.fab svg{width:22px;height:22px}
+@media(max-width:480px){.fab{right:20px}}
+
+/* 라벨 */
+.tagline{
+  position:fixed;top:0;left:0;right:0;z-index:99;
+  background:var(--ink);color:var(--on-ink);
+  font-size:.6875rem;font-weight:600;padding:5px 12px;letter-spacing:.02em;
+}
+body.shot .tagline{display:none}
+/* 풀페이지 캡처 시 position:fixed 는 뷰포트에 박혀 본문을 가린다 → 문서 바닥으로 */
+body.shot{position:relative}
+body.shot .nav{position:absolute;bottom:0;left:0;right:0;transform:none;margin:0 auto}
+body.shot .fab{position:absolute;bottom:84px}
+</style>
+</head>
+<body data-screen="list">
+<div class="app">
+
+<!-- ─────────── 헤더 (공통) ─────────── -->
+<div class="hd">
+  <div class="hd-l">
+    <div class="logo">₩</div>
+    <div class="hd-t">우리집 가계부</div>
+  </div>
+  <div class="hd-r">
+    <div class="hd-chip">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      정우
+    </div>
+    <div class="hd-btn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ 내역 ═══════════ -->
+<div class="screen" id="s-list">
+  <div class="filter">
+    <button class="pill on">전체</button>
+    <button class="pill">정우</button>
+    <button class="pill">지현</button>
+  </div>
+
+  <div class="pnav">
+    <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 18-6-6 6-6"/></svg></button>
+    <div class="pnav-t">8월 25일 – 9월 24일</div>
+    <button disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m9 18 6-6-6-6"/></svg></button>
+  </div>
+
+  <div class="sum">
+    <div class="sum-i">
+      <div class="sum-l">수입</div>
+      <div class="sum-v" style="color:var(--inc)">3,420,000</div>
+    </div>
+    <div class="sum-i">
+      <div class="sum-l">지출</div>
+      <div class="sum-v" style="color:var(--exp)">1,284,600</div>
+    </div>
+  </div>
+
+  <div class="searchw">
+    <span class="search-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></span>
+    <input class="search-inp" placeholder="메모·카테고리·계좌 검색">
+  </div>
+
+  <div class="sec">
+    <div class="dhead"><div class="dhead-d">8월 24일 (일)</div><div class="dhead-t">지출 128,400</div></div>
+    <div class="item"><div class="i-ic">🍚</div><div class="i-bd">
+      <div class="i-top"><div class="i-cat">식비</div><div class="i-amt e">−9,000</div></div>
+      <div class="i-sub">신한카드 · 정우 · <span class="memo">회사 근처 백반</span></div></div></div>
+    <div class="item"><div class="i-ic">☕</div><div class="i-bd">
+      <div class="i-top"><div class="i-cat">카페</div><div class="i-amt e">−5,600</div></div>
+      <div class="i-sub">카카오페이 · 지현</div></div></div>
+    <div class="item"><div class="i-ic">💡</div><div class="i-bd">
+      <div class="i-top"><div class="i-cat">공과금</div><div class="i-amt e">−43,800</div></div>
+      <div class="i-sub">자동이체 · 공용 · <span class="memo">8월 전기요금</span></div></div></div>
+    <div class="item"><div class="i-ic">🛒</div><div class="i-bd">
+      <div class="i-top"><div class="i-cat">장보기</div><div class="i-amt e">−70,000</div></div>
+      <div class="i-sub">신한카드 · 지현</div></div></div>
+
+    <div class="dhead"><div class="dhead-d">8월 23일 (토)</div><div class="dhead-t">지출 52,300</div></div>
+    <div class="item"><div class="i-ic">⛽</div><div class="i-bd">
+      <div class="i-top"><div class="i-cat">교통/차량</div><div class="i-amt e">−52,300</div></div>
+      <div class="i-sub">현대카드 · 정우</div></div></div>
+
+    <div class="dhead"><div class="dhead-d">8월 22일 (금)</div><div class="dhead-t">지출 18,000</div></div>
+    <div class="item"><div class="i-ic">💰</div><div class="i-bd">
+      <div class="i-top"><div class="i-cat">월급</div><div class="i-amt i">+2,800,000</div></div>
+      <div class="i-sub">국민은행 · 정우</div></div></div>
+    <div class="item"><div class="i-ic">🔄</div><div class="i-bd">
+      <div class="i-top"><div class="i-cat">계좌간 이동</div><div class="i-amt e">−500,000</div></div>
+      <div class="i-sub"><span class="trf">출금 · 이동</span> · 국민은행 · 정우</div></div></div>
+    <div class="item"><div class="i-ic">🔄</div><div class="i-bd">
+      <div class="i-top"><div class="i-cat">계좌간 이동</div><div class="i-amt i">+500,000</div></div>
+      <div class="i-sub"><span class="trf">입금 · 이동</span> · 카카오뱅크 · 정우</div></div></div>
+    <div class="item"><div class="i-ic">🍜</div><div class="i-bd">
+      <div class="i-top"><div class="i-cat">식비</div><div class="i-amt e">−18,000</div></div>
+      <div class="i-sub">현금 · 정우</div></div></div>
+  </div>
+</div>
+
+<!-- ═══════════ 분류 + 한도 ═══════════ -->
+<div class="screen" id="s-cat">
+  <div class="filter">
+    <button class="pill on">카테고리</button>
+    <button class="pill">결제수단</button>
+  </div>
+  <div class="pnav">
+    <button><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m15 18-6-6 6-6"/></svg></button>
+    <div class="pnav-t">8월 25일 – 9월 24일</div>
+    <button disabled><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m9 18 6-6-6-6"/></svg></button>
+  </div>
+
+  <div class="sec">
+    <div class="sec-t">카테고리별 지출<span>8개 · 1,284,600원</span></div>
+    <div class="crow"><div class="crow-t"><div class="crow-ic">🍚</div><div class="crow-nm">식비</div><div class="crow-v">486,200</div></div>
+      <div class="crow-m"><div class="trk"><i style="width:100%"></i></div><div class="crow-p">37.8%</div></div></div>
+    <div class="crow"><div class="crow-t"><div class="crow-ic">🛒</div><div class="crow-nm">장보기</div><div class="crow-v">243,800</div></div>
+      <div class="crow-m"><div class="trk"><i style="width:50.1%"></i></div><div class="crow-p">19.0%</div></div></div>
+    <div class="crow"><div class="crow-t"><div class="crow-ic">💡</div><div class="crow-nm">공과금</div><div class="crow-v">186,400</div></div>
+      <div class="crow-m"><div class="trk"><i style="width:38.3%"></i></div><div class="crow-p">14.5%</div></div></div>
+    <div class="crow"><div class="crow-t"><div class="crow-ic">⛽</div><div class="crow-nm">교통/차량</div><div class="crow-v">154,300</div></div>
+      <div class="crow-m"><div class="trk"><i style="width:31.7%"></i></div><div class="crow-p">12.0%</div></div></div>
+    <div class="crow"><div class="crow-t"><div class="crow-ic">☕</div><div class="crow-nm">카페</div><div class="crow-v">92,700</div></div>
+      <div class="crow-m"><div class="trk"><i style="width:19.1%"></i></div><div class="crow-p">7.2%</div></div></div>
+    <div class="crow"><div class="crow-t"><div class="crow-ic">🏥</div><div class="crow-nm">의료</div><div class="crow-v">68,000</div></div>
+      <div class="crow-m"><div class="trk"><i style="width:14.0%"></i></div><div class="crow-p">5.3%</div></div></div>
+
+    <div class="sec-t">한도<span>정우 · 이번 주기</span></div>
+    <div class="lrow">
+      <div class="l-t"><div class="l-nm">식비</div><div class="l-pct warn">81%</div></div>
+      <div class="l-bw"><div class="l-b warn" style="width:81%"></div></div>
+      <div class="l-m"><span><b>486,200</b> / 600,000</span><span>13일 남음</span></div>
+      <div class="l-msg">이 속도면 주기 끝에 62,000원 초과해요</div>
+    </div>
+    <div class="lrow">
+      <div class="l-t"><div class="l-nm">카페</div><div class="l-pct over">124%</div></div>
+      <div class="l-bw"><div class="l-b over" style="width:100%"></div></div>
+      <div class="l-m"><span><b>92,700</b> / 75,000</span><span>13일 남음</span></div>
+      <div class="l-msg over">17,700원 초과</div>
+    </div>
+    <div class="lrow">
+      <div class="l-t"><div class="l-nm">교통/차량</div><div class="l-pct ok">51%</div></div>
+      <div class="l-bw"><div class="l-b ok" style="width:51%"></div></div>
+      <div class="l-m"><span><b>154,300</b> / 300,000</span><span>13일 남음</span></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════ 분석 ═══════════ -->
+<div class="screen" id="s-analysis">
+  <div class="filter">
+    <button class="pill on">지출분석</button>
+    <button class="pill">연말정산</button>
+  </div>
+
+  <div class="sec">
+    <div class="sec-t">카테고리 구성<span>이번 주기</span></div>
+    <div class="donutw">
+      <div class="donut">
+        <svg viewBox="0 0 100 100" width="190" height="190">
+          <!-- r=42, C=263.9 · 각 세그먼트 사이 2px(=1.36 단위) 서피스 갭 -->
+          <circle cx="50" cy="50" r="42" fill="none" stroke="var(--s1)" stroke-width="13" stroke-dasharray="98.4 165.5" stroke-dashoffset="0"/>
+          <circle cx="50" cy="50" r="42" fill="none" stroke="var(--s2)" stroke-width="13" stroke-dasharray="48.8 215.1" stroke-dashoffset="-101.1"/>
+          <circle cx="50" cy="50" r="42" fill="none" stroke="var(--s3)" stroke-width="13" stroke-dasharray="36.9 227.0" stroke-dashoffset="-152.6"/>
+          <circle cx="50" cy="50" r="42" fill="none" stroke="var(--s4)" stroke-width="13" stroke-dasharray="30.0 233.9" stroke-dashoffset="-192.2"/>
+          <circle cx="50" cy="50" r="42" fill="none" stroke="var(--s5)" stroke-width="13" stroke-dasharray="16.3 247.6" stroke-dashoffset="-224.9"/>
+          <circle cx="50" cy="50" r="42" fill="none" stroke="var(--s6)" stroke-width="13" stroke-dasharray="19.2 244.7" stroke-dashoffset="-243.9"/>
+        </svg>
+        <div class="donut-c"><div class="dc-l">총 지출</div><div class="dc-v">1,284,600</div></div>
+      </div>
+      <div class="dleg">
+        <div class="dleg-i"><span class="dleg-d" style="background:var(--s1)"></span><span class="dleg-n">식비</span><span class="dleg-v">486,200</span><span class="dleg-p">37.8%</span></div>
+        <div class="dleg-i"><span class="dleg-d" style="background:var(--s2)"></span><span class="dleg-n">장보기</span><span class="dleg-v">243,800</span><span class="dleg-p">19.0%</span></div>
+        <div class="dleg-i"><span class="dleg-d" style="background:var(--s3)"></span><span class="dleg-n">공과금</span><span class="dleg-v">186,400</span><span class="dleg-p">14.5%</span></div>
+        <div class="dleg-i"><span class="dleg-d" style="background:var(--s4)"></span><span class="dleg-n">교통/차량</span><span class="dleg-v">154,300</span><span class="dleg-p">12.0%</span></div>
+        <div class="dleg-i"><span class="dleg-d" style="background:var(--s5)"></span><span class="dleg-n">카페</span><span class="dleg-v">92,700</span><span class="dleg-p">7.2%</span></div>
+        <div class="dleg-i"><span class="dleg-d" style="background:var(--s6)"></span><span class="dleg-n">기타</span><span class="dleg-v">121,200</span><span class="dleg-p">9.4%</span></div>
+      </div>
+    </div>
+
+    <div class="sec-t">주기별 지출<span>최근 3주기</span></div>
+    <div class="bars">
+      <div class="barcol">
+        <div class="barseg" style="height:26%;background:var(--s4)"></div>
+        <div class="barseg" style="height:19%;background:var(--s3)"></div>
+        <div class="barseg" style="height:22%;background:var(--s2)"></div>
+        <div class="barseg" style="height:33%;background:var(--s1)"></div>
+      </div>
+      <div class="barcol">
+        <div class="barseg" style="height:21%;background:var(--s4)"></div>
+        <div class="barseg" style="height:16%;background:var(--s3)"></div>
+        <div class="barseg" style="height:18%;background:var(--s2)"></div>
+        <div class="barseg" style="height:28%;background:var(--s1)"></div>
+      </div>
+      <div class="barcol">
+        <div class="barseg" style="height:24%;background:var(--s4)"></div>
+        <div class="barseg" style="height:15%;background:var(--s3)"></div>
+        <div class="barseg" style="height:19%;background:var(--s2)"></div>
+        <div class="barseg" style="height:38%;background:var(--s1)"></div>
+      </div>
+    </div>
+    <div class="barv"><div>1,398,200</div><div>1,142,600</div><div>1,284,600</div></div>
+    <div class="barx"><div>6.25–7.24</div><div>7.25–8.24</div><div>8.25–9.24</div></div>
+
+    <div class="sec-t">눈에 띄는 것<span>3건</span></div>
+    <div class="ins"><div class="ins-ic">📈</div><div>
+      <div class="ins-t">식비가 지난 주기보다 34% 늘었어요</div>
+      <div class="ins-b">362,800원 → 486,200원. 외식 건수가 11회에서 17회로 늘어난 것이 대부분입니다.</div></div></div>
+    <div class="ins"><div class="ins-ic">🔁</div><div>
+      <div class="ins-t">매달 반복되는 지출 4건</div>
+      <div class="ins-b">공과금·통신비·보험료·구독료 합계 월 186,400원. 주기 시작 시점에 이미 확정된 금액입니다.</div></div></div>
+    <div class="ins"><div class="ins-ic">❗</div><div>
+      <div class="ins-t">일회성으로 보이는 지출</div>
+      <div class="ins-b">8월 12일 가전 <b>420,000원</b> — 이 카테고리 중앙값의 5.2배입니다.</div></div></div>
+  </div>
+</div>
+
+<!-- ═══════════ 계좌 ═══════════ -->
+<div class="screen" id="s-acct">
+  <div class="filter">
+    <button class="pill on">전체</button>
+    <button class="pill">정우</button>
+    <button class="pill">지현</button>
+  </div>
+
+  <div class="sec">
+    <div class="tot">
+      <div class="tot-l">총 자산</div>
+      <div class="tot-v">18,472,300</div>
+      <div class="tot-s">
+        <div>이번 주기 수입<b style="color:var(--inc)">+3,420,000</b></div>
+        <div>이번 주기 지출<b style="color:var(--exp)">−1,284,600</b></div>
+      </div>
+    </div>
+
+    <div class="sec-t">계좌<span>5개 · 계좌간 이동 포함</span></div>
+    <div class="arow"><div><div class="a-nm">국민은행</div><div class="a-sub">정우 · 입출금</div></div><div class="a-bal">8,240,100</div></div>
+    <div class="arow"><div><div class="a-nm">카카오뱅크</div><div class="a-sub">정우 · 입출금</div></div><div class="a-bal">3,918,400</div></div>
+    <div class="arow"><div><div class="a-nm">신한은행</div><div class="a-sub">지현 · 입출금</div></div><div class="a-bal">4,602,800</div></div>
+    <div class="arow"><div><div class="a-nm">토스뱅크</div><div class="a-sub">지현 · 파킹</div></div><div class="a-bal">1,850,000</div></div>
+    <div class="arow"><div><div class="a-nm">현금</div><div class="a-sub">공용</div></div><div class="a-bal">−139,000</div></div>
+  </div>
+</div>
+
+</div><!-- /.app -->
+
+<div class="fab"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></div>
+
+<div class="nav">
+  <div class="tab on" data-t="list"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M8 6h13M8 12h13M8 18h13"/><circle cx="3.5" cy="6" r="1.2" fill="currentColor" stroke="none"/><circle cx="3.5" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="3.5" cy="18" r="1.2" fill="currentColor" stroke="none"/></svg>내역</div>
+  <div class="tab" data-t="cat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 3a9 9 0 1 0 9 9h-9V3Z"/><path d="M15.5 3.5A9 9 0 0 1 20.5 8.5L15.5 10Z"/></svg>분류</div>
+  <div class="tab" data-t="limit"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg>한도</div>
+  <div class="tab" data-t="analysis"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m3 16 5-6 4 4 8-9"/><path d="M15 5h5v5"/></svg>분석</div>
+  <div class="tab" data-t="acct"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="6" width="19" height="13" rx="2"/><path d="M2.5 10h19"/></svg>계좌</div>
+  <div class="tab" data-t="master"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/></svg>설정</div>
+</div>
+
+<script>
+// 스크린샷 스크립트가 부르는 훅
+window.setScreen = function(name){
+  document.body.dataset.screen = name;
+  document.querySelectorAll('.tab').forEach(function(t){
+    t.classList.toggle('on', t.dataset.t === name);
+  });
+  window.scrollTo(0,0);
+};
+</script>
+</body>
+</html>
