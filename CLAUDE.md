@@ -539,6 +539,11 @@ node scripts/measure_timeline.js --4g                   # 어디서 시간이 �
 ⚠️ 비교 대상은 **작업 사본이 아니라 커밋된 blob**(`git show origin/main:public/index.html`).
 Windows 작업 사본은 CRLF, 리포 blob은 LF라 작업 사본과 비교하면 항상 불일치가 난다.
 
+⚠️ **`poll_deploy.js` 직후 `check_live.js`가 해시 불일치로 한 번 실패할 수 있다.**
+2026-08-24에 실제로 겪었다 — 코드 변경 없이 두 번째 실행에서 바로 `ALL PASS`가 됐다.
+엣지 PoP 전파 지연으로 보인다(마커는 이미 보이는 노드와 옛 파일을 주는 노드가 잠시 공존).
+**한 번 더 돌려보고 그래도 불일치면 그때 파헤칠 것.**
+
 ### JS 검증 (테스트 프레임워크 없음)
 브라우저 없이 인라인 JS를 확인하는 법: 마지막 `<script>` 블록을 추출 → `new Function`/`Module._compile`에 stub(supabase·Chart·document·localStorage) 주입해 파싱/순수함수 단위테스트. `node`로 실행.
 - 빠른 문법 검사(복붙용): `node -e "const fs=require('fs');const c=[...fs.readFileSync('public/index.html','utf8').matchAll(/<script>([\s\S]*?)<\/script>/g)].pop()[1];try{new Function(c);console.log('JS OK')}catch(e){console.error(e.message);process.exit(1)}"`
