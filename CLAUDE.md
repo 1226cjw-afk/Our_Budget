@@ -71,7 +71,9 @@ Our_Budget/
 │   ├── check_authgate.js#   로그인 게이트 배선이 소스에 들어갔는가
 │   ├── check_live.js    #   배포본이 커밋한 것과 동일한가 (sha256)
 │   ├── shot_auth.js     #   헤드리스 렌더 확인
-│   ├── measure_load.js  #   초기 로딩 실측 + 폰트·바이트 회귀 검사 (아래 기준선 표를 재현)
+│   ├── measure_load.js  #   초기 로딩 '구조' 회귀 검사 (폰트·바이트·chart.js — 아래 기준선 표를 재현)
+│   ├── measure_timeline.js # 첫 화면까지를 구간 분해 (HTML→supabase-js→DCL→첫 DB 요청→응답→렌더)
+│   ├── test_lazy_chart.js  # chart.js 지연 로드 단위테스트 + <head> 태그 순서 검사
 │   └── poll_deploy.js   #   배포 반영 폴링
 ├── docs/superpowers/    # 스펙·플랜 (배포 안 됨)
 ├── backup_appscript.gs  # 구글 시트 백업용 GAS 코드 (참고용, 배포는 Apps Script에 수동 반영)
@@ -84,9 +86,22 @@ Our_Budget/
 새 파일을 추가할 땐 **공개돼도 되는가**를 먼저 판단하고, 앱 자산일 때만 `public/`에 둘 것.
 검증: `node scripts/check_assets.js` — 앱 외 경로가 404인지, `/`가 200인지 함께 본다.
 
-CSS · JS 모두 `public/index.html` 안에 인라인. 외부 의존성 (모두 `<head>`에서 논블로킹 로드):
-- `@supabase/supabase-js@2` · `chart.js` (CDN, `defer` — 파싱 비차단. 둘 다 `DOMContentLoaded` 이후에만 사용하므로 안전.
-  `defer`는 명세상 DOMContentLoaded **직전**에 실행이 끝나므로 시작 시점에 `window.supabase`·`Chart`가 이미 있다)
+CSS · JS 모두 `public/index.html` 안에 인라인. 외부 의존성:
+- `@supabase/supabase-js@2` — `<head>`에 `defer`. 파싱 비차단이고 `DOMContentLoaded` 이후에만 쓰므로 안전
+  (`defer`는 명세상 DOMContentLoaded **직전**에 실행이 끝나 시작 시점에 `window.supabase`가 이미 있다)
+- `chart.js` — **`<head>`에 두지 않는다. `ensureChart()`가 분석 탭에서 지연 로드한다**(2026-08-24).
+  ⚠️ 되돌리지 말 것: `defer`는 DOMContentLoaded를 **막는다**. 앱은 그 시점에 `getSession`→`loadAll`을 시작하므로,
+  분석 탭에서만 쓰는 72KB가 **첫 DB 요청 앞에 줄을 서 있었다**. 실측으로 DCL이 chart.js 실행 시점과
+  **정확히 같았다**(4G+CPU4배: supabase-js 1,159ms / chart.js 1,375ms / DCL 1,375ms / 첫 쿼리 1,381ms).
+  배포본 대조 결과 앱 시작·첫 쿼리가 **각각 −273ms**, 초기 전송이 −72KB.
+  `measure_load.js`의 '초기 로딩에 chart.js 없음' 검사가 재발을 잡는다.
+- ⚠️ **`<head>`의 네트워크 태그(preconnect·폰트 `<link>`·`<script>`)는 `apple-touch-icon`보다 앞에 둘 것.**
+  그 아이콘이 base64 **26KB짜리 한 줄**이라 뒤에 두면 preload 스캐너의 CDN 발견이 27,652바이트 뒤로 밀린다.
+  `test_lazy_chart.js`가 이 순서를 검사한다.
+- **`preconnect`는 CDN과 DB 둘 다** (`cdn.jsdelivr.net`, `hqyvkyflakhuvethrstw.supabase.co`).
+  첫 쿼리는 DCL 직후에 나가는데 그때 핸드셰이크를 처음부터 하면 실측 TCP 275ms·TLS 288ms를 그 자리에서 쓴다.
+  적용 여부 판정법: 첫 supabase 요청의 `response.timing.connectStart`가 **`-1`이면 재사용(성공)**,
+  실제 값이면 그 자리 핸드셰이크(실패) — preconnect 줄만 뺀 사본과 대조해 확인했다.
 - Pretendard (jsdelivr `<link>`, **variable + dynamic-subset**) — 폰트는 이것 하나뿐이다
   - ⚠️ CSS `@import`로 되돌리면 직렬·렌더블로킹이 됨(금지)
   - ⚠️ **`static/pretendard.min.css`로 되돌리지 말 것** — 서브셋이 아니라 weight마다 한글 전체 woff2를 받는다.
@@ -98,21 +113,41 @@ CSS · JS 모두 `public/index.html` 안에 인라인. 외부 의존성 (모두 
   - `font-family` 1순위는 `'Pretendard Variable'` — dynamic-subset의 실제 패밀리명이 그것이다.
     `'Pretendard'`로만 적으면 웹폰트가 안 잡히고 조용히 시스템 폰트로 떨어진다
 
-**초기 로딩 기준선** — 재측정: `node scripts/measure_load.js [--4g]`
-(2026-08-15 배포본 실측, 콜드 캐시·세션 없음. Edge 헤드리스+CDP 워터폴):
+**초기 로딩 기준선** — 재측정: `node scripts/measure_load.js [--4g]` (구조 검사) ·
+`node scripts/measure_timeline.js [--4g]` (구간 분해)
+(2026-08-24 배포본 실측, 콜드 캐시. Edge 헤드리스+CDP 워터폴):
 
 | | 앱 시작(DCL) | FCP | 총 바이트 |
 |---|---|---|---|
-| 데스크톱 | 730ms | 752ms | 462KB |
-| 4G+CPU4배 | 1,432ms | 1,176ms | 462KB |
+| 데스크톱 | 730ms | 752ms | 384KB |
+| 4G+CPU4배 | 1,102ms | 1,128ms | 384KB |
 
-> 바꾸기 전엔 앱 시작이 각각 1,506ms / 4,274ms에 3.45MB였다.
-> **'앱 시작'은 `load`가 아니라 DOMContentLoaded 시점**이다 — 여기서 `getSession`→`loadAll`이 출발한다.
-> 로그인된 상태면 여기에 REST 왕복(6쿼리 병렬, 거래 134KB JSON, 실측 RTT 0.15~0.19s)이 더 붙는다.
+> ⚠️ **DCL을 기준선으로 삼는 것만으로는 부족하다.** 2026-08-15에 폰트 3.15MB→244KB, 시작점을 `load`→DCL로
+> 옮겨 DCL을 크게 줄였는데 사용자 체감은 "그대로"였다. 사용자가 기다리는 건 **'앱이 시작한 시점'이 아니라
+> '데이터가 보이는 시점'**이고, 그 사이에 세션 확인 → 6쿼리 → 렌더가 더 있기 때문이다.
+> 그래서 `measure_timeline.js`가 생겼다 — HTML 도착 / supabase-js 실행 / DCL / FCP / **첫 DB 요청 발사** /
+> DB 응답 완료 / 첫 렌더를 나눠 찍는다. 성능 얘기는 이 표로 할 것.
+>
+> **첫 화면까지의 크리티컬 패스는 서로 다른 3개 호스트로 가는 직렬 왕복이다:**
+> `workers.dev`(HTML) → `cdn.jsdelivr.net`(supabase-js) → `supabase.co`(토큰 갱신 + 6쿼리).
+> 하나라도 크리티컬 패스에 불필요하게 얹히면 그만큼 데이터가 늦는다(chart.js가 그랬다).
+>
+> - **`getSession()`은 토큰이 만료됐으면 갱신 왕복을 `await` 한다** (supabase-js `__loadSession` → `_callRefreshToken`).
+>   액세스 토큰 기본 수명이 1시간이라 **하루 만에 처음 여는 경우는 거의 항상 여기에 걸린다.**
+>   "처음엔 느리고 새로고침하면 빠르다"의 절반이 이것 — 나머지 절반은 HTML·CDN·폰트가 디스크 캐시에서 오는 것.
+>   ⚠️ 이걸 우회하려고 인라인 스크립트에서 직접 refresh를 치지 말 것 — Supabase는 **refresh token을 회전**시키므로
+>   supabase-js 바깥에서 갱신하고 저장 포맷을 어긋나게 쓰면 가족 전체가 로그아웃된다.
+> - 앱 HTML은 실측상 **LAX(로스앤젤레스) PoP**에서 온다(콜드 TTFB 450~560ms). Supabase는 ICN(서울, TTFB 100~350ms).
+>   코드로 못 고치는 부분이라 기준선의 편차 원인으로만 기억할 것.
+>
 > 회귀 의심 시: 총 바이트가 1MB를 넘거나 DCL이 load에 가까워지면 폰트/시작점을 먼저 볼 것.
 > `measure_load.js`가 그 판정을 대신한다 — **시간이 아니라 구조를 검사**한다(총 바이트 1MB 미만 /
-> Pretendard가 dynamic-subset인가 / Google Fonts가 되살아났는가). 시간은 환경 편차가 커서 기준선의 2배까지만 본다.
-> 통제 실험은 `--block='<패턴>'`(그 리소스만 빼고 재측정). 회귀본에 대고 3개가 FAIL 나는 것까지 확인해 뒀다.
+> Pretendard가 dynamic-subset인가 / Google Fonts가 되살아났는가 / chart.js가 초기 로딩에 없는가).
+> 시간은 환경 편차가 커서 기준선의 2배까지만 본다.
+> 통제 실험은 `--block='<패턴>'`(그 리소스만 빼고 재측정). 회귀본에 대고 FAIL이 나는 것까지 확인해 뒀다.
+> ⚠️ **개선 전/후 비교는 1회 측정으로 하지 말 것.** CDN 응답 편차만으로 같은 파일의 DCL이 217~1,166ms까지
+> 흔들린다(실측). 두 버전을 **교대로** N회씩 돌려 중앙값으로 볼 것 — 한쪽을 몰아 돌리면 그 시간대의
+> 네트워크 상태가 통째로 한쪽 편을 든다. 실제로 단일 런 비교에서 "1,419ms→304ms"라는 가짜 개선을 봤다.
 
 **데이터가 늘 때** (2026-08-15 실측, 실제 DB 분포로 합성한 행 기준):
 - **전송량은 문제가 아니다** — gzip이 11배 먹는다(카테고리·계좌가 반복되는 데이터라). 515건 10KB / 5,000건 92KB / 10,000건 183KB
@@ -405,6 +440,7 @@ Supabase Auth 공유 계정 1개. Worker 프록시도, 자체 인증 코드도 �
 | `taxMapSection(m,kind,t)` | 소득·지출 매핑 UI 공용 빌더 (연말정산 화면용). 소득은 입금 있는 카테고리로 좁힘 |
 | `setTaxMap / applyTaxSuggest / saveTySalary / resetTySalary / copyTaxDDL` | 매핑 단건 저장(빈값=삭제) / 미분류 일괄 추천 / 총급여 수동값(0이면 삭제=추정 복귀) / 설치 SQL 복사 |
 | `drawAnalysisCharts() / destroyCharts()` | 도넛 + 주기별 스택막대(지출=카테고리·왼축, 수입=오른 보조축) + 추이 라인 / 인스턴스 일괄 파괴 |
+| `ensureChart() / drawWhenChartReady(fn)` | chart.js 지연 로드(1회만 삽입, 실패 시 재시도 가능) / 도착을 기다렸다 그리기. ⚠️**기다리는 사이 화면이 바뀌면 그리지 않는다** — `render()`가 올리는 `_renderSeq`를 캡처해 대조한다. 빼면 없어진 캔버스에 그리거나, 새로 그린 차트를 다음 `destroyCharts()`가 지운다. `startApp()` 끝에서 idle에 미리 받아둬 분석 탭 첫 진입도 안 기다린다(크리티컬 패스 밖) |
 | `expOf(rs) / incOf(rs) / catColor(c)` | 지출·수입 합계 헬퍼(이동 제외), 카테고리 색 — `_catOrder` 인덱스로 팔레트 배정. ⚠️**이름해시 금지**(한글이 한 칸에 몰려 전부 초록), ⚠️**'처음 등장 순서'로도 되돌리지 말 것**(탭 여는 순서·멤버 필터에 따라 기기·세션마다 색이 달라짐) → `rebuildCatOrder()`의 로케일 정렬이 유일한 기준 |
 | `isTransfer(r)` | 계좌간 이동 거래 판별(`r.category===TRANSFER_CAT`) — 통계 제외 필터에 공통 사용 |
 | `$(id) / parseDate(s) / todayStr() / amtVal(id)` | getElementById 축약 / 날짜 파싱(YYYY-MM-DD는 정오로 — 타임존 경계 안전) / 오늘 날짜 문자열 / 콤마 금액 input→숫자 |
@@ -546,7 +582,9 @@ git push
 # Cloudflare Workers 자동 배포 (1~2분 소요)
 node scripts/poll_deploy.js "<이번 변경에만 있는 문자열>"   # 반영을 기다림 (인자: [최대라운드] [마커], 마커만 줘도 됨)
 node scripts/check_live.js                              # 반영 확인 (배포본 sha256 == origin/main blob)
-node scripts/measure_load.js                            # 로딩 회귀 검사 (렌더·폰트를 건드렸다면)
+node scripts/measure_load.js                            # 로딩 '구조' 회귀 검사 (렌더·폰트·<head>를 건드렸다면)
+node scripts/test_lazy_chart.js                         # 차트 지연 로드 배선 (브라우저 불필요, 1초)
+node scripts/measure_timeline.js --4g                   # 어디서 시간이 가는지 구간 분해 (성능 얘기는 이걸로)
 ```
 > GAS 백업 코드를 고쳤다면 `backup_appscript.gs`도 함께 커밋. (단 실제 반영은 Apps Script "새 버전" 재배포 필요)
 
