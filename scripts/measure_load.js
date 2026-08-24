@@ -117,6 +117,10 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       "static(통파일) 경로가 잡혔다 — weight마다 한글 전체를 받는다");
     chk("Google Fonts 미사용", !urls.some(u => /fonts\.googleapis\.com/.test(u)),
       "@font-face 496개짜리 렌더블로킹 CSS가 되살아났다");
+    // chart.js는 분석 탭 전용이다. <head>에 defer로 두면 DOMContentLoaded가 그걸 기다리므로
+    // 첫 DB 요청이 72KB 뒤에 줄을 선다(2026-08-24 실측: DCL이 chart.js 실행 시점과 정확히 일치).
+    chk("초기 로딩에 chart.js 없음", !urls.some(u => /npm\/chart\.js/.test(u)),
+      "chart.js가 다시 크리티컬 패스에 올라왔다 — 지연 로드는 ensureChart()");
     chk(`DCL이 기준선의 2배 이내`, dcl <= BASE[mode].dcl * 2, `${dcl}ms vs 기준 ${BASE[mode].dcl}ms (편차 ±20%는 정상)`);
   }
   console.log(bad ? `\n${bad} FAILED` : "\nALL PASS");
