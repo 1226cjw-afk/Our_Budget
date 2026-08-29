@@ -116,6 +116,15 @@ CSS · JS 모두 `public/index.html` 안에 인라인. 외부 의존성:
     첫 페인트만 데스크톱 ~150ms·4G ~520ms 늦추고 있었다. CSS 폰트 스택엔 이름이 남아 있는데 그건 **로컬 설치본 폴백**이다
   - `font-family` 1순위는 `'Pretendard Variable'` — dynamic-subset의 실제 패밀리명이 그것이다.
     `'Pretendard'`로만 적으면 웹폰트가 안 잡히고 조용히 시스템 폰트로 떨어진다
+  - ⚠️ **`media="print" onload="this.media='all'"`를 지우고 `rel="stylesheet"` 단독으로 되돌리지 말 것**(2026-08-30).
+    이 CSS는 렌더블로킹이라 **첫 픽셀이 jsdelivr 왕복 뒤로 밀려 있었다** — chart.js와 똑같은 모양의 문제였다
+    (겉모습에만 쓰는 리소스가 첫 화면 앞에 줄을 선다). 교대 A/B N=6·4G+CPU4배 실측 **FCP −444ms · DCL −268ms**.
+    시각적으로 잃는 게 없는 이유: 이 CSS의 `@font-face` **92개가 전부 `font-display:swap`**이라
+    폴백으로 먼저 그렸다가 교체되는 깜빡임은 *지금도 이미* 일어난다. 바이트·요청 수도 동일(494KB/12개),
+    폰트 92개 전부 로드됨을 실측 확인. `<noscript>` 폴백은 `onload`가 안 도는 환경용이니 같이 두 것.
+    `test_lazy_chart.js`가 두 조각(비블로킹 배선·noscript 폴백)을 각각 검사한다.
+  - ✗ **반증된 대안**: supabase-js `<script>`를 폰트 `<link>` 앞으로 옮기는 것은 **효과가 없다**(같은 실험에서 +18ms).
+    "보류 중인 스타일시트가 뒤따르는 스크립트를 막는다"는 그럴듯한 설명이지만 실측이 기각했다 — 다시 시도하지 말 것
 
 **초기 로딩 기준선** — 재측정: `node scripts/measure_load.js [--4g]` (구조 검사) ·
 `node scripts/measure_timeline.js [--4g]` (구간 분해)
@@ -155,7 +164,10 @@ CSS · JS 모두 `public/index.html` 안에 인라인. 외부 의존성:
 >   "처음엔 느리고 새로고침하면 빠르다"의 절반이 이것 — 나머지 절반은 HTML·CDN·폰트가 디스크 캐시에서 오는 것.
 >   ⚠️ 이걸 우회하려고 인라인 스크립트에서 직접 refresh를 치지 말 것 — Supabase는 **refresh token을 회전**시키므로
 >   supabase-js 바깥에서 갱신하고 저장 포맷을 어긋나게 쓰면 가족 전체가 로그아웃된다.
-> - 앱 HTML은 실측상 **LAX(로스앤젤레스) PoP**에서 온다(콜드 TTFB 450~560ms). Supabase는 ICN(서울, TTFB 100~350ms).
+> - 앱 HTML은 **한국 밖 PoP**에서 온다 — 2026-08-15엔 LAX(로스앤젤레스), 2026-08-30 재측정은 **MAA(첸나이)**로 바뀌어 있었다.
+>   즉 **PoP는 고정이 아니다** — `curl -sI <배포URL> | grep -i cf-ray`의 접미사로 그때그때 확인할 것(콜드 TTFB 145~560ms).
+>   HTML은 브로틀리로 63KB까지 줄어 있고(`content-encoding: br`) `cache-control: max-age=0, must-revalidate`라 매번 재검증 왕복이 있다.
+>   Supabase는 ICN(서울, TTFB 100~350ms).
 >   코드로 못 고치는 부분이라 기준선의 편차 원인으로만 기억할 것.
 >
 > 회귀 의심 시: 총 바이트가 1MB를 넘거나 DCL이 load에 가까워지면 폰트/시작점을 먼저 볼 것.

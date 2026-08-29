@@ -22,7 +22,15 @@
 <!-- Pretendard: @import(직렬·렌더블로킹) 대신 <link>로 — preload 스캐너가 일찍 발견 -->
 <!-- static(통파일) 금지: weight마다 한글 전체 woff2를 받아 4개 = 3.15MB였다(2026-08-15 실측).
      variable + dynamic-subset = 유니코드 범위 92조각 중 쓰는 것만 + 한 파일이 45~920 전 weight 담당. -->
-<link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" rel="stylesheet">
+<!-- ⚠️ media="print" + onload 는 오타가 아니다 — 이 CSS 를 '렌더 블로킹에서 뺀다'.
+     rel="stylesheet" 그대로 두면 첫 픽셀이 jsdelivr 왕복 뒤로 밀린다(2026-08-30 실측:
+     교대 A/B N=6 에서 FCP -444ms · DCL -268ms, 4G+CPU4배).
+     시각적으로 잃는 게 없는 이유: 이 CSS 의 @font-face 92개가 전부 font-display:swap 이라
+     폴백으로 먼저 그렸다가 교체되는 깜빡임은 '지금도 이미' 일어난다. 첫 페인트만 앞당겨질 뿐이다.
+     바이트·요청 수도 동일(494KB/12개)하고 폰트는 그대로 92개 다 로드된다 — 실측으로 확인했다.
+     ⚠️ rel="stylesheet" 단독으로 되돌리지 말 것. test_lazy_chart.js 가 이 배선을 검사한다. -->
+<link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" rel="stylesheet" media="print" onload="this.media='all'">
+<noscript><link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" rel="stylesheet"></noscript>
 <!-- defer: HTML 파싱을 막지 않음(헤더·스피너 즉시 페인트). DOMContentLoaded 이후에만 쓰여 안전.
      ⚠️ 여기에 chart.js를 다시 추가하지 말 것 — defer는 DOMContentLoaded를 막으므로
      분석 탭 전용 라이브러리가 첫 DB 요청 앞에 줄을 선다. 지연 로드는 ensureChart(). -->

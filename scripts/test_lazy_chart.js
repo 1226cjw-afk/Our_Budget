@@ -89,6 +89,20 @@ ok("DB에 preconnect가 걸려 있다",
      pre > 0 && pre < icon && sb < icon && font < icon,
      `icon@${icon} / preconnect@${pre} / supabase-js@${sb} / font@${font}`);
 }
+{
+  // 폰트 CSS가 렌더 블로킹으로 되돌아갔는가.
+  // chart.js와 같은 모양의 문제였다 — 화면 겉모습에만 쓰는 리소스가 첫 픽셀 앞에 줄을 선다.
+  // 2026-08-30 교대 A/B(N=6, 4G+CPU4배): 비블로킹으로 FCP -444ms · DCL -268ms.
+  // @font-face 92개가 전부 font-display:swap 이라 교체 깜빡임은 어차피 이미 일어난다(시각적 손해 없음).
+  const tag = (html.match(/<link[^>]*pretendardvariable-dynamic-subset[^>]*>/g) || [])
+    .find(t => !/^\s*<noscript/.test(t) && !html.includes("<noscript>" + t));
+  ok("폰트 CSS가 렌더 블로킹이 아니다",
+     !!tag && /media=["']print["']/.test(tag) && /onload=["'][^"']*media\s*=\s*['"]all['"]/.test(tag),
+     `rel="stylesheet" 단독으로 되돌아갔다 — 첫 픽셀이 jsdelivr 왕복 뒤로 밀린다\n     태그: ${tag || "(못 찾음)"}`);
+  ok("스크립트 꺼진 브라우저용 <noscript> 폴백이 있다",
+     /<noscript>\s*<link[^>]*pretendardvariable-dynamic-subset[^>]*rel="stylesheet"[^>]*>\s*<\/noscript>/.test(html),
+     "onload가 안 도는 환경에서 폰트가 영영 안 걸린다");
+}
 
 // ── 2. ensureChart(): 중복 삽입하지 않는가 ──
 {
