@@ -79,6 +79,7 @@ Our_Budget/
 │   ├── lib_mock.js      #   위 두 스크립트가 공유하는 가짜 supabase 클라이언트 + 합성 데이터
 │   ├── test_date_field.js # 날짜 필드(투명 네이티브 입력 + 직접 그린 표시) 기능 검증
 │   ├── test_boot_cache.js # 스냅샷 캐시 + 부분 로드 가드 (브라우저 불필요, ~1초)
+│   ├── test_period.js   #   주기 판정 불변식 (멤버별 시작일·타임스탬프 판정 동치)
 │   ├── perf_logic.js    #   계산 성능 — 행 수를 늘려가며 집계·렌더 비용과 '차수'를 잰다
 │   └── poll_deploy.js   #   배포 반영 폴링
 ├── docs/superpowers/    # 스펙·플랜 (배포 안 됨)
@@ -209,21 +210,33 @@ CSS · JS 모두 `public/index.html` 안에 인라인. 외부 의존성:
 **계산 성능 기준선** — 재측정: `node scripts/perf_logic.js [--max=40000] [--reps=7]`
 (2026-09-01, 데스크톱 · 반복 중앙값 · ms. **폰은 대략 4배**. 절대값보다 **차수**를 볼 것)
 
-| | 629행(오늘) | 10,000행 | 40,000행 | 차수 |
-|---|---|---|---|---|
-| `bucketByPeriod`(6주기) | 3.2 | 57 | **247** | O(n) |
-| `scoped()`(이번주기·전체멤버) | 0.7 | 10 | 45 | O(n) |
-| `viewAnalysis` | 2.5 | 30 | 130 | O(n) |
-| `render(내역)` 기본 화면 | 0.8 | 11 | 58 | O(n) |
-| `aggCat` · `taxCalc` · `orphanTransfers` | <0.2 | ~1 | ~4 | O(n) |
-| `saveSnapshot` / `readSnapshot` | 0.6 | 11 | — | O(n) |
+| | 629행(오늘) | 10,000행 | 40,000행 | 차수 | (개선 전 40,000행) |
+|---|---|---|---|---|---|
+| `bucketByPeriod`(6주기) | 0.13 | 1.5 | 11 | O(n) | 247 |
+| `scoped()`(이번주기·전체멤버) | 0.08 | 0.6 | 5.0 | O(n) | 45 |
+| `viewAnalysis` | 0.74 | 1.3 | 10 | O(n) | 130 |
+| `render(내역)` 기본 화면 | 0.14 | 0.6 | 5.6 | O(n) | 58 |
+| `viewCategory` | 0.08 | 0.6 | 5.3 | O(n) | 46 |
+| `aggCat` · `taxCalc` · `orphanTransfers` | <0.2 | ~1 | ~4 | O(n) | 같음 |
+| `listResultsHtml`(검색) | 1.3 | 8.2 | 35 | O(n) | 같음 |
+| `saveSnapshot` / `readSnapshot` | 0.7 | 13 | 66 / — | O(n) | 같음 |
 
-- **이차 복잡도는 없다**(629→40,000행 전 구간 확인). 오늘 수치는 전부 폰에서도 10ms 안쪽이라 문제가 아니다.
-- ⚠️ **가장 무거운 건 `bucketByPeriod`이고 원인은 `inPeriod`가 행마다 `parseDate`를 주기 수만큼 반복하는 것**이다
-  (40,000행·6주기 = 14만 번의 `new Date`). `scoped()`도 같은 이유로 비싸다. 실측 대안(결과 동일 확인):
-  행당 1회 파싱 + 타임스탬프 비교 **4~8배**, 로드 때 `_t`를 심어두고 재사용 **50~156배**(심는 비용 40,000행 27ms).
-- ⚠️ **스냅샷 캐시는 약 9,400행(2MB)에서 조용히 저장을 멈춘다**(`SNAP_MAX`). 현재 증가 속도(≈70행/월)로 10년쯤 뒤지만,
-  멈출 때 아무 표시가 없다 — 그때는 첫 화면이 다시 2~3초로 돌아가는데 원인이 안 보인다.
+- **이차 복잡도는 없다**(629→40,000행 전 구간 확인). 40,000행에서도 폰 근사(×4)로 200ms를 넘는 항목이 없다.
+- **2026-09-01 개선**: 주기 판정을 문자열 파싱에서 타임스탬프 비교로 바꿔 집계가 **11~22배** 빨라졌다.
+  옛 `inPeriod(r.date, p)`는 행마다 주기 수만큼 `parseDate`(=`new Date(문자열)`)를 돌렸다 —
+  40,000행·6주기면 14만 번. 지금은 `applyLoad`의 `stampRows()`가 행당 `_t`(숫자)를 한 번 심고
+  `inPeriodRow(r,p)`가 `p.sT`·`p.eT`와 숫자로만 비교한다.
+  - ⚠️ **`inPeriod(문자열, p)`로 되돌리지 말 것.** 결과는 같지만 비용이 돌아온다.
+    문자열판은 `test_period.js`의 **참조 구현**으로만 남겨둔 것이다(둘이 같은 답을 내는지 대조).
+  - ⚠️ `rowTime()`의 `_t` 폴백을 지우지 말 것 — 캐시 밖에서 만든 임시 행 객체가 조용히 전부 탈락한다
+    (`test_period.js`가 이 변이로 6건 FAIL 한다).
+  - ⚠️ `billingPeriod()`의 `sT`·`eT`는 `start`·`end`와 **같은 경계의 숫자판**이다. 한쪽만 고치면 갈린다.
+- **스냅샷이 `SNAP_MAX`(2MB, ≈9,400행)를 넘으면** 포기하지 않고 **최근 45일만 담고 `partial:true`**를 단다.
+  `bootFromSnapshot`이 그 표시를 보고 `ROWS_PARTIAL`을 켜므로 `needsFullRows()` 가드가 그대로 걸린다 —
+  잘린 데이터로 잔액·공제액이 계산되는 일은 없다.
+  ⚠️ 예전엔 그냥 `return false`였는데, 그러면 한도를 넘는 날부터 첫 화면이 다시 2~3초로 돌아가면서
+  **화면에도 로그에도 단서가 없다**. 조용한 퇴화가 제일 나쁘다.
+- `saveSnapshot`은 **마지막 렌더 뒤 idle에서** 부른다(40,000행 직렬화 66ms이 렌더 앞에 끼면 안 된다).
 - ⚠️ `perf_logic.js`는 케이스마다 화면 상태를 초기화한다. 안 하면 앞 케이스의 `memberFilter`가 남아
   다음 케이스가 절반의 행만 처리하고 **조용히 작게** 나온다(실제로 `viewAnalysis`가 자기 안의
   `bucketByPeriod`보다 싸게 나와서 발견했다 — 수치가 서로 모순되면 하네스를 먼저 의심할 것).
@@ -435,6 +448,7 @@ FCP만 1,000ms→114ms로 당겨진 탓에 **스피너를 더 오래 쳐다보�
 | `reloadAndRender()` | `loadAll()+render()` — CRUD 후 공통 마무리 |
 | `movePeriod(d) / resetPeriod() / viewedPeriod(m)` | 내역·분류 탭 ◀▶ 주기 탐색 (periodOffset 0 클램프, 누르면 scope='current') |
 | `bucketByPeriod(rows,n,ref)` / `mixedPeriods()` | 최근 n주기 버킷팅(**행마다 그 멤버 주기**, 인덱스 n-1=이번 주기) / 멤버 간 시작일이 갈리는 상태인지 — 위 '결제 주기' 절 참조 |
+| `rowTime(r) / inPeriodRow(r,p) / stampRows(rows)` | 행 날짜의 숫자판(없으면 그 자리에서 채움) / 행 단위 주기 판정 — **집계의 안쪽 루프** / 로드 직후 일괄 심기. ⚠️`inPeriod(문자열,p)`로 되돌리면 행마다 `parseDate`가 주기 수만큼 돌아 40,000행에서 11ms→247ms가 된다. 문자열판은 `test_period.js`의 참조 구현 전용 |
 | `myRows() / retryLoad() / recentPeriods(n,m)` | 멤버 필터 적용 행 / 로드 실패 후 재시도(배너·에러카드 버튼) / 최근 n주기 목록 |
 | `taxSelect(member,kind,value,cur)` / `tyAmtLabel(a,isCat,cur)` | 연말정산 매핑 셀렉트·금액 캡션 공용 빌더 — 연말정산 화면·설정 탭 **4곳**이 같은 마크업을 쓴다. 인라인으로 복붙하지 말 것(옵션 하나 고칠 때 한 곳을 빠뜨린다) |
 | `drillTo(q)` | 분류 카드 클릭 → 내역 탭 이동 + 검색어 세팅 (주기·멤버 필터 유지, '미지정' 카드는 비활성) |
@@ -614,6 +628,7 @@ node scripts/check_theme.js                             # 디자인 계약 (토�
 node scripts/measure_load.js                            # 로딩 '구조' 회귀 검사 (렌더·폰트·<head>를 건드렸다면)
 node scripts/test_lazy_chart.js                         # 차트 지연 로드 배선 (브라우저 불필요, 1초)
 node scripts/test_boot_cache.js                         # 스냅샷 캐시·부분 로드 가드 (첫 화면을 건드렸다면)
+node scripts/test_period.js                             # 주기 판정 (집계·필터를 건드렸다면)
 node scripts/check_authgate.js                          # 로그인 게이트 + 캐시 삭제 4지점
 node scripts/shot_theme.js                              # 라이트/다크 실렌더 + 대비 실측 (눈으로 볼 PNG를 남긴다)
 node scripts/test_date_field.js                         # 날짜 필드 (입력 시트를 건드렸다면)

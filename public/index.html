@@ -1174,7 +1174,10 @@ function billingPeriod(member, ref){
   const start=new Date(sy,sm,sd);
   // 종료 = 다음 시작일 하루 전 (sd=1이면 같은 달 말일 — 다음달로 넘기던 버그 수정됨)
   const end=new Date(sy,sm+1,sd); end.setDate(end.getDate()-1); end.setHours(23,59,59);
-  return {start,end,label:`${sm+1}/${sd} ~ ${end.getMonth()+1}/${end.getDate()}`,key:`${sy}-${String(sm+1).padStart(2,"0")}`};
+  // sT·eT는 같은 경계의 숫자판. 행 판정을 Date 비교가 아니라 숫자 비교로 하기 위한 것이다
+  // (inPeriodRow 참조 — 행마다 Date를 만들던 것이 집계 비용의 대부분이었다)
+  return {start,end,sT:start.getTime(),eT:end.getTime(),
+          label:`${sm+1}/${sd} ~ ${end.getMonth()+1}/${end.getDate()}`,key:`${sy}-${String(sm+1).padStart(2,"0")}`};
 }
 function recentPeriods(n, member){
   member=member||MEMBERS[0];
@@ -1183,6 +1186,16 @@ function recentPeriods(n, member){
   return Array.from({length:n},(_,i)=>billingPeriod(member,new Date(cur.start.getFullYear(),cur.start.getMonth()-(n-1-i),sd)));
 }
 const inPeriod = (s,p) => { const d=parseDate(s); return d>=p.start&&d<=p.end; };
+/* 행 단위 주기 판정 — 집계의 안쪽 루프다.
+   ⚠️ 여기가 앱 계산 비용의 대부분이었다(2026-09-01 실측). 옛 코드는 `inPeriod(r.date, ps[i])`라
+   **행마다 주기 수만큼** parseDate(=new Date(문자열))를 돌렸다 — 40,000행·6주기면 14만 번.
+   지금은 행의 날짜를 한 번만 숫자로 만들어(_t) 재사용하고 경계도 숫자(sT·eT)로 비교한다.
+   실측 40,000행·6주기 247ms → 1.5ms. 결과가 옛 판정과 동일함은 test_period.js가 고정한다.
+   ⚠️ _t가 없는 행(캐시 밖에서 만든 임시 객체 등)도 안전하게 돌아야 하므로 없으면 그 자리에서 채운다. */
+const rowTime = r => r._t != null ? r._t : (r._t = parseDate(r.date).getTime());
+const inPeriodRow = (r,p) => { const t=rowTime(r); return t>=p.sT && t<=p.eT; };
+// 로드 직후 한 번에 심어둔다 — 나중에 하나씩 심으면 객체 모양이 중간에 바뀌어 오히려 느려진다
+const stampRows = rows => { for(let i=0;i<rows.length;i++) rowTime(rows[i]); return rows; };
 /* 최근 n주기로 행을 나눈다 (인덱스 n-1 = 이번 주기).
    ⚠️ 멤버마다 주기 시작일이 다르다(정우 25일 / 지현 21일). 한 사람 기준으로 잘라내면
    지현의 21~24일 거래가 엉뚱한 주기에 들어가, 같은 '이번 주기'인데 내역 탭과 분석·분류 탭의
@@ -1194,7 +1207,7 @@ function bucketByPeriod(rows, n, refMember){
   const out = Array.from({length:n}, () => []);
   rows.forEach(r => {
     const ps = psOf(r.member);
-    for(let i=0;i<n;i++){ if(inPeriod(r.date, ps[i])){ out[i].push(r); break; } }
+    for(let i=0;i<n;i++){ if(inPeriodRow(r, ps[i])){ out[i].push(r); break; } }
   });
   return out;
 }
@@ -1256,7 +1269,9 @@ function bootFromSnapshot(){
   if(!snap) return false;
   try{
     applyLoad(snap);
-    ROWS_PARTIAL = false;   // 스냅샷은 항상 전량이다 (saveSnapshot이 전량·무오류일 때만 저장한다)
+    // 보통은 전량이지만, 한도를 넘어 잘린 스냅샷이면 가드를 켠 채로 그린다
+    // (잘린 데이터로 계좌 잔액·연말정산을 계산하지 않게 — needsFullRows 참조)
+    ROWS_PARTIAL = snap.partial;
     applyDeviceDefaults();
     renderMemberSeg();
     render();
@@ -1405,10 +1420,19 @@ function saveSnapshot(res){
     // '사용자가 지운 설정'처럼 보이고, 그 위에 저장하면 원본을 진짜로 덮어쓴다
     if(!res || !res.mem || res.mem.error || !res.tx || res.tx.error) return false;
     if(res.lim.error || res.mst.error || res.cfg.error || res.mtm.error) return false;
-    const s = JSON.stringify({ v:SNAP_V, at:Date.now(),
-      mem:res.mem.data||[], tx:res.tx.data||[], lim:res.lim.data||[],
-      mst:res.mst.data||[], cfg:res.cfg.data||[], mtm:res.mtm.data||[] });
-    if(s.length > SNAP_MAX) return false;
+    const base = { v:SNAP_V, at:Date.now(), mem:res.mem.data||[], lim:res.lim.data||[],
+                   mst:res.mst.data||[], cfg:res.cfg.data||[], mtm:res.mtm.data||[] };
+    const all = res.tx.data||[];
+    let s = JSON.stringify({ ...base, tx:all, partial:false });
+    if(s.length > SNAP_MAX){
+      // ⚠️ 여기서 그냥 포기하면 **조용한 퇴화**가 된다 — 행이 늘어 한도를 넘는 날부터
+      // 첫 화면이 다시 2~3초로 돌아가는데 화면에도 로그에도 단서가 없다(≈9,400행 지점).
+      // 그래서 최근 창만이라도 남기고 partial 표시를 달아, 복원 쪽이 needsFullRows() 가드를
+      // 켠 채로 그리게 한다. 잘린 데이터로 잔액·공제액을 계산하는 일은 없다.
+      const cut = recentCutoff();
+      s = JSON.stringify({ ...base, tx: all.filter(r => r.date >= cut), partial:true });
+      if(s.length > SNAP_MAX) return false;   // 최근 45일조차 안 들어가면 그때는 포기
+    }
     localStorage.setItem(SNAP_KEY, s);
     return true;
   }catch(e){ return false; }   // QuotaExceeded·사생활 모드 등. 캐시는 편의지 정확성의 근거가 아니다
@@ -1420,7 +1444,9 @@ function readSnapshot(){
     const p = JSON.parse(s);
     if(!p || p.v !== SNAP_V || !Array.isArray(p.mem) || !Array.isArray(p.tx)) return null;
     const w = d => ({ data: Array.isArray(d) ? d : [], error: null });
-    return { mem:w(p.mem), tx:w(p.tx), lim:w(p.lim), mst:w(p.mst), cfg:w(p.cfg), mtm:w(p.mtm) };
+    // partial: 한도를 넘어 최근 창만 담긴 스냅샷. bootFromSnapshot이 이걸 보고 가드를 켠다
+    return { partial: !!p.partial,
+             mem:w(p.mem), tx:w(p.tx), lim:w(p.lim), mst:w(p.mst), cfg:w(p.cfg), mtm:w(p.mtm) };
   }catch(e){ return null; }
 }
 function clearSnapshot(){ try{ localStorage.removeItem(SNAP_KEY); }catch(e){} }
@@ -1449,7 +1475,9 @@ function applyLoad({mem, tx, lim, mst, cfg, mtm}){
   if(!MEMBERS.includes(tyMember))     tyMember     = defMember();
 
   if(tx.error) throw new Error(tx.error.message||"거래내역 로드 오류");
-  ROWS = tx.data||[];
+  // 날짜를 숫자로 한 번에 심어둔다 — 이후 모든 주기 판정이 파싱 없이 숫자 비교로 끝난다
+  // (40,000행에 27ms 드는 대신 집계가 247ms → 1.5ms. inPeriodRow 주석 참조)
+  ROWS = stampRows(tx.data||[]);
 
   // 아래 세 테이블은 실패해도 앱을 세우지 않고 폴백으로 넘어간다. 대신 무엇이 안 왔는지 배너로 알린다
   // — 폴백값(빈 한도·DEFAULT_CATS·기본 설정)이 '사용자가 지운 것'처럼 보이면 안 되므로.
@@ -1539,7 +1567,11 @@ async function loadAll(onPartial){
   const tx = await full;
   applyLoad({mem, tx, lim, mst, cfg, mtm});
   ROWS_PARTIAL = false;
-  saveSnapshot({mem, tx, lim, mst, cfg, mtm});
+  // ⚠️ 캐시 쓰기는 **화면을 그린 뒤** 한가할 때 한다. 여기서 동기로 하면 직렬화가
+  // 마지막 렌더 앞에 끼어든다 — 40,000행에서 72ms(폰 ~290ms)였다. 크리티컬 패스 밖으로.
+  // 못 쓰고 탭이 닫혀도 손해는 '다음 접속에 캐시가 없다'뿐이다
+  const idle = window.requestIdleCallback ? window.requestIdleCallback.bind(window) : (f=>setTimeout(f,0));
+  idle(() => saveSnapshot({mem, tx, lim, mst, cfg, mtm}));
 }
 
 /* 데이터 재로드 + 재렌더 — CRUD 후 공통 마무리 */
@@ -1833,9 +1865,9 @@ function setDeviceUser(name){
 function myRows(){ return memberFilter==="전체" ? ROWS : ROWS.filter(r=>r.member===memberFilter); }
 function scoped(){
   if(scope!=="current") return myRows();
-  if(memberFilter!=="전체"){ const p=viewedPeriod(memberFilter); return myRows().filter(r=>inPeriod(r.date,p)); }
+  if(memberFilter!=="전체"){ const p=viewedPeriod(memberFilter); return myRows().filter(r=>inPeriodRow(r,p)); }
   const pc={};  // 멤버별 주기 캐시 — 행마다 viewedPeriod(Date 2개 생성)를 재계산하지 않도록
-  return myRows().filter(r=>inPeriod(r.date, pc[r.member]||(pc[r.member]=viewedPeriod(r.member))));
+  return myRows().filter(r=>inPeriodRow(r, pc[r.member]||(pc[r.member]=viewedPeriod(r.member))));
 }
 
 /* ── 렌더 ── */
@@ -2107,7 +2139,7 @@ function viewLimit(){
   const cur=billingPeriod(limitMember);
   const memberLimits=LIMITS[limitMember]||{};
   const spent={};
-  ROWS.filter(r=>r.member===limitMember&&r.type==="지출"&&!isTransfer(r)&&inPeriod(r.date,cur))
+  ROWS.filter(r=>r.member===limitMember&&r.type==="지출"&&!isTransfer(r)&&inPeriodRow(r,cur))
       .forEach(r=>spent[r.category]=(spent[r.category]||0)+r.amount);
 
   // 한도 지정 대상 = catsOf(멤버) — master_data 카테고리 + 저장된 한도(레거시 보존)

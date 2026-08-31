@@ -188,6 +188,51 @@ function fnBody(s, anchor){
   C.env.localStorage.setItem("ourbudget.snapshot", "{깨진 JSON");
   ok("깨진 캐시는 null 로 떨어진다(예외 아님)", C.ev("readSnapshot()") === null);
 
+  // 2MB(SNAP_MAX)를 넘으면 '조용히 포기'가 아니라 최근분만이라도 남기고 partial 표시를 단다.
+  // 그냥 포기하면 그날부터 첫 화면이 다시 2~3초로 돌아가는데 화면엔 아무 단서가 없다.
+  {
+    const big = payload();
+    const fat = "긴".repeat(600);                       // 행당 ~1.8KB
+    const old = [];
+    for (let i = 0; i < 3500; i++)
+      old.push({ id:"o"+i, date:"2024-01-15", member:"정우", type:"지출", category:"식비",
+                 account:"국민", method:"신용", amount:1000, memo:fat });
+    const today = new Date();
+    const ds = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,"0")}-${String(today.getDate()).padStart(2,"0")}`;
+    const recent = [{ id:"n1", date:ds, member:"정우", type:"지출", category:"식비",
+                      account:"국민", method:"신용", amount:2000, memo:"최근" }];
+    big.tx = { data: old.concat(recent), error: null };
+
+    const F = load();
+    F.env.__T.p = big;
+    const saved = F.ev("saveSnapshot(__T.p)");
+    ok("2MB를 넘어도 저장을 포기하지 않는다", saved === true,
+       "조용히 캐시가 꺼져 첫 화면이 2~3초로 돌아간다");
+    const packed = JSON.parse(F.env.localStorage.getItem("ourbudget.snapshot") || "null");
+    ok("넘칠 땐 최근 창만 담는다", !!packed && packed.tx.length === 1 && packed.tx[0].id === "n1",
+       packed ? `담긴 행 ${packed.tx.length}건` : "저장 안 됨");
+    ok("잘렸다는 표시가 붙는다", !!packed && packed.partial === true);
+
+    // 복원 쪽은 그 표시를 보고 가드를 켜야 한다 — 안 켜면 반쪽 데이터로 잔액·공제액이 나간다
+    const G = load();
+    G.env.localStorage.setItem("ourbudget.snapshot", JSON.stringify(packed));
+    G.env.localStorage.setItem("ourbudget.auth", "{}");
+    ok("readSnapshot 이 partial 을 돌려준다", G.ev("readSnapshot().partial") === true);
+    G.ev("bootFromSnapshot()");
+    ok("잘린 캐시로 부팅하면 ROWS_PARTIAL 이 켜진다", G.ev("ROWS_PARTIAL") === true,
+       "가드가 꺼진 채로 계좌·연말정산이 반쪽 데이터로 계산된다");
+
+    const H = load();
+    H.env.__T.p = payload();
+    H.ev("saveSnapshot(__T.p)");
+    const full = H.env.localStorage.getItem("ourbudget.snapshot");
+    const I = load();
+    I.env.localStorage.setItem("ourbudget.snapshot", full);
+    I.env.localStorage.setItem("ourbudget.auth", "{}");
+    I.ev("bootFromSnapshot()");
+    ok("온전한 캐시로 부팅하면 ROWS_PARTIAL 이 꺼진다", I.ev("ROWS_PARTIAL") === false);
+  }
+
   const D = load();
   D.ev("clearSnapshot()");
   ok("clearSnapshot 이 예외 없이 돈다", true);
