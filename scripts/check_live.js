@@ -37,7 +37,9 @@ const sha = b => crypto.createHash("sha256").update(b).digest("hex").slice(0,16)
   const body = live.buf.toString("utf8");
   for(const [name, s] of [
     ["로그인 오버레이",   'id="authOv"'],
-    ["세션 유지 설정",     'storageKey:"ourbudget.auth"'],
+    // storageKey는 AUTH_KEY 상수를 쓴다(스냅샷 캐시가 같은 키를 읽어야 해서 한 벌로 묶었다).
+    // 값 자체가 바뀌면 가족 전체가 재로그인이므로 상수 정의를 마커로 삼는다
+    ["세션 유지 설정",     'AUTH_KEY        = "ourbudget.auth"'],
     ["비밀번호 변경",      'openPwChange()'],
     ["로그아웃",           'doLogout()'],
   ]) say(body.includes(s), `배포본에 ${name}`);
