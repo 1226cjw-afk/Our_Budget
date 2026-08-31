@@ -82,6 +82,11 @@ const MOCK = `
     var b = {
       select:function(){return b;}, order:function(){return b;}, eq:function(){return b;},
       in:function(){return b;}, range:function(){return b;}, limit:function(){return b;},
+      // 1차 로드가 최근 RECENT_DAYS일만 받아오는 데 쓴다. 실제로 걸러야 ROWS_PARTIAL 경로가
+      // 목에서도 '부분 데이터'가 된다 — 전량을 돌려주면 그 경로를 검증하지 못한다.
+      // ⚠️ 앱이 새 필터 메서드를 쓰기 시작하면 여기에도 추가할 것. 없으면 TypeError로
+      //    앱 전체가 죽고, 목을 쓰는 검사들이 "JSON parse 실패"라는 엉뚱한 오류로 떨어진다
+      gte:function(col,val){ payload = payload.filter(function(r){ return String(r[col]) >= String(val); }); return b; },
       then:function(res){ res({data:payload, error:null, count:payload.length}); return Promise.resolve(); }
     };
     return b;

@@ -999,6 +999,11 @@ const MASTER_KEYS  = {categories:"카테고리", methods:"결제수단", account
 const MASTER_TYPE  = {categories:"category", methods:"method", accounts:"account"};  // JS key → DB type
 const MASTER_KEY_OF= {category:"categories", method:"methods", account:"accounts"};   // DB type → JS key
 const DEVICE_USER_KEY = "ourbudget.deviceUser";  // localStorage: 이 기기의 기본 사용자
+const AUTH_KEY        = "ourbudget.auth";     // localStorage: supabase-js 세션. createClient의 storageKey와 반드시 같을 것
+const SNAP_KEY        = "ourbudget.snapshot"; // localStorage: 마지막 성공 로드 스냅샷 (첫 화면 즉시 렌더용)
+const SNAP_V          = 1;                    // 스냅샷 스키마 버전 — 담는 모양을 바꾸면 올릴 것(옛 캐시가 폐기된다)
+const SNAP_MAX        = 2 * 1024 * 1024;      // 이보다 크면 저장 포기 (localStorage 5MB 한도 보호)
+const RECENT_DAYS     = 45;                   // 1차 로드 창 — 결제 주기 최대 31일 + 여유라 이번 주기는 항상 덮인다
 // 구글 시트 백업 (Apps Script 웹앱). URL 비우면 백업 비활성.
 const GAS_BACKUP_URL    = "https://script.google.com/macros/s/AKfycbweq9PLy5VDBa68VN-76aWL8wUW6nvLZOlVaktn5oZE-HMkwg_iuXNGP6dBfcqjH56G/exec";  // Apps Script 웹앱
 const GAS_BACKUP_SECRET = "ourbudget-backup-2026";  // GAS 코드의 SECRET과 동일하게
@@ -1048,6 +1053,9 @@ const TABS = [
 let sb;
 let MEMBERS       = [];     // DB에서 동적 로드
 let ROWS          = [];
+// ROWS가 최근 RECENT_DAYS일치뿐인 상태(1차 로드). 창 밖 숫자를 그리면 '그럴듯하게 적은' 값이
+// 조용히 나가므로 needsFullRows()가 해당 화면을 막는다 — 이 플래그를 지우지 말 것
+let ROWS_PARTIAL  = false;
 let LIMITS        = {};     // {멤버: {카테고리: 금액}}
 let MASTER        = {};     // {멤버: {categories, methods, accounts}}
 let BILLING_STARTS = {};    // {멤버: 시작일} — app_settings에서 로드
@@ -1213,32 +1221,63 @@ document.addEventListener("DOMContentLoaded", async () => {
     buildNav(); render(); return;
   }
   sb = supabase.createClient(SUPABASE_URL, SUPABASE_ANON, {
-    auth:{ persistSession:true, autoRefreshToken:true, storageKey:"ourbudget.auth" }
+    auth:{ persistSession:true, autoRefreshToken:true, storageKey:AUTH_KEY }
   });
   try { DEVICE_USER = localStorage.getItem(DEVICE_USER_KEY) || null; } catch(e){ DEVICE_USER = null; }
   buildNav();
   // 세션 만료·비밀번호 변경 시 로그인 화면으로 되돌린다.
   // 이게 없으면 빨간 '데이터 연결 오류' 카드가 떠서 원인을 오도한다(RLS 문제로 오인)
-  sb.auth.onAuthStateChange(ev => { if(ev==="SIGNED_OUT") showAuth(); });
+  sb.auth.onAuthStateChange(ev => { if(ev==="SIGNED_OUT"){ clearSnapshot(); showAuth(); } });
+  // 저장된 세션이 있으면 지난 화면을 **먼저** 그린다. getSession()은 액세스 토큰이 만료됐으면
+  // 갱신 왕복을 await 하고(토큰 수명 1시간 → 하루 만에 여는 경우 거의 항상), 그 뒤에 6쿼리가 있다.
+  // 그 2~3초 동안 스피너만 돌던 것을 없앤다 — 유효성은 바로 아래에서 확인하고, 아니면 화면을 비운다
+  if(hasStoredSession()) bootFromSnapshot();
   const { data:{ session } } = await sb.auth.getSession();
-  if(!session){ showAuth(); return; }   // 로그인 전엔 loadAll을 호출하지 않는다
+  if(!session){ clearSnapshot(); showAuth(); return; }   // 로그인 전엔 loadAll을 호출하지 않는다
   await startApp();
 });
+
+// 기기 사용자 보정 + 필터 기본값. 캐시 렌더·1차 렌더·2차 렌더가 모두 거치는데
+// memberFilter는 **한 번만** 덮는다 — 그새 사용자가 필터를 바꿨으면 그걸 존중해야 한다
+let _defaultsApplied = false;
+function applyDeviceDefaults(){
+  // 기기 사용자가 멤버에 없으면(삭제·개명) 무효화
+  if(DEVICE_USER && !MEMBERS.includes(DEVICE_USER)){ DEVICE_USER=null; try{localStorage.removeItem(DEVICE_USER_KEY);}catch(e){} }
+  if(_defaultsApplied) return;
+  _defaultsApplied = true;
+  // 기기 사용자가 정해져 있으면 각 필터의 기본값을 그 사람으로
+  if(DEVICE_USER) memberFilter = DEVICE_USER;
+}
+
+// 저장된 스냅샷으로 첫 화면을 즉시 그린다 — 세션 '유효성' 확인 전이다.
+// ⚠️ 저장된 세션이 있을 때만 부를 것. 로그아웃 상태에서 금액이 보이면 안 된다
+function bootFromSnapshot(){
+  const snap = readSnapshot();
+  if(!snap) return false;
+  try{
+    applyLoad(snap);
+    ROWS_PARTIAL = false;   // 스냅샷은 항상 전량이다 (saveSnapshot이 전량·무오류일 때만 저장한다)
+    applyDeviceDefaults();
+    renderMemberSeg();
+    render();
+    return true;
+  }catch(e){ clearSnapshot(); return false; }   // 모양이 안 맞는 옛 캐시
+}
 
 // 세션이 확보된 뒤의 시작 절차 — 기존 onload 후반부 그대로
 async function startApp(){
   hideAuth();
-  try { await loadAll(); }
+  // 1차(최근 45일)가 오면 바로 그리고, 전량이 오면 아래에서 한 번 더 그린다
+  try { await loadAll(()=>{ applyDeviceDefaults(); renderMemberSeg(); renderKeepScroll(); }); }
   catch(e) {
-    if(isAuthErr(e)){ showAuth(); return; }   // 인증 문제면 에러 카드가 아니라 로그인 화면
+    // 인증 문제면 에러 카드가 아니라 로그인 화면. 캐시도 지운다 — 남겨두면 다음 접속에
+    // 로그인 못 하는 상태로 금액만 다시 뜬다
+    if(isAuthErr(e)){ clearSnapshot(); showAuth(); return; }
     loadError=e.message; console.error("초기화 오류:",e);
   }
-  // 기기 사용자가 멤버에 없으면(삭제·개명) 무효화
-  if(DEVICE_USER && !MEMBERS.includes(DEVICE_USER)){ DEVICE_USER=null; try{localStorage.removeItem(DEVICE_USER_KEY);}catch(e){} }
-  // 기기 사용자가 정해져 있으면 각 필터의 기본값을 그 사람으로
-  if(DEVICE_USER) memberFilter = DEVICE_USER;
+  applyDeviceDefaults();
   renderMemberSeg();
-  render();
+  renderKeepScroll();
   // 최초 1회: 이 기기의 사용자를 아직 안 정했으면 선택 모달
   if(!DEVICE_USER && MEMBERS.length && !loadError) openDeviceUser();
   // 화면이 다 그려진 뒤 한가할 때 chart.js를 미리 받아둔다 — 분석 탭 첫 진입에서 기다리지 않도록.
@@ -1287,6 +1326,7 @@ async function doLogin(ev){
 }
 async function doLogout(){
   if(!confirm("로그아웃할까요?\n다시 보려면 비밀번호를 입력해야 해요.")) return;
+  clearSnapshot();     // 캐시를 남기면 로그아웃 후 다음 접속에 금액이 다시 뜬다
   await sb.auth.signOut();
   location.reload();   // 전역 상태를 확실히 비운다
 }
@@ -1353,17 +1393,51 @@ async function fetchTransactions(){
   const seen = new Set();
   return {data: data.filter(r => !seen.has(r.id) && seen.add(r.id)), error:null, count:total};
 }
-async function loadAll(){
+/* ── 스냅샷 캐시 ──
+   첫 화면을 DB 왕복 '앞에' 그리기 위한 것. 접속 때마다 getSession()의 토큰 갱신 왕복 +
+   6쿼리를 기다리느라 스피너가 2~3초 돌던 것을 없앤다(2026-09-01).
+   ⚠️ 캐시에 담는 것은 '파생된 전역'이 아니라 **쿼리 6종의 원본 응답**이다.
+   복원도 applyLoad를 그대로 타므로 파생 로직이 한 벌이고, 캐시 화면과 DB 화면이 어긋날 수 없다.
+   전역을 직렬화하면 파생이 두 벌이 되어 한쪽만 고칠 때 조용히 갈린다 — 되돌리지 말 것. */
+function saveSnapshot(res){
+  try{
+    // 하나라도 폴백으로 떨어진 응답은 저장하지 않는다 — 다음 접속에서 그 폴백이
+    // '사용자가 지운 설정'처럼 보이고, 그 위에 저장하면 원본을 진짜로 덮어쓴다
+    if(!res || !res.mem || res.mem.error || !res.tx || res.tx.error) return false;
+    if(res.lim.error || res.mst.error || res.cfg.error || res.mtm.error) return false;
+    const s = JSON.stringify({ v:SNAP_V, at:Date.now(),
+      mem:res.mem.data||[], tx:res.tx.data||[], lim:res.lim.data||[],
+      mst:res.mst.data||[], cfg:res.cfg.data||[], mtm:res.mtm.data||[] });
+    if(s.length > SNAP_MAX) return false;
+    localStorage.setItem(SNAP_KEY, s);
+    return true;
+  }catch(e){ return false; }   // QuotaExceeded·사생활 모드 등. 캐시는 편의지 정확성의 근거가 아니다
+}
+function readSnapshot(){
+  try{
+    const s = localStorage.getItem(SNAP_KEY);
+    if(!s) return null;
+    const p = JSON.parse(s);
+    if(!p || p.v !== SNAP_V || !Array.isArray(p.mem) || !Array.isArray(p.tx)) return null;
+    const w = d => ({ data: Array.isArray(d) ? d : [], error: null });
+    return { mem:w(p.mem), tx:w(p.tx), lim:w(p.lim), mst:w(p.mst), cfg:w(p.cfg), mtm:w(p.mtm) };
+  }catch(e){ return null; }
+}
+function clearSnapshot(){ try{ localStorage.removeItem(SNAP_KEY); }catch(e){} }
+// 세션 '유효성'이 아니라 '존재'만 본다 — 유효성은 getSession()이 뒤에서 확인하고,
+// 실패하면 화면을 비우고 캐시를 지운다(showAuth 경로)
+const hasStoredSession = () => { try{ return !!localStorage.getItem(AUTH_KEY); }catch(e){ return false; } };
+
+// 1차 로드가 받아올 창의 시작일. 로컬 날짜로 만든다 — toISOString은 UTC라 하루 어긋난다
+function recentCutoff(){
+  const d = new Date(); d.setDate(d.getDate() - RECENT_DAYS);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+}
+
+// 응답 6종 → 전역. 순수 변환이라 DB에서 왔든 캐시에서 왔든 같은 결과가 나온다
+function applyLoad({mem, tx, lim, mst, cfg, mtm}){
   loadError = null;
   loadWarn  = [];
-  const [mem, tx, lim, mst, cfg, mtm] = await Promise.all([
-    sb.from("members").select("name").order("id"),
-    fetchTransactions(),
-    sb.from("category_limits").select("*"),
-    sb.from("master_data").select("*"),
-    sb.from("app_settings").select("*"),
-    sb.from("tax_map").select("*")
-  ]);
 
   if(mem.error) throw new Error("멤버 로드 오류: "+mem.error.message);
   MEMBERS = (mem.data||[]).map(m=>m.name);
@@ -1434,6 +1508,38 @@ async function loadAll(){
 
   // (옛 rebuildCatOrder 는 사라졌다 — 색 배정이 로케일 정렬 인덱스가 아니라
   //  viewAnalysis 의 지출 상위 5 슬롯으로 바뀌었다. setCatSlots 참조)
+}
+
+/* 로드 — 첫 렌더를 '전체 히스토리'에서 떼어낸다.
+   작은 표 5개 + 최근 RECENT_DAYS일 거래가 오면 1차 렌더(onPartial), 전량이 오면 2차 렌더.
+   ⚠️ 7개를 **한꺼번에** 던진다. 1차를 기다렸다 2차를 시작하면 싱가포르 왕복이 직렬로 쌓인다.
+   ⚠️ 1차 렌더 동안 ROWS는 45일치뿐이다 — 창 밖 숫자를 그리지 않게 needsFullRows()가 막는다.
+   onPartial을 안 주면(CRUD 후 reloadAndRender·retryLoad) 전량만 기다렸다 한 번에 끝난다. */
+async function loadAll(onPartial){
+  const small = Promise.all([
+    sb.from("members").select("name").order("id"),
+    sb.from("category_limits").select("*"),
+    sb.from("master_data").select("*"),
+    sb.from("app_settings").select("*"),
+    sb.from("tax_map").select("*")
+  ]);
+  const recent = sb.from("transactions").select("*")
+                   .gte("date", recentCutoff()).order("date",{ascending:false}).order("id");
+  const full = fetchTransactions();
+  full.catch(()=>{});   // 전량이 1차보다 먼저 실패해도 unhandled rejection이 되지 않게
+
+  const [[mem, lim, mst, cfg, mtm], rec] = await Promise.all([small, recent]);
+  // 1차: 최근분으로 먼저 그린다. 실패하면 조용히 건너뛰고 전량을 기다린다(판정은 2차가 한다)
+  if(onPartial && !mem.error && !rec.error){
+    ROWS_PARTIAL = true;
+    applyLoad({mem, tx:rec, lim, mst, cfg, mtm});
+    onPartial();
+  }
+  // 2차: 전량. applyLoad가 던지면 ROWS_PARTIAL을 내리지 않는다(부분인 채로 '전량'이라 표시하면 안 됨)
+  const tx = await full;
+  applyLoad({mem, tx, lim, mst, cfg, mtm});
+  ROWS_PARTIAL = false;
+  saveSnapshot({mem, tx, lim, mst, cfg, mtm});
 }
 
 /* 데이터 재로드 + 재렌더 — CRUD 후 공통 마무리 */
@@ -1734,6 +1840,26 @@ function scoped(){
 
 /* ── 렌더 ── */
 let _renderSeq = 0;   // 지연 로드된 chart.js가 도착했을 때 "아직 같은 화면인가"를 판정 (drawWhenChartReady)
+// 최근 RECENT_DAYS일 창 밖의 데이터가 있어야 답이 맞는 화면들.
+// ⚠️ 여기서 하나 빠지면 그 화면이 반쪽 데이터로 계산돼 조용히 틀린다 — 새 화면을 만들면 같이 볼 것.
+//   · 분석: 최근 AN_PERIODS주기(최대 6개월) + 연말정산은 역년(1/1~) 전체
+//   · 계좌: 전기간 잔액 — 45일 전 입금 한 건이 빠지면 잔액이 통째로 틀어진다
+//   · 내역 '전체' 범위 / 지난 주기 탐색(periodOffset<0)
+function needsFullRows(){
+  if(periodOffset < 0) return true;
+  if(tab === "analysis" || tab === "acct") return true;
+  if(tab === "list" && scope === "all") return true;
+  return false;
+}
+
+// 재렌더가 스크롤을 위로 튕기지 않게 한다. 캐시 화면·1차 화면을 보며 스크롤한 뒤에
+// 최신 데이터가 도착해 다시 그리는 것이 이제 정상 경로라 필요하다
+function renderKeepScroll(){
+  const y = window.scrollY;
+  render();
+  if(y) window.scrollTo(0, y);
+}
+
 function render(){
   _renderSeq++;
   destroyCharts();  // 분석 탭을 떠날 때 detached 캔버스를 잡고 있는 Chart 인스턴스 해제
@@ -1755,6 +1881,15 @@ function render(){
       </div>
       <button onclick="retryLoad()" style="margin-top:14px;padding:10px 20px;background:var(--fill);color:var(--ink);border:1px solid var(--line-2);border-radius:11px;font-weight:700;font-size:.84rem">다시 시도</button>
     </div></div>`;
+    return;
+  }
+  // 1차 로드(최근 45일)만 들어온 상태에서 창 밖 데이터가 필요한 화면이면 숫자를 그리지 않는다.
+  // 반쪽 데이터로 계산된 잔액·연말정산 공제액은 오류도 배너도 없이 '그냥 좀 적은 숫자'로 보여서
+  // 사용자가 틀린 줄 모른다 — 이 앱에서 가장 위험한 실패 방식이다
+  if(ROWS_PARTIAL && needsFullRows()){
+    m.innerHTML = warnBanner() + `<div class="sec" style="text-align:center">
+      <div class="spin"></div>
+      <div style="color:var(--ink-3);font-size:.78rem;margin-top:10px">전체 내역을 불러오는 중…</div></div>`;
     return;
   }
   // 캔버스를 그리는 탭이 있어 innerHTML 주입과 draw를 분리한다 (배너를 앞에 붙이려면 한 곳에서 써야 함)

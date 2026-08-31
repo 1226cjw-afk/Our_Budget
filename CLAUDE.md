@@ -78,6 +78,7 @@ Our_Budget/
 │   ├── shot_theme.js    #   라이트/다크 × 9화면 렌더 캡처 + 대비 실측 (가짜 DB, 실서비스 안 건드림)
 │   ├── lib_mock.js      #   위 두 스크립트가 공유하는 가짜 supabase 클라이언트 + 합성 데이터
 │   ├── test_date_field.js # 날짜 필드(투명 네이티브 입력 + 직접 그린 표시) 기능 검증
+│   ├── test_boot_cache.js # 스냅샷 캐시 + 부분 로드 가드 (브라우저 불필요, ~1초)
 │   └── poll_deploy.js   #   배포 반영 폴링
 ├── docs/superpowers/    # 스펙·플랜 (배포 안 됨)
 ├── backup_appscript.gs  # 구글 시트 백업용 GAS 코드 (참고용, 배포는 Apps Script에 수동 반영)
@@ -165,11 +166,19 @@ CSS · JS 모두 `public/index.html` 안에 인라인. 외부 의존성:
 >   "처음엔 느리고 새로고침하면 빠르다"의 절반이 이것 — 나머지 절반은 HTML·CDN·폰트가 디스크 캐시에서 오는 것.
 >   ⚠️ 이걸 우회하려고 인라인 스크립트에서 직접 refresh를 치지 말 것 — Supabase는 **refresh token을 회전**시키므로
 >   supabase-js 바깥에서 갱신하고 저장 포맷을 어긋나게 쓰면 가족 전체가 로그아웃된다.
-> - 앱 HTML은 **한국 밖 PoP**에서 온다 — 2026-08-15엔 LAX(로스앤젤레스), 2026-08-30 재측정은 **MAA(첸나이)**로 바뀌어 있었다.
->   즉 **PoP는 고정이 아니다** — `curl -sI <배포URL> | grep -i cf-ray`의 접미사로 그때그때 확인할 것(콜드 TTFB 145~560ms).
->   HTML은 브로틀리로 63KB까지 줄어 있고(`content-encoding: br`) `cache-control: max-age=0, must-revalidate`라 매번 재검증 왕복이 있다.
->   Supabase는 ICN(서울, TTFB 100~350ms).
->   코드로 못 고치는 부분이라 기준선의 편차 원인으로만 기억할 것.
+> - ⚠️ **이 표는 인도에서 잰 값이다. 가족이 쓰는 한국 경로가 아니다**(2026-09-01 판명).
+>   `curl -s https://cloudflare.com/cdn-cgi/trace` → `loc=IN` / `colo=MAA`.
+>   예전엔 이 MAA·LAX를 "Cloudflare가 한국 밖 PoP로 보낸다"고 적어놨는데 **오독이었다** —
+>   PoP가 먼 게 아니라 **측정 PC가 인도**다(TCP 핸드셰이크 29ms로 확인. 한국→첸나이면 100ms 이상이어야 한다).
+>   **성능 결론을 내기 전에 `loc=`부터 확인할 것.** 여기서 좋게 나오는 구간이 가족에겐 가장 비쌀 수 있다.
+> - ⚠️ **Supabase 원본은 서울이 아니라 싱가포르(`ap-southeast-1`)다.**
+>   판정법: `nslookup db.hqyvkyflakhuvethrstw.supabase.co` → `2406:da18:…` 를
+>   AWS `ip-ranges.json`의 `ipv6_prefixes`와 대조. 옛 문서의 "ICN(서울)"은 **API 앞단 Cloudflare 엣지 코드**를
+>   Postgres 리전으로 오독한 것이다 — `cf-ray` 접미사는 리전이 아니다.
+>   인도→싱가포르는 가깝고 한국→싱가포르는 그 2배쯤이라, **DB 왕복이 가족 체감의 지배 항목**이다
+>   (2026-08-31 사용자 보고: 한국에서 2~3초).
+> - HTML은 브로틀리로 63KB까지 줄어 있고(`content-encoding: br`) `cache-control: max-age=0, must-revalidate`라 매번 재검증 왕복이 있다.
+>   PoP는 고정이 아니다 — `curl -sI <배포URL> | grep -i cf-ray`로 그때그때 확인(콜드 TTFB 145~560ms).
 >
 > 회귀 의심 시: 총 바이트가 1MB를 넘거나 DCL이 load에 가까워지면 폰트/시작점을 먼저 볼 것.
 > `measure_load.js`가 그 판정을 대신한다 — **시간이 아니라 구조를 검사**한다(총 바이트 1MB 미만 /
@@ -240,6 +249,7 @@ CSS · JS 모두 `public/index.html` 안에 인라인. 외부 의존성:
 FAMILY_EMAIL   // (상수) 가족 공용 계정 이메일. 비밀번호는 앱 어디에도 없다 — 사용자가 입력해 Supabase가 검증
 MEMBERS        // string[]  — DB에서 로드
 ROWS           // 거래내역 전체
+ROWS_PARTIAL   // ROWS가 최근 45일치뿐인 상태(1차 로드). needsFullRows()가 창 밖 화면을 막는다
 LIMITS         // { 멤버: { 카테고리: 금액 } }
 MASTER         // { 멤버: { categories, methods, accounts } }
 BILLING_STARTS // { 멤버: 시작일 } — app_settings에서 로드
@@ -279,8 +289,11 @@ memberVal    // 입력 시트의 '누가' 선택값
 Supabase Auth 공유 계정 1개. Worker 프록시도, 자체 인증 코드도 만들지 않았다 —
 `supabase-js`가 세션·토큰 갱신을, Supabase가 레이트리밋을 처리한다. `sb.from(...)` 호출부는 그대로다.
 
-- **시작 흐름**: `DOMContentLoaded` 핸들러가 `getSession()`으로 분기 → 세션 없으면 `showAuth()`하고 **끝**(`loadAll()`을 호출하지 않는다),
-  있으면 `startApp()`이 기존 초기화(로드·렌더·기기사용자 모달)를 그대로 수행
+- **시작 흐름**: `DOMContentLoaded` 핸들러가 **저장된 세션이 있으면 캐시부터 그리고**(`hasStoredSession()`→`bootFromSnapshot()`,
+  위 '첫 화면' 절), 그다음 `getSession()`으로 분기 → 세션 없으면 캐시를 지우고 `showAuth()`하고 **끝**
+  (`loadAll()`을 호출하지 않는다), 있으면 `startApp()`이 기존 초기화(로드·렌더·기기사용자 모달)를 그대로 수행
+  - ⚠️ 캐시 렌더는 **세션 '존재'만 보고** 그린다(유효성은 그 뒤 `getSession()`이 확인). 로그아웃 상태에선 안 그린다 —
+    `check_authgate.js`가 `if(hasStoredSession()) bootFromSnapshot()` 형태를 강제한다
   - ⚠️ **`window.onload`로 되돌리지 말 것**(2026-08-15). `load`는 폰트·이미지까지 다 기다리므로 첫 DB 요청이
     폰트 다운로드 뒤에 줄을 선다 — 실측으로 앱 시작이 데스크톱 **+817ms**, 4G **+3,164ms** 늦었다.
     `check_authgate.js`가 `window.onload =` 대입을 금지 항목으로 잡는다(주석 속 언급은 오탐이라 `=`까지 봐야 한다)
@@ -293,6 +306,38 @@ Supabase Auth 공유 계정 1개. Worker 프록시도, 자체 인증 코드도 �
   세션만으로 바꾸게 두면 폰을 주운 사람이 비밀번호를 바꿔 **가족 전체를 잠가버린다** — 데이터 열람보다 나쁜 결과다. 이 확인을 제거하지 말 것
 - 숨김 username input은 `display:none`이 아니라 화면 밖으로 보낸다 — `display:none`이면 비밀번호 관리자가 폼을 인식하지 못한다
 - 배선 검증: `node scripts/check_authgate.js` (소스에 조각이 실제로 들어갔는지 정규식 대조)
+
+### 첫 화면 — 스냅샷 캐시 + 2단 로드 (2026-09-01)
+
+**왜**: 폰트·chart.js 최적화는 전부 *정적 자산* 구간이었다. 정작 사용자가 기다리는 건
+`getSession()`(만료 시 갱신 왕복) → 6쿼리 → 렌더이고, 그게 한국에서 2~3초였다.
+FCP만 1,000ms→114ms로 당겨진 탓에 **스피너를 더 오래 쳐다보게 돼 "개선했는데 더 느려졌다"**는 보고가 나왔다.
+
+- **스냅샷 캐시**: 마지막 성공 로드를 `localStorage["ourbudget.snapshot"]`에 저장.
+  다음 접속 때 `hasStoredSession()`이면 `bootFromSnapshot()`으로 **`getSession()` 앞에서** 즉시 렌더.
+  실측 2,045ms → **32ms**(느린 DB 흉내: 세션 1,200ms + 쿼리 800ms).
+  - ⚠️ **캐시에 담는 건 '파생된 전역'이 아니라 쿼리 6종의 원본 응답이다.** 복원도 `applyLoad`를 그대로 타므로
+    파생이 한 벌이고 캐시 화면과 DB 화면이 어긋날 수 없다. 전역을 직렬화하면 파생이 두 벌이 된다 — 되돌리지 말 것.
+  - ⚠️ **`bootFromSnapshot()`을 `await getSession()` 뒤로 옮기지 말 것.** 앱은 멀쩡히 동작하는데
+    효과만 사라진다(화면으로는 안 보이는 회귀) — `test_boot_cache.js`가 소스 순서로 잡는다.
+  - ⚠️ 캐시를 지우는 자리 **4곳**: `SIGNED_OUT` · `if(!session)` · `startApp`의 `isAuthErr` · `doLogout`(signOut 전).
+    하나만 빠져도 로그아웃·세션만료 뒤에 금액이 다시 뜬다. `check_authgate.js`가 4곳을 각각 검사한다.
+  - 폴백이 섞인 응답(6종 중 하나라도 error)은 **저장하지 않는다** — 다음 접속에 폴백이 '사용자가 지운 설정'처럼 보인다.
+  - 재방문 시 갱신 전까지 **지난 화면(최대 몇 초 전)**이 보인다. 신선한 데이터가 도착하면 제자리에서 바뀐다.
+
+- **2단 로드**: `loadAll(onPartial)`이 작은 표 5개 + **최근 45일** + **전량**을 한꺼번에 던지고,
+  최근분이 오면 1차 렌더(`ROWS_PARTIAL=true`), 전량이 오면 2차 렌더.
+  `onPartial` 없이 부르면(CRUD 후 `reloadAndRender`·`retryLoad`·`refreshData`) 전량만 기다린다 — 기존 동작 그대로.
+  - 45일인 이유: 결제 주기 최대 31일 + 여유 → **이번 주기는 시작일과 무관하게 항상 덮인다**.
+  - ⚠️ **`ROWS_PARTIAL` 동안 창 밖 숫자를 그리면 안 된다.** `needsFullRows()`가 막는 화면:
+    **분석**(최근 N주기·연말정산 역년) · **계좌**(전기간 잔액) · **내역 '전체'** · **`periodOffset<0`**.
+    여기서 하나 빠지면 반쪽 데이터로 계산된 값이 오류도 배너도 없이 '그냥 좀 적은 숫자'로 나간다 —
+    이 앱에서 가장 위험한 실패 방식이다. **새 화면을 만들면 이 목록을 같이 볼 것.**
+  - 오늘 기준 이득은 작다(614행 중 최근 45일이 ~200행). 이 구조의 값은 **히스토리가 늘어도 첫 화면이 안 느려지는 것**이다.
+
+- ⚠️ `scripts/lib_mock.js`의 가짜 빌더에 **`gte`가 있어야 한다**. 앱이 새 필터 메서드를 쓰기 시작했는데
+  목에 없으면 TypeError로 앱이 통째로 죽고, 목을 쓰는 검사들이 "JSON parse 실패" 같은 **엉뚱한 오류**로 떨어진다
+  (2026-09-01에 `test_date_field.js`가 실제로 그렇게 깨졌다).
 
 ### 결제 주기
 멤버별 시작일 설정 (`BILLING_STARTS`, 기본 매월 25일~익월 24일). `billingPeriod(member, ref)`가 해당 멤버 주기 계산 — 종료일은 '다음 시작일 하루 전'으로 산출 (시작일=1이면 같은 달 말일. 과거엔 1일 설정 시 두 달짜리 주기가 되던 버그 → 2026-07 수정, 회귀 금지).
@@ -315,7 +360,12 @@ Supabase Auth 공유 계정 1개. Worker 프록시도, 자체 인증 코드도 �
 | `doLogin(ev) / doLogout()` | 공용 계정 로그인 / 로그아웃(`signOut` 후 `location.reload()`로 전역 상태를 확실히 비움) |
 | `openPwChange() / doPwChange(ev)` | 설정 탭 비밀번호 변경. **현재 비밀번호를 재확인한 뒤** `updateUser` (위 '로그인 게이트' 절의 이유) |
 | `isAuthErr(e)` | 인증 실패를 일반 로드 오류와 구분 (`401`·`JWT`·`PGRST301`·`Invalid Refresh Token`) — 화면 분기의 기준 |
-| `loadAll()` | members·transactions·category_limits·master_data·app_settings 병렬 로드 |
+| `loadAll(onPartial?)` | 작은 표 5개 + **최근 45일 거래** + **전량 거래**를 한꺼번에 발사. `onPartial`을 주면 최근분이 오는 즉시 1차 렌더(`ROWS_PARTIAL=true`)하고 전량이 오면 2차 렌더 + 스냅샷 저장. 안 주면 전량만 기다린다(CRUD·↻·재시도 경로). ⚠️1차를 `await`한 뒤 2차를 시작하지 말 것 — 싱가포르 왕복이 직렬로 쌓인다 |
+| `applyLoad(res)` | 응답 6종 → 전역(MEMBERS·ROWS·LIMITS·MASTER·MTMAP·CTMAP·BILLING_STARTS…). **순수 변환**이라 DB에서 왔든 캐시에서 왔든 결과가 같다 — 캐시 복원이 이 함수를 그대로 타는 것이 스냅샷 설계의 핵심 |
+| `saveSnapshot/readSnapshot/clearSnapshot` | 원본 응답 6종을 `localStorage`에 저장·복원·삭제. 폴백이 섞였거나 2MB 초과면 저장 안 함. 버전(`SNAP_V`) 불일치·깨진 JSON은 `null`로 떨어진다(예외 아님) |
+| `hasStoredSession() / bootFromSnapshot()` | 저장된 세션 '존재' 확인 / 캐시로 첫 화면 즉시 렌더. ⚠️`await getSession()` **앞에서** 불러야 의미가 있다 |
+| `needsFullRows()` | `ROWS_PARTIAL`일 때 그리면 안 되는 화면 판정 — 분석·계좌·내역'전체'·`periodOffset<0`. ⚠️새 화면 추가 시 같이 볼 것 |
+| `renderKeepScroll() / applyDeviceDefaults()` | 스크롤 유지 재렌더(캐시→최신 교체가 정상 경로라 필요) / 기기사용자 보정 + 필터 기본값(`memberFilter`는 **한 번만** 덮는다) |
 | `fetchTransactions()` | 거래 전량 수신 — `count:"exact"`의 전체 행 수와 실수신 건수를 대조해 모자라면 `.range()`로 이어 받는다. PostgREST `max-rows` 상한에 걸리면 **에러 없이 잘려** 모든 집계가 조용히 틀어지므로 (515행/2026-08-15 기준 미도달, 실측 712건/년 페이스 → 1,000행 돌파는 2027년 중). ⚠️**남은 페이지는 `Promise.all`로 한 번에** — 첫 응답의 `count`로 개수를 이미 알므로 순차 `await`로 왕복을 쌓지 말 것(옛 방식은 1,000행마다 왕복 1회 직렬, 10,000행이면 +9회). ⚠️`.range`는 오프셋 기반이라 받는 도중 다른 기기가 입력하면 경계에서 행이 겹친다 → **id로 중복 제거**(1건만 겹쳐도 집계가 조용히 부푼다) |
 | `warnBanner()` | 부분 로드 실패(`loadWarn`) 배너 — `render()`가 모든 탭 본문 앞에 붙임 |
 | `orphanTransfers() / orphanBanner()` | 짝 없는 계좌간 이동 leg 탐지 / 계좌 탭 경고 배너. 짝 판정 기준은 **`delEntry`의 mate 탐색과 동일하게 유지**(같은 멤버·날짜·금액의 반대 type) |
@@ -540,6 +590,8 @@ node scripts/check_live.js                              # 반영 확인 (배포�
 node scripts/check_theme.js                             # 디자인 계약 (토큰·금지패턴·고아클래스·차트규칙)
 node scripts/measure_load.js                            # 로딩 '구조' 회귀 검사 (렌더·폰트·<head>를 건드렸다면)
 node scripts/test_lazy_chart.js                         # 차트 지연 로드 배선 (브라우저 불필요, 1초)
+node scripts/test_boot_cache.js                         # 스냅샷 캐시·부분 로드 가드 (첫 화면을 건드렸다면)
+node scripts/check_authgate.js                          # 로그인 게이트 + 캐시 삭제 4지점
 node scripts/shot_theme.js                              # 라이트/다크 실렌더 + 대비 실측 (눈으로 볼 PNG를 남긴다)
 node scripts/test_date_field.js                         # 날짜 필드 (입력 시트를 건드렸다면)
 node scripts/measure_timeline.js --4g                   # 어디서 시간이 가는지 구간 분해 (성능 얘기는 이걸로)
