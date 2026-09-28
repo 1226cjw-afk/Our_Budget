@@ -2141,6 +2141,17 @@ function limitUsage(rows){
     m[r.category]=(m[r.category]||0)+(r.type==="입금"?-r.amount:r.amount); });
   return m;
 }
+/* 분석 탭용 순액 분리 — 카테고리별 (지출 − 입금)이 양수면 지출, 음수면 수입으로 보낸다.
+   생활비·데이트는 지출의 40% 안팎이 정산 입금으로 돌아오는데(2026-09 실데이터), 총액으로 그리면
+   실제 부담보다 크게 보이고 그 입금이 '수입'으로 부풀었다. 경조사처럼 받은 게 더 많은 달은 수입 쪽에 남는다.
+   ⚠️ expTot − incTot 은 총액 방식(expOf/incOf)과 같다 — 상쇄분만 양쪽에서 빠지므로 순수익은 변하지 않는다 */
+function netSplit(rows){
+  const exp={}, inc={}; let expTot=0, incTot=0;
+  Object.entries(limitUsage(rows)).forEach(([c,v])=>{
+    if(v>0){ exp[c]=v; expTot+=v; } else if(v<0){ inc[c]=-v; incTot+=-v; }
+  });
+  return {exp, inc, expTot, incTot};
+}
 
 /* ── 한도 탭 (멤버별) ── */
 function viewLimit(){
@@ -2223,21 +2234,20 @@ function viewAnalysis(){
   const rowsByPeriod = bucketByPeriod(mine, AN_PERIODS, _anMem);
   const labels = periods.map(p => p.label.split(" ")[0]);
 
-  // 주기별 수입·지출 합계
-  const period = rowsByPeriod.map(rs => ({inc:incOf(rs), exp:expOf(rs)}));
+  // 주기별 순액 — 이 탭의 모든 지출·수입 숫자는 여기서 나온다(카테고리별 지출−입금, 위 netSplit 주석)
+  const nets = rowsByPeriod.map(netSplit);
+  const period = nets.map(n => ({inc:n.incTot, exp:n.expTot}));
   const incomeByPeriod = period.map(d=>d.inc);
 
   // 최근(현재) 주기 카테고리별 지출 (도넛)
-  const curRows = rowsByPeriod[rowsByPeriod.length-1] || [];
-  const curCat = {};
-  curRows.filter(r=>r.type!=="입금"&&!isTransfer(r)).forEach(r => curCat[r.category]=(curCat[r.category]||0)+r.amount);
+  const curCat = (nets[nets.length-1] || {exp:{}}).exp;
   const curCatArr = Object.entries(curCat).sort((a,b)=>b[1]-a[1]);   // [[cat,amt], ...]
   const totExp = curCatArr.reduce((s,[,a])=>s+a,0);
 
   // 카테고리 × 주기 지출 매트릭스 → 스택 막대용 (전체합 상위 6 + 나머지 '기타')
   const catByPeriod = {};
-  rowsByPeriod.forEach((rs,pi)=>rs.filter(r=>r.type!=="입금"&&!isTransfer(r))
-    .forEach(r=>{(catByPeriod[r.category]=catByPeriod[r.category]||Array(periods.length).fill(0))[pi]+=r.amount;}));
+  nets.forEach((n,pi)=>Object.entries(n.exp)
+    .forEach(([c,a])=>{(catByPeriod[c]=catByPeriod[c]||Array(periods.length).fill(0))[pi]+=a;}));
   const catTotals = Object.entries(catByPeriod).map(([c,a])=>[c,a.reduce((s,x)=>s+x,0)]).sort((a,b)=>b[1]-a[1]);
   // ⚠️ 상한은 6이다(검증된 슬롯 전부). '기타'는 슬롯이 아니라 무채색이라 7번째 색이 아니다. 안전한 색이 6개뿐이라 이걸 넘기면 색이 순환한다.
   //    도넛·스택막대·추이라인이 '같은' 상위 6을 쓰고 같은 슬롯 색을 받는다 —
@@ -2259,7 +2269,7 @@ function viewAnalysis(){
   const donutArr = donutEtc>0 ? [...donutTop,[ETC_CAT,donutEtc]] : donutTop;
 
   // 카테고리별 추이 (라인) — 같은 5개
-  const trend = topCats.map(c => ({cat:c, data: rowsByPeriod.map(rs => expOf(rs.filter(r=>r.category===c)))}));
+  const trend = topCats.map(c => ({cat:c, data: nets.map(n => n.exp[c]||0)}));
 
   _anStash = {labels, period, incomeByPeriod, stackSeries, donut:donutArr, totExp, trend};
 
@@ -2294,7 +2304,8 @@ function viewAnalysis(){
     <div class="am"><div class="am-l">이번 주기 지출</div><div class="am-v r">${won(last)}</div>${prev?`<div class="am-sub">${trChip(trPct)} <span style="color:var(--ink-3)">전 주기</span></div>`:`<div class="am-sub" style="color:var(--ink-3)">기록 시작</div>`}</div>
     <div class="am"><div class="am-l">이번 주기 수입</div><div class="am-v g">${won(lastInc)}</div><div class="am-sub" style="color:var(--ink-3)">순 ${net>=0?'+':'-'}${wonShort(Math.abs(net))}</div></div>
     <div class="am"><div class="am-l">평균 대비</div><div class="am-v ${avgPct>0?'r':avgPct<0?'g':''}">${avgPct>=0?'+':''}${avgPct}%</div><div class="am-sub" style="color:var(--ink-3)">평균 ${wonShort(avg)}</div></div>
-  </div>`;
+  </div>
+  <div style="font-size:.7rem;color:var(--ink-3);margin:-4px 0 12px">같은 카테고리의 환불·정산 입금은 지출에서 차감해 계산해요</div>`;
 
   // 2) 주기별 지출 구성 — 카테고리 스택 막대 + 수입 막대 (한눈에 주기별 카테고리 지출/수입)
   if(catTotals.length || incomeByPeriod.some(v=>v>0)){
@@ -2368,10 +2379,10 @@ function buildInsights(mem, periods, rowsByPeriod, curCatArr, totExp){
     b: nears.map(o=>`'${o.c}' ${o.pct}%`).join(" · ")+" — 한도까지 여유가 얼마 없어요."});
 
   // 3) 평소보다 급증한 카테고리 (이전 주기 평균 대비)
-  const prevRows=rowsByPeriod.slice(0,-1).flat();
+  //    비교 대상(curCatArr)이 순액이므로 평소 값도 주기별 순액으로 — 한쪽만 총액이면 정산 입금만큼 '급증'이 가려진다
   const prevCnt=Math.max(periods.length-1,1);
   const prevAvg={};
-  prevRows.filter(r=>r.type!=="입금"&&!isTransfer(r)).forEach(r=>prevAvg[r.category]=(prevAvg[r.category]||0)+r.amount);
+  rowsByPeriod.slice(0,-1).forEach(rs=>Object.entries(netSplit(rs).exp).forEach(([c,a])=>prevAvg[c]=(prevAvg[c]||0)+a));
   Object.keys(prevAvg).forEach(c=>prevAvg[c]/=prevCnt);
   let surge=null;
   curCatArr.forEach(([c,a])=>{

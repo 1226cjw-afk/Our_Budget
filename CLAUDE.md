@@ -80,6 +80,7 @@ Our_Budget/
 │   ├── test_date_field.js # 날짜 필드(투명 네이티브 입력 + 직접 그린 표시) 기능 검증
 │   ├── test_boot_cache.js # 스냅샷 캐시 + 부분 로드 가드 (브라우저 불필요, ~1초)
 │   ├── test_period.js   #   주기 판정 불변식 (멤버별 시작일·타임스탬프 판정 동치)
+│   ├── test_net.js      #   순액 집계(한도 limitUsage · 분석 netSplit) 계약 — 순수익 불변식
 │   ├── perf_logic.js    #   계산 성능 — 행 수를 늘려가며 집계·렌더 비용과 '차수'를 잰다
 │   └── poll_deploy.js   #   배포 반영 폴링
 ├── docs/superpowers/    # 스펙·플랜 (배포 안 됨)
@@ -441,6 +442,7 @@ FCP만 1,000ms→114ms로 당겨진 탓에 **스피너를 더 오래 쳐다보�
 | `setCatSlots(ranked) / catColor(c) / ETC_CAT` | 카테고리 색 배정 — 지출 상위 **6개에만** 슬롯 `--s1`…`--s6`을 주고 나머지는 `기타`(무채색 `--ink-3`)로 접는다. ⚠️**`CAT_PALETTE[i % n]` 순환으로 되돌리지 말 것**: 라이트·다크 양쪽에서 색각이상 분리도를 통과하는 색은 6개뿐이라 순환시키면 같은 차트에 같은 색이 두 번 나온다. ⚠️이름해시·'처음 등장 순서'도 금지(옛 회귀 2건) |
 | `tyColor(kind)` | 연말정산 3색(신용 `--s2` / 체크 `--s1` / 현금 `--s3`). ⚠️**`--s4`(노랑)를 쓰지 말 것** — `--s2`(주황)와 한 막대에 있으면 정상 시력으로도 구분이 안 된다(실측 ΔE 13.7 라이트 / 10.6 다크로 FAIL) |
 | `isTransfer(r)` | 계좌간 이동 거래 판별(`r.category===TRANSFER_CAT`) — 통계 제외 필터에 공통 사용 |
+| `limitUsage(rows) / netSplit(rows)` | 카테고리별 **순액(지출 − 입금)**. 한도 탭·분석 탭 '한도 초과/임박'은 부호 있는 `limitUsage`, 분석 탭 차트·요약·급증 진단은 `netSplit`(양수→지출, 음수→수입). 생활비·데이트는 지출의 40% 안팎이 같은 카테고리 정산 입금으로 돌아와서(2026-09 실데이터) 지출만 더하면 크게 부풀었다. ⚠️분석 탭에 `type!=="입금"` 필터로 카테고리 합을 다시 쓰지 말 것 — 차트끼리 숫자가 갈린다. 순수익(`incTot−expTot`)은 총액 방식과 같다(`test_net.js`가 고정). 분류 탭(`aggCat`)은 수입·지출을 따로 보여주는 화면이라 총액 유지, 연말정산은 입금이 환불인지 수입인지 앱이 모르므로 매핑에 맡긴다 |
 | `$(id) / parseDate(s) / todayStr() / amtVal(id)` | getElementById 축약 / 날짜 파싱(YYYY-MM-DD는 정오로 — 타임존 경계 안전) / 오늘 날짜 문자열 / 콤마 금액 input→숫자 |
 | `comma(n) / dbErr(res,pre?)` | 콤마 숫자 포맷 / Supabase 응답 에러 공통 처리(에러면 토스트 후 true — `if(dbErr(res))return;` 패턴) |
 | `pills(items,cur,fn) / segBtns(items,cur,fn)` | 필 바(.filter)·세그먼트(.seg) 버튼 공통 빌더 — items는 문자열 또는 [값,라벨] 쌍 배열, jsq/esc 내장 |
@@ -461,8 +463,8 @@ FCP만 1,000ms→114ms로 당겨진 탓에 **스피너를 더 오래 쳐다보�
 |----|------|
 | 내역 (list) | 날짜별 거래 목록, 주기(◀▶ 과거 주기 탐색)/멤버 필터 + 검색바(searchQ)·건수 표시. **'전체' 필은 점진 렌더링**(150행씩, 스크롤하면 이어짐) — 건수 라벨은 '그린 것'이 아니라 **걸린 것 전체**를 보여준다 |
 | 분류 (cat) | 카테고리별/결제수단별 집계(catBy 토글 필), 주기(◀▶)/멤버 필터, 카드 클릭 시 내역 드릴다운 |
-| 한도 (limit) | 멤버별 한도 설정 및 진행률 (warn 임계값=WARN_TH) + 상단 '전체 한도 요약' 카드 |
-| 분석 (analysis) | 상단 세그먼트 2개(`anView`) — **지출분석**: 최근 AN_PERIODS주기 차트·반복지출·요약 / **연말정산**: 아래 참조 |
+| 한도 (limit) | 멤버별 한도 설정 및 진행률 (warn 임계값=WARN_TH) + 상단 '전체 한도 요약' 카드. 사용액은 **지출 − 입금**(`limitUsage`) |
+| 분석 (analysis) | 상단 세그먼트 2개(`anView`) — **지출분석**: 최근 AN_PERIODS주기 차트·반복지출·요약, 금액은 카테고리 **순액**(`netSplit`) / **연말정산**: 아래 참조 |
 | 계좌 (acct) | 계좌별 잔액(이동 포함), 총수입·지출(이동 제외), 멤버 필터 |
 | 설정 (master) | 멤버·기기사용자(+비밀번호 변경·로그아웃)·앱설정(임계값·주기수)·CSV 내보내기·결제주기·카테고리(아이콘 포함)·결제수단·계좌 관리 |
 
@@ -629,6 +631,7 @@ node scripts/measure_load.js                            # 로딩 '구조' 회귀
 node scripts/test_lazy_chart.js                         # 차트 지연 로드 배선 (브라우저 불필요, 1초)
 node scripts/test_boot_cache.js                         # 스냅샷 캐시·부분 로드 가드 (첫 화면을 건드렸다면)
 node scripts/test_period.js                             # 주기 판정 (집계·필터를 건드렸다면)
+node scripts/test_net.js                                # 순액 집계 (한도·분석 금액을 건드렸다면)
 node scripts/check_authgate.js                          # 로그인 게이트 + 캐시 삭제 4지점
 node scripts/shot_theme.js                              # 라이트/다크 실렌더 + 대비 실측 (눈으로 볼 PNG를 남긴다)
 node scripts/test_date_field.js                         # 날짜 필드 (입력 시트를 건드렸다면)
