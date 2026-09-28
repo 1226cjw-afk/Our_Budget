@@ -54,6 +54,17 @@ const { ev, env } = load();
 // 실제 상태: 멤버마다 시작일이 다르다 (정우 25일 / 지현 21일)
 ev(`MEMBERS = ["정우","지현"]; BILLING_STARTS = {"정우":25,"지현":21}; memberFilter="전체"`);
 
+// 경계 날짜는 **오늘 기준 각자의 이번 주기 시작일**에서 뽑는다.
+// ⚠️ 고정 날짜(2026-08-25 등)로 되돌리지 말 것 — '이번 주기'는 오늘로 계산되므로 달이 바뀌는 순간
+//    행이 전부 창 밖으로 나가 4건 FAIL 한다(2026-09-28 실제 발생: 9/1에 쓴 테스트가 한 달 뒤 깨졌다).
+const D = ev(`(function(){
+  periodOffset = 0;
+  var iso = function(d){ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0"); };
+  var shift = function(d,n){ var x = new Date(d); x.setDate(x.getDate()+n); return iso(x); };
+  var sJ = viewedPeriod("정우").start, sH = viewedPeriod("지현").start;
+  return { j1: iso(sJ), j2: shift(sJ,-1), jIn: shift(sJ,1), h1: iso(sH), h2: shift(sH,-1) };
+})()`);
+
 // ── 1. 타임스탬프 판정이 문자열 판정과 같은가 ──────────────
 // 경계(시작일 당일·전날·종료일·종료 다음날)와 월말·연말을 포함한 날짜 매트릭스
 {
@@ -88,9 +99,9 @@ ev(`MEMBERS = ["정우","지현"]; BILLING_STARTS = {"정우":25,"지현":21}; m
 {
   const same = ev(`(function(){
     var p = viewedPeriod("정우");
-    var a = {date:"2026-08-26"};                 // 심기 전
-    var b = {date:"2026-08-26"}; b._t = parseDate(b.date).getTime();
-    var c = {date:"2026-08-26", _t: null};       // 값이 비어 있는 경우
+    var a = {date:"${D.jIn}"};                   // 심기 전 (이번 주기 시작 다음날)
+    var b = {date:"${D.jIn}"}; b._t = parseDate(b.date).getTime();
+    var c = {date:"${D.jIn}", _t: null};         // 값이 비어 있는 경우
     return [inPeriodRow(a,p), inPeriodRow(b,p), inPeriodRow(c,p)].join(",");
   })()`);
   ok("_t 없음/있음/null 이 모두 같은 답", same === "true,true,true", same);
@@ -100,10 +111,10 @@ ev(`MEMBERS = ["정우","지현"]; BILLING_STARTS = {"정우":25,"지현":21}; m
 {
   // 각 멤버의 시작일 경계에 딱 걸리는 행들 — 여기가 옛 버그 자리다
   env.__T.rows = [
-    { id:"j1", member:"정우", date:"2026-08-25", type:"지출", category:"식비", amount:1000 },
-    { id:"j2", member:"정우", date:"2026-08-24", type:"지출", category:"식비", amount:1000 },
-    { id:"h1", member:"지현", date:"2026-08-21", type:"지출", category:"식비", amount:1000 },
-    { id:"h2", member:"지현", date:"2026-08-20", type:"지출", category:"식비", amount:1000 },
+    { id:"j1", member:"정우", date:D.j1, type:"지출", category:"식비", amount:1000 },   // 정우 시작일(25일)
+    { id:"j2", member:"정우", date:D.j2, type:"지출", category:"식비", amount:1000 },   // 그 하루 전
+    { id:"h1", member:"지현", date:D.h1, type:"지출", category:"식비", amount:1000 },   // 지현 시작일(21일)
+    { id:"h2", member:"지현", date:D.h2, type:"지출", category:"식비", amount:1000 },   // 그 하루 전
   ];
   ev(`ROWS = __T.rows; periodOffset = 0`);
 
@@ -113,7 +124,7 @@ ev(`MEMBERS = ["정우","지현"]; BILLING_STARTS = {"정우":25,"지현":21}; m
     return b[b.length-1].map(function(r){return r.id;}).sort().join(",");
   })()`);
   ok("이번 주기 버킷 = 각자 주기의 시작일 이후 행", cur === "h1,j1",
-     `받은 값: ${cur} (정우 8/25·지현 8/21이 이번 주기, 그 하루 전은 지난 주기여야 한다)`);
+     `받은 값: ${cur} (정우 ${D.j1}·지현 ${D.h1}이 이번 주기, 그 하루 전은 지난 주기여야 한다)`);
 
   const prev = ev(`(function(){
     var b = bucketByPeriod(ROWS, 3, "정우");
