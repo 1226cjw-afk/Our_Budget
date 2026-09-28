@@ -2133,33 +2133,40 @@ function viewCategory(){
   return h+`</div>`;
 }
 
+/* 한도 사용액 = 카테고리별 (지출 − 입금). 환불·캐시백·더치페이 정산 입금이 같은 카테고리의 지출을 상쇄한다.
+   계좌간 이동은 제외. 한도 탭과 분석 탭 '한도 초과/임박' 진단이 같은 기준을 쓰도록 여기 하나로 둔다 */
+function limitUsage(rows){
+  const m={};
+  rows.forEach(r=>{ if(isTransfer(r)) return;
+    m[r.category]=(m[r.category]||0)+(r.type==="입금"?-r.amount:r.amount); });
+  return m;
+}
+
 /* ── 한도 탭 (멤버별) ── */
 function viewLimit(){
   if(!limitMember) return `<div class="sec">${empty("👥","설정에서 멤버를 추가해주세요.")}</div>`;
   const cur=billingPeriod(limitMember);
   const memberLimits=LIMITS[limitMember]||{};
-  const spent={};
-  ROWS.filter(r=>r.member===limitMember&&r.type==="지출"&&!isTransfer(r)&&inPeriodRow(r,cur))
-      .forEach(r=>spent[r.category]=(spent[r.category]||0)+r.amount);
+  const spent=limitUsage(ROWS.filter(r=>r.member===limitMember&&inPeriodRow(r,cur)));
 
   // 한도 지정 대상 = catsOf(멤버) — master_data 카테고리 + 저장된 한도(레거시 보존)
   // → '계좌간 이동'처럼 설정 카테고리에 없는 지출 항목은 한도 UI에 노출하지 않음
   const cats=catsOf(limitMember);
   const items=cats.map(cat=>{
     const limit=memberLimits[cat]||0, used=spent[cat]||0;
-    return {cat,limit,used,pct:limit?Math.round(used/limit*100):0};
+    return {cat,limit,used,pct:limit?Math.max(0,Math.round(used/limit*100)):0};
   }).sort((a,b)=>b.pct-a.pct);
   const over=items.filter(i=>i.limit&&i.pct>=100);
 
   let h=memberBar(limitMember,"setLimitMember")+`<div class="sec">`;
-  h+=`<div class="sec-t" style="padding-top:4px">${esc(limitMember)}의 이번 주기 한도 · ${cur.label}</div>`;
+  h+=`<div class="sec-t" style="padding-top:4px">${esc(limitMember)}의 이번 주기 한도 · ${cur.label} · 지출−입금 기준</div>`;
   if(over.length) h+=`<div class="alert">⚠️ <b>${over.map(o=>esc(o.cat)).join(", ")}</b> 한도 초과!</div>`;
 
   // 종합 요약 — 한도가 설정된 카테고리 전체의 사용률
   const withLim=items.filter(i=>i.limit>0);
   if(withLim.length){
     const tl=withLim.reduce((s,i)=>s+i.limit,0), tu=withLim.reduce((s,i)=>s+i.used,0);
-    const tp=tl?Math.round(tu/tl*100):0;
+    const tp=tl?Math.max(0,Math.round(tu/tl*100)):0;
     const st=tp>=100?"over":tp>=WARN_TH?"warn":"ok";
     h+=`<div class="lcard ${st}">
       <div class="l-h"><div class="c-l"><div class="c-ic">📦</div><div class="c-nm">전체 한도 요약</div></div><div class="l-pct ${st}">${tp}%</div></div>
@@ -2181,7 +2188,7 @@ function viewLimit(){
         if(state==="over") h+=`<div class="l-msg">${won(it.used-it.limit)} 초과</div>`;
         else if(state==="warn") h+=`<div class="l-msg warn">한도까지 ${won(it.limit-it.used)}</div>`;
       } else {
-        h+=`<div class="l-meta"><span>이번 주기 ${won(it.used)} 사용</span></div>`;
+        h+=`<div class="l-meta"><span>${it.used<0?`이번 주기 ${won(-it.used)} 순입금`:`이번 주기 ${won(it.used)} 사용`}</span></div>`;
       }
       h+=`<div class="l-edit"><input id="lim_${esc(limitMember)}_${esc(it.cat)}" inputmode="numeric" placeholder="월 한도 (비우면 삭제)" value="${it.limit?comma(it.limit):''}" oninput="fmtNum(this)"><button onclick="saveLimit('${jsq(limitMember)}','${jsq(it.cat)}')">저장</button></div>
       </div>`;
@@ -2336,7 +2343,6 @@ function viewAnalysis(){
 function buildInsights(mem, periods, rowsByPeriod, curCatArr, totExp){
   if(!totExp) return [{ic:"🌱",tone:"good",t:"이번 주기는 아직 지출이 없어요.",b:"지출이 쌓이면 카테고리별 과지출 진단과 절약 팁을 보여드릴게요."}];
   const out=[];
-  const curMap = Object.fromEntries(curCatArr);
 
   // 1) 최대 지출 카테고리 집중도
   const [topCat, topAmt]=curCatArr[0];
@@ -2350,9 +2356,10 @@ function buildInsights(mem, periods, rowsByPeriod, curCatArr, totExp){
   // 2) 한도 초과 / 임박 (멤버 한도 기준) — '전체' 필터에선 가족 합산 지출을 한 멤버 한도와
   //    비교하게 돼 거짓 경고가 뜨므로, 특정 멤버를 선택했을 때만 표시
   const lim=(memberFilter!=="전체"&&mem&&LIMITS[mem])||{};
+  const limUsed=limitUsage(rowsByPeriod[rowsByPeriod.length-1]||[]);   // 한도 탭과 같은 기준(지출−입금)
   const overs=[], nears=[];
   Object.entries(lim).forEach(([c,l])=>{
-    if(!l) return; const used=curMap[c]||0; const pct=Math.round(used/l*100);
+    if(!l) return; const used=limUsed[c]||0; const pct=Math.round(used/l*100);
     if(pct>=100) overs.push({c,used,l,pct}); else if(pct>=WARN_TH) nears.push({c,pct});
   });
   if(overs.length) out.push({ic:"🚨",tone:"warn",t:`한도 초과 ${overs.length}건`,
