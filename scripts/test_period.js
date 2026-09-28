@@ -68,16 +68,19 @@ const D = ev(`(function(){
 // ── 1. 타임스탬프 판정이 문자열 판정과 같은가 ──────────────
 // 경계(시작일 당일·전날·종료일·종료 다음날)와 월말·연말을 포함한 날짜 매트릭스
 {
-  const dates = [];
-  for (let m = 1; m <= 12; m++)
+  // 오늘 기준 앞뒤 12개월 — 2026년 고정이면 해가 바뀌는 순간 전 날짜가 6주기 창 밖이라
+  // 양쪽 다 false 로 '같음' 판정이 나서 이 검사가 **아무것도 안 보면서 통과**한다
+  const dates = [], now = new Date();
+  for (let k = -12; k <= 1; k++)
     for (const d of [1, 20, 21, 24, 25, 26, 28, 30, 31]) {
-      const dd = new Date(2026, m - 1, d);
-      if (dd.getMonth() !== m - 1) continue;         // 2/30 같은 없는 날 제외
-      dates.push(`2026-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`);
+      const y = new Date(now.getFullYear(), now.getMonth() + k, 1);
+      const dd = new Date(y.getFullYear(), y.getMonth(), d);
+      if (dd.getMonth() !== y.getMonth()) continue;   // 2/30 같은 없는 날 제외
+      dates.push(`${dd.getFullYear()}-${String(dd.getMonth()+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`);
     }
   env.__T.dates = dates;
   const same = ev(`(function(){
-    var bad = [];
+    var bad = [], hits = 0;
     ["정우","지현"].forEach(function(m){
       for (var off = 0; off > -6; off--) {
         periodOffset = off;
@@ -86,13 +89,17 @@ const D = ev(`(function(){
           var byString = inPeriod(ds, p);                       // 기존 판정(문자열 파싱)
           var byRow    = inPeriodRow({date: ds}, p);            // 새 판정(타임스탬프)
           if (byString !== byRow) bad.push(m + " " + ds + " off" + off);
+          if (byRow) hits++;
         });
       }
     });
     periodOffset = 0;
+    __T.hits = hits;
     return bad.length ? bad.slice(0,5).join(", ") : "";
   })()`);
-  ok("타임스탬프 판정 === 문자열 판정 (2멤버 × 6주기 × 104일)", same === "", same);
+  ok(`타임스탬프 판정 === 문자열 판정 (2멤버 × 6주기 × ${env.__T.dates.length}일)`, same === "", same);
+  // 참이 하나도 없으면 위 대조는 false===false 만 본 것이다 — 멤버 2 × 주기 6 × 경계일 여러 개가 걸려야 정상
+  ok("대조한 날짜가 실제로 주기 안에 걸린다", env.__T.hits >= 12, `주기 안 판정 ${env.__T.hits}건`);
 }
 
 // ── 2. _t가 심어져 있든 없든 같은 답 ────────────────────────

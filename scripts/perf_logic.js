@@ -78,7 +78,10 @@ const TRANSFER_CAT = "계좌간 이동";
 function makeRows(n){
   const rows = [];
   const months = Math.max(9, Math.round(n / 70));
-  const end = new Date(2026, 7, 28);
+  // ⚠️ 끝을 고정 날짜로 두지 말 것 — '이번 주기'는 오늘로 계산되므로, 데이터가 오늘 전에 끝나면
+  //    이번 주기 케이스(scoped·render·viewCategory)가 빈 창을 재서 **조용히 싸게** 나온다
+  //    (2026-09-28 발견: 8/28 고정이라 9/25~ 주기가 비어 있었다). 난수 시드는 그대로라 분포는 같다.
+  const t = new Date(), end = new Date(t.getFullYear(), t.getMonth(), t.getDate());
   const start = new Date(end.getFullYear(), end.getMonth() - months, 1);
   const span = end - start;
   let seed = 12345;
