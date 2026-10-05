@@ -319,7 +319,17 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .l-h{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:9px}
 .l-pct{font-size:.9375rem;font-weight:650;letter-spacing:-.02em}
 .l-pct.ok{color:var(--ink-2)}.l-pct.warn{color:var(--warn)}.l-pct.over{color:var(--exp)}
-.l-bar-w{height:5px;background:var(--fill-2);border-radius:3px;overflow:hidden;margin-bottom:7px}
+.lcard.link{cursor:pointer}
+/* 막대 + '오늘' 눈금. 눈금은 막대보다 위아래로 3px 길게 — overflow:hidden 인 막대 밖에 둔다 */
+.l-track{position:relative;margin-bottom:7px}
+.l-bar-w{height:5px;background:var(--fill-2);border-radius:3px;overflow:hidden}
+.l-pace{position:absolute;top:-3px;bottom:-3px;width:2px;margin-left:-1px;background:var(--ink);border-radius:1px}
+.l-cap{font-size:.7rem;color:var(--ink-3);line-height:1.6;padding:8px 0 4px}
+.l-tgl{margin-left:auto;font-size:.75rem;font-weight:550;color:var(--ink-3)}
+.lrow{display:flex;align-items:center;gap:10px;padding:11px 0;cursor:pointer}
+.lrow-w{border-bottom:1px solid var(--line)}
+.lrow-w .l-edit{margin:0 0 12px}
+.lrow-s{font-size:.75rem;color:var(--ink-3);white-space:nowrap}
 .l-bar{height:5px;border-radius:3px;transition:width .5s cubic-bezier(.4,0,.2,1)}
 .l-bar.ok{background:var(--ink-2)}
 .l-bar.warn{background:var(--warn)}
@@ -823,16 +833,19 @@ body.sheet-open{overflow:hidden}
    (-webkit-touch-callout 은 iOS WebKit 만 지원 — 흔한 iOS 판별 관용구). */
 @supports (-webkit-touch-callout:none){ .tym-sel,.m-item .tym-sel{font-size:16px} }
 
-/* ── 진입 모션 (한 번, staggered) ── */
+/* ── 진입 모션 (탭에 들어올 때 한 번, staggered) ──
+   ⚠️ #main.anim 일 때만 돈다 — render()가 탭(·세그먼트)이 바뀐 렌더에만 붙인다.
+   예전엔 모든 재렌더에서 돌아서, 앱을 열 때(캐시→최근→전량 3번 그림) 요약 카드가 세 번 깜빡였고
+   한도 행을 펼칠 때마다 화면 전체가 다시 떠올랐다. */
 @keyframes riseIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
-.panel,.cards .card,.astat .am,.acct-tot,.acct-grid .am,.m-section,.lcard{
+.anim .panel,.anim .cards .card,.anim .astat .am,.anim .acct-tot,.anim .acct-grid .am,.anim .m-section,.anim .lcard{
   animation:riseIn .3s cubic-bezier(.22,.61,.36,1) both}
-.panel:nth-child(2){animation-delay:.03s}.panel:nth-child(3){animation-delay:.06s}
-.panel:nth-child(4){animation-delay:.09s}.panel:nth-child(5){animation-delay:.12s}
-.panel:nth-child(6){animation-delay:.15s}.panel:nth-child(7){animation-delay:.18s}
-.astat .am:nth-child(2){animation-delay:.04s}.astat .am:nth-child(3){animation-delay:.08s}
+.anim .panel:nth-child(2){animation-delay:.03s}.anim .panel:nth-child(3){animation-delay:.06s}
+.anim .panel:nth-child(4){animation-delay:.09s}.anim .panel:nth-child(5){animation-delay:.12s}
+.anim .panel:nth-child(6){animation-delay:.15s}.anim .panel:nth-child(7){animation-delay:.18s}
+.anim .astat .am:nth-child(2){animation-delay:.04s}.anim .astat .am:nth-child(3){animation-delay:.08s}
 @media(prefers-reduced-motion:reduce){
-  .panel,.cards .card,.astat .am,.acct-tot,.acct-grid .am,.m-section,.lcard{animation:none}
+  .anim .panel,.anim .cards .card,.anim .astat .am,.anim .acct-tot,.anim .acct-grid .am,.anim .m-section,.anim .lcard{animation:none}
 }
 </style>
 </head>
@@ -1745,6 +1758,7 @@ async function saveLimit(member, cat){
   if(dbErr(res,"한도 저장 오류")) return;
   if(!LIMITS[member]) LIMITS[member]={};
   if(v>0) LIMITS[member][cat]=v; else delete LIMITS[member][cat];
+  limEdit=null;   // 저장했으면 입력칸을 접는다
   renderKeepScroll(); toast(v>0?"한도 저장":"한도 삭제");
   syncInBackground();
 }
@@ -1911,7 +1925,7 @@ function goTab(k){ tab=k; buildNav(); render(); }
 function setScope(s){ scope=s; render(); }
 function setMemberFilter(m){ memberFilter=m; render(); }
 function setCatBy(v){ catBy=v; render(); }
-function setLimitMember(m){ limitMember=m; render(); }
+function setLimitMember(m){ limitMember=m; limEdit=null; render(); }
 function setMasterMember(m){ masterMember=m; render(); }
 function setAnView(v){ anView=v; render(); }
 function setTyMember(m){ tyMember=m; render(); }
@@ -1946,6 +1960,7 @@ function scoped(){
 
 /* ── 렌더 ── */
 let _renderSeq = 0;   // 지연 로드된 chart.js가 도착했을 때 "아직 같은 화면인가"를 판정 (drawWhenChartReady)
+let _animView = null; // 마지막으로 진입 모션을 돌린 화면 — 같은 화면 재렌더엔 모션을 안 붙인다
 // 최근 RECENT_DAYS일 창 밖의 데이터가 있어야 답이 맞는 화면들.
 // ⚠️ 여기서 하나 빠지면 그 화면이 반쪽 데이터로 계산돼 조용히 틀린다 — 새 화면을 만들면 같이 볼 것.
 //   · 분석: 최근 AN_PERIODS주기(최대 6개월) + 연말정산은 역년(1/1~) 전체
@@ -2012,6 +2027,9 @@ function render(){
   }
   else if(tab==="acct")     body = viewAccount();
   else if(tab==="master")   body = viewMaster();
+  // 진입 모션은 탭(·분석 세그먼트)이 바뀐 렌더에서만 — 같은 화면을 다시 그릴 땐 깜빡이지 않게(CSS .anim 주석)
+  const view = tab + ":" + anView;
+  if(view !== _animView){ m.classList.add("anim"); _animView = view; } else m.classList.remove("anim");
   m.innerHTML = warnBanner() + body;   // 부분 로드 실패는 어느 탭에 있든 상단에 고정 노출
   if(after) after();
 }
@@ -2227,12 +2245,32 @@ function netSplit(rows){
   return {exp, inc, expTot, incTot};
 }
 
-/* ── 한도 탭 (멤버별) ── */
+/* ── 한도 탭 (멤버별) ──
+   ① 시간 축: 같은 97%라도 주기 3일째와 29일째는 뜻이 정반대다. 막대 위 세로선이 '오늘'(주기 경과율)이고,
+      주기 1/4이 지난 뒤엔 지금 속도로 주기 말을 어림해 한도를 넘을 것 같으면 미리 알린다.
+      ⚠️ 1/4 전엔 어림하지 않는다 — 첫날 3만원이면 '주기 말 90만원'이 나와 경고가 늘 뜬다.
+   ② 입력칸은 행을 탭할 때만 편다(limEdit). 예전엔 모든 카테고리에 입력칸+저장 버튼이 늘 떠서
+      화면의 절반이 입력칸이었다. 한도 없는 카테고리는 아래 '한도 미설정'에 한 줄씩 접는다. */
+let limEdit = null;   // 입력칸을 편 카테고리 (한 번에 하나)
+const PACE_MIN = .25;
+function toggleLimEdit(cat){
+  limEdit = limEdit===cat ? null : cat;
+  renderKeepScroll();
+  if(limEdit){ const el=$(`lim_${limitMember}_${limEdit}`); if(el) el.focus(); }
+}
+function limEditHtml(cat, limit){
+  // 입력·버튼 탭이 행의 토글로 번지지 않게 막는다
+  return `<div class="l-edit" onclick="event.stopPropagation()"><input id="lim_${esc(limitMember)}_${esc(cat)}" inputmode="numeric" placeholder="월 한도 (비우면 삭제)" value="${limit?comma(limit):''}" oninput="fmtNum(this)" onkeydown="if(event.key==='Enter')saveLimit('${jsq(limitMember)}','${jsq(cat)}')"><button onclick="saveLimit('${jsq(limitMember)}','${jsq(cat)}')">저장</button></div>`;
+}
+// 진행 바 + 오늘 눈금. pace = 주기 경과율(0~1)
+const limBar = (pct, st, pace) =>
+  `<div class="l-track"><div class="l-bar-w"><div class="l-bar ${st}" style="width:${Math.min(pct,100)}%"></div></div><div class="l-pace" style="left:${(pace*100).toFixed(1)}%"></div></div>`;
 function viewLimit(){
   if(!limitMember) return `<div class="sec">${empty("👥","설정에서 멤버를 추가해주세요.")}</div>`;
   const cur=billingPeriod(limitMember);
   const memberLimits=LIMITS[limitMember]||{};
   const spent=limitUsage(ROWS.filter(r=>r.member===limitMember&&inPeriodRow(r,cur)));
+  const prog=periodProgress(limitMember), pace=Math.min(1, prog.day/prog.len);
 
   // 한도 지정 대상 = catsOf(멤버) — master_data 카테고리 + 저장된 한도(레거시 보존)
   // → '계좌간 이동'처럼 설정 카테고리에 없는 지출 항목은 한도 UI에 노출하지 않음
@@ -2242,41 +2280,54 @@ function viewLimit(){
     return {cat,limit,used,pct:limit?Math.max(0,Math.round(used/limit*100)):0};
   }).sort((a,b)=>b.pct-a.pct);
   const over=items.filter(i=>i.limit&&i.pct>=100);
+  // 지금 속도로 주기 말 어림 — 한도 넘을 것 같으면 그 금액, 아니면 0
+  const proj = it => (pace>=PACE_MIN && it.used>0 && it.used/pace > it.limit) ? Math.round(it.used/pace/1000)*1000 : 0;
 
   let h=memberBar(limitMember,"setLimitMember")+`<div class="sec">`;
-  h+=`<div class="sec-t" style="padding-top:4px">${esc(limitMember)}의 이번 주기 한도 · ${cur.label} · 지출−입금 기준</div>`;
+  h+=`<div class="sec-t" style="padding-top:4px">${esc(limitMember)}의 이번 주기 한도 · ${cur.label}<span>${prog.day}/${prog.len}일째</span></div>`;
+  h+=`<div class="l-cap">막대 위 세로선이 오늘이에요 — 선보다 막대가 길면 주기 속도보다 빨리 쓰는 중. 금액은 지출−입금 기준</div>`;
   if(over.length) h+=`<div class="alert">⚠️ <b>${over.map(o=>esc(o.cat)).join(", ")}</b> 한도 초과!</div>`;
 
   // 종합 요약 — 한도가 설정된 카테고리 전체의 사용률
-  const withLim=items.filter(i=>i.limit>0);
+  const withLim=items.filter(i=>i.limit>0), noLim=items.filter(i=>!i.limit);
   if(withLim.length){
     const tl=withLim.reduce((s,i)=>s+i.limit,0), tu=withLim.reduce((s,i)=>s+i.used,0);
     const tp=tl?Math.max(0,Math.round(tu/tl*100)):0;
     const st=tp>=100?"over":tp>=WARN_TH?"warn":"ok";
     h+=`<div class="lcard ${st}">
       <div class="l-h"><div class="c-l"><div class="c-ic">📦</div><div class="c-nm">전체 한도 요약</div></div><div class="l-pct ${st}">${tp}%</div></div>
-      <div class="l-bar-w"><div class="l-bar ${st}" style="width:${Math.min(tp,100)}%"></div></div>
+      ${limBar(tp,st,pace)}
       <div class="l-meta"><span>${won(tu)}</span><span class="l-lim">/ ${won(tl)}</span><span style="margin-left:auto;font-size:.76rem;color:${tu<=tl?'var(--inc)':'var(--exp)'}">${tu<=tl?'남음 '+won(tl-tu):'초과 '+won(tu-tl)}</span></div>
     </div>`;
   }
 
   if(!items.length){
-    h+=empty("🎯","지출 내역이나 설정된 한도가 없어요.\n아래에서 한도를 직접 추가할 수 있어요.");
-  } else {
-    items.forEach(it=>{
-      const state=!it.limit?"ok":it.pct>=100?"over":it.pct>=WARN_TH?"warn":"ok";
-      h+=`<div class="lcard ${state}">
-        <div class="l-h"><div class="c-l"><div class="c-ic">${icon(it.cat)}</div><div class="c-nm">${esc(it.cat)}</div></div><div class="l-pct ${state}">${it.limit?it.pct+'%':'한도없음'}</div></div>`;
-      if(it.limit){
-        h+=`<div class="l-bar-w"><div class="l-bar ${state}" style="width:${Math.min(it.pct,100)}%"></div></div>
-          <div class="l-meta"><span>${won(it.used)}</span><span class="l-lim">/ ${won(it.limit)}</span></div>`;
-        if(state==="over") h+=`<div class="l-msg">${won(it.used-it.limit)} 초과</div>`;
-        else if(state==="warn") h+=`<div class="l-msg warn">한도까지 ${won(it.limit-it.used)}</div>`;
-      } else {
-        h+=`<div class="l-meta"><span>${it.used<0?`이번 주기 ${won(-it.used)} 순입금`:`이번 주기 ${won(it.used)} 사용`}</span></div>`;
-      }
-      h+=`<div class="l-edit"><input id="lim_${esc(limitMember)}_${esc(it.cat)}" inputmode="numeric" placeholder="월 한도 (비우면 삭제)" value="${it.limit?comma(it.limit):''}" oninput="fmtNum(this)"><button onclick="saveLimit('${jsq(limitMember)}','${jsq(it.cat)}')">저장</button></div>
-      </div>`;
+    h+=empty("🎯","설정된 카테고리가 없어요.\n설정 탭에서 카테고리를 먼저 추가해주세요.");
+    return h+`</div>`;
+  }
+  withLim.forEach(it=>{
+    const state=it.pct>=100?"over":it.pct>=WARN_TH?"warn":"ok";
+    const p=state==="ok"?proj(it):0;
+    const open=limEdit===it.cat;
+    h+=`<div class="lcard ${state} link" onclick="toggleLimEdit('${jsq(it.cat)}')">
+      <div class="l-h"><div class="c-l"><div class="c-ic">${icon(it.cat)}</div><div class="c-nm">${esc(it.cat)}</div></div><div class="l-pct ${state}">${it.pct}%</div></div>
+      ${limBar(it.pct,state,pace)}
+      <div class="l-meta"><span>${won(it.used)} <span class="l-lim">/ ${won(it.limit)}</span></span><span class="l-tgl">${open?'닫기':'변경'}</span></div>`;
+    if(state==="over") h+=`<div class="l-msg">${won(it.used-it.limit)} 초과</div>`;
+    else if(state==="warn") h+=`<div class="l-msg warn">한도까지 ${won(it.limit-it.used)}</div>`;
+    else if(p) h+=`<div class="l-msg warn">지금 속도면 주기 말 약 ${won(p)} — 한도를 넘을 수 있어요</div>`;
+    if(open) h+=limEditHtml(it.cat,it.limit);
+    h+=`</div>`;
+  });
+
+  if(noLim.length){
+    h+=`<div class="sec-t">한도 미설정<span>${noLim.length}개 · 탭해서 설정</span></div>`;
+    noLim.forEach(it=>{
+      const open=limEdit===it.cat;
+      h+=`<div class="lrow-w"><div class="lrow" onclick="toggleLimEdit('${jsq(it.cat)}')">
+        <div class="c-ic">${icon(it.cat)}</div><div class="c-nm">${esc(it.cat)}</div>
+        <span class="lrow-s">${it.used<0?`${won(-it.used)} 순입금`:it.used?`${won(it.used)} 사용`:''}</span>
+        <span class="l-tgl">${open?'닫기':'설정'}</span></div>${open?limEditHtml(it.cat,0):''}</div>`;
     });
   }
   return h+`</div>`;
