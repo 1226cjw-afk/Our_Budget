@@ -206,7 +206,7 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .search-inp{
   width:100%;padding:10px 38px 10px 13px;
   border:1px solid var(--line-2);border-radius:8px;
-  background:var(--bg);color:var(--ink);font-family:inherit;font-size:.875rem;
+  background:var(--bg);color:var(--ink);font-family:inherit;font-size:1rem;
   outline:none;transition:border-color .15s;
 }
 .search-inp::placeholder{color:var(--ink-3)}
@@ -331,7 +331,7 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .l-edit{margin-top:11px;display:flex;gap:8px}
 .l-edit input{
   flex:1;padding:9px 12px;border:1px solid var(--line-2);border-radius:8px;
-  background:var(--bg);color:var(--ink);font-family:inherit;font-size:.84rem;
+  background:var(--bg);color:var(--ink);font-family:inherit;font-size:1rem;
   outline:none;transition:border-color .15s;
 }
 .l-edit input:focus{border-color:var(--ink)}
@@ -489,10 +489,11 @@ body.sheet-open{overflow:hidden}
   letter-spacing:.01em;
   margin-bottom:7px;display:block;
 }
+.flb-hint{color:var(--ink-2);font-weight:500}
 .inp{
   width:100%;padding:12px 14px;
   border:1px solid var(--line-2);border-radius:8px;
-  font-size:.9375rem;font-family:inherit;color:var(--ink);
+  font-size:1rem;font-family:inherit;color:var(--ink);
   background:var(--bg);outline:none;appearance:none;
   transition:border-color .15s,box-shadow .15s;
 }
@@ -589,7 +590,7 @@ body.sheet-open{overflow:hidden}
 .m-add{display:flex;gap:8px;padding-bottom:4px}
 .m-add input{
   flex:1;padding:10px 12px;border:1px solid var(--line-2);border-radius:8px;
-  background:var(--bg);color:var(--ink);font-family:inherit;font-size:.85rem;
+  background:var(--bg);color:var(--ink);font-family:inherit;font-size:1rem;
   outline:none;transition:border-color .15s;
 }
 .m-add input:focus{border-color:var(--ink)}
@@ -620,7 +621,7 @@ body.sheet-open{overflow:hidden}
 .set-in{
   width:62px;text-align:center;padding:9px 6px;
   border:1px solid var(--line-2);border-radius:8px;
-  background:var(--bg);color:var(--ink);font-family:inherit;font-size:.85rem;outline:none;
+  background:var(--bg);color:var(--ink);font-family:inherit;font-size:1rem;outline:none;
 }
 .set-in:focus{border-color:var(--ink)}
 /* 이모지 선택 그리드 (아이콘 피커) */
@@ -723,7 +724,7 @@ body.sheet-open{overflow:hidden}
 .auth-d{font-size:.8125rem;color:var(--ink-2);line-height:1.65;margin-bottom:18px}
 .auth-pw{
   width:100%;padding:12px 14px;background:var(--bg);border:1px solid var(--line-2);
-  border-radius:8px;color:var(--ink);font-size:.95rem;text-align:center;font-family:inherit;outline:none;
+  border-radius:8px;color:var(--ink);font-size:1rem;text-align:center;font-family:inherit;outline:none;
 }
 .auth-pw:focus{border-color:var(--ink)}
 .auth-msg{min-height:18px;margin-top:9px;font-size:.78rem;color:var(--exp)}
@@ -816,6 +817,11 @@ body.sheet-open{overflow:hidden}
 .tym-grp{font-size:.75rem;font-weight:600;color:var(--warn);padding:14px 0 4px;border-top:1px solid var(--line);margin-top:6px}
 /* 설정 탭 마스터 행에 붙는 구분 셀렉트 (연말정산 매핑과 동일한 값) */
 .m-item .tym-sel{padding:6px 7px;font-size:.72rem}
+/* ⚠️ 입력칸 글자는 16px 이상 — iOS 사파리는 그보다 작은 칸에 포커스하면 화면을 확대하고
+   되돌리지 않는다(금액·메모·검색·한도가 전부 14~15px였다). 위 입력칸들은 전부 1rem 이다.
+   매핑 셀렉트만 좁은 행에 있어 데스크톱·안드로이드에선 작게 두고 iOS 에서만 키운다
+   (-webkit-touch-callout 은 iOS WebKit 만 지원 — 흔한 iOS 판별 관용구). */
+@supports (-webkit-touch-callout:none){ .tym-sel,.m-item .tym-sel{font-size:16px} }
 
 /* ── 진입 모션 (한 번, staggered) ── */
 @keyframes riseIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
@@ -967,7 +973,7 @@ body.sheet-open{overflow:hidden}
         </button>
         <select id="fMethod" style="display:none"></select>
       </div>
-      <div class="frow" id="rowAccount"><label class="flb">계좌</label>
+      <div class="frow" id="rowAccount"><label class="flb">계좌<span class="flb-hint" id="fAccountHint" style="display:none"> · 이 카테고리에 자주 쓴 계좌</span></label>
         <button type="button" class="sel-btn" onclick="openPicker('fAccount','계좌')">
           <span id="fAccountDisp">계좌 선택</span><span class="sel-arr"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg></span>
         </button>
@@ -3235,12 +3241,55 @@ function viewMaster(){
 }
 
 /* ── 입력 시트 ── */
+/* 입력 습관 — 피커를 '자주 쓰는 순'으로, 계좌는 카테고리별 단골로 미리 고른다.
+   실데이터(2026-10, 639건): 카테고리별 최빈 계좌가 실제 계좌와 일치 84.5%,
+   멤버별 상위 5개 카테고리가 전체의 91.2%. 매 입력마다 피커 2개를 여는 게 기본이었다.
+   최근 RECENT_HABIT건만 본다 — 전 기간이면 바꾼 카드·계좌가 오래 상위에 남는다. */
+const RECENT_HABIT = 200;
+function habitRows(m){
+  const out=[];
+  for(const r of ROWS){            // ROWS는 날짜 내림차순 → 앞에서부터가 최근
+    if(r.member!==m || isTransfer(r)) continue;
+    out.push(r); if(out.length>=RECENT_HABIT) break;
+  }
+  return out;
+}
+// 목록을 사용 횟수 내림차순으로 — 동률이면 설정 순서 유지(안정 정렬)
+function byUse(list, rows, field){
+  const n={}; rows.forEach(r=>{ const v=r[field]; if(v) n[v]=(n[v]||0)+1; });
+  return list.map((v,i)=>[v,i]).sort((a,b)=>(n[b[0]]||0)-(n[a[0]]||0) || a[1]-b[1]).map(x=>x[0]);
+}
+// 최빈값 — 동률이면 먼저(=더 최근에) 그 횟수에 닿은 쪽
+function modeOf(rows, field){
+  const c={}; let best=null, bn=0;
+  rows.forEach(r=>{ const v=r[field]; if(!v) return; c[v]=(c[v]||0)+1; if(c[v]>bn){ bn=c[v]; best=v; } });
+  return best;
+}
+// 그 카테고리에서 가장 많이 쓴 계좌, 없으면 그 멤버가 가장 많이 쓴 계좌
+function topAccountFor(m, cat){
+  const rs=habitRows(m);
+  return modeOf(rs.filter(r=>r.category===cat), "account") || modeOf(rs, "account");
+}
+/* 계좌 자동 선택. ⚠️ 사용자가 계좌를 직접 고른 뒤엔(acctAuto=false) 카테고리를 바꿔도 덮지 않는다.
+   ⚠️ 설정에서 지운 계좌는 되살리지 않는다 — 옵션에 있을 때만 고른다(수정 시트의 ensureOpt와 다르다).
+   자동으로 골랐다는 걸 라벨 옆에 밝힌다 — 틀린 계좌가 조용히 저장되면 잔액이 틀어진다. */
+let acctAuto = false;
+function autoAccount(){
+  const sel=$("fAccount"), a=topAccountFor(memberVal, $("fCategory").value);
+  const has = !!a && [...sel.options].some(o=>o.value===a);
+  sel.value = has ? a : "";
+  acctAuto = has;
+  updateSelBtn("fAccount");
+  showAcctHint();
+}
+function showAcctHint(){ const h=$("fAccountHint"); if(h) h.style.display = acctAuto ? "" : "none"; }
 function refreshCatList(){
   const mdata=MASTER[memberVal]||{categories:[...DEFAULT_CATS],methods:[],accounts:[]};
   const opt=v=>`<option value="${esc(v)}">${esc(v)}</option>`;
-  $("fCategory").innerHTML=catsOf(memberVal).map(opt).join("");
-  $("fMethod").innerHTML=`<option value="">선택 안함</option>`+mdata.methods.map(opt).join("");
-  const acctOpts=`<option value="">계좌 선택</option>`+mdata.accounts.map(opt).join("");
+  const hr=habitRows(memberVal);
+  $("fCategory").innerHTML=byUse(catsOf(memberVal),hr,"category").map(opt).join("");
+  $("fMethod").innerHTML=`<option value="">선택 안함</option>`+byUse(mdata.methods,hr,"method").map(opt).join("");
+  const acctOpts=`<option value="">계좌 선택</option>`+byUse(mdata.accounts,hr,"account").map(opt).join("");
   $("fAccount").innerHTML=acctOpts;
   $("fFromAccount").innerHTML=acctOpts;
   $("fToAccount").innerHTML=acctOpts;
@@ -3249,7 +3298,7 @@ function refreshCatList(){
 function renderMemberSeg(){
   $("memberSeg").innerHTML=segBtns(MEMBERS, memberVal, "setMember");
 }
-function setMember(m){ memberVal=m; renderMemberSeg(); refreshCatList(); }
+function setMember(m){ memberVal=m; renderMemberSeg(); refreshCatList(); autoAccount(); }
 function setType(t){
   typeVal=t;
   $("tgExp").className="tg"+(t==="지출"?" tg-e":"");
@@ -3275,7 +3324,11 @@ function openSheet(){
   memberVal=memberVal||defMember();
   renderMemberSeg();
   refreshCatList();
+  autoAccount();
   showSheet();
+  // 금액부터 친다 — 시트를 열고 금액 칸을 한 번 더 누르던 탭을 없앤다.
+  // 탭 핸들러 안에서 동기로 불러야 iOS가 키보드를 띄운다(setTimeout으로 미루면 무시된다)
+  $("fAmount").focus();
 }
 function editEntry(id){
   // id로 ROWS에서 조회 — 행 JSON을 onclick 속성에 인라인하면 메모의 따옴표에 깨짐
@@ -3295,6 +3348,7 @@ function editEntry(id){
   ensureOpt("fCategory",r.category);
   ensureOpt("fMethod",r.method);
   ensureOpt("fAccount",r.account);
+  acctAuto=false; showAcctHint();   // 수정은 저장된 계좌 그대로 — 자동 선택 아님
   updateSelBtn("fCategory"); updateSelBtn("fMethod"); updateSelBtn("fAccount");
   $("fMemo").value=r.memo||"";
   showSheet();
@@ -3341,6 +3395,8 @@ function pickOptIdx(idx){
   const sel = $(pickerSel);
   sel.selectedIndex = idx;
   updateSelBtn(pickerSel);
+  if(pickerSel==="fAccount"){ acctAuto=false; showAcctHint(); }          // 사용자가 직접 골랐다 — 이후 덮지 않는다
+  else if(pickerSel==="fCategory" && !editId && (acctAuto || !$("fAccount").value)) autoAccount();
   closePicker();
 }
 function closePicker(){

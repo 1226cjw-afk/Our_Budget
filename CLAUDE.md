@@ -82,6 +82,7 @@ Our_Budget/
 │   ├── test_period.js   #   주기 판정 불변식 (멤버별 시작일·타임스탬프 판정 동치)
 │   ├── test_net.js      #   순액 집계(한도 limitUsage · 분석 netSplit) 계약 — 순수익 불변식
 │   ├── test_optimistic.js # 저장 직후 즉시 반영 — 왕복 1회·DB 정렬 일치·응답 역전·불필요 재렌더
+│   ├── test_input_habit.js # 입력 시트 — 자주 쓰는 순 정렬·단골 계좌 자동 선택·입력칸 16px
 │   ├── perf_logic.js    #   계산 성능 — 행 수를 늘려가며 집계·렌더 비용과 '차수'를 잰다
 │   └── poll_deploy.js   #   배포 반영 폴링
 ├── docs/superpowers/    # 스펙·플랜 (배포 안 됨)
@@ -425,7 +426,8 @@ FCP만 1,000ms→114ms로 당겨진 탓에 **스피너를 더 오래 쳐다보�
 | `editEntry(id)` | 수정 시트 열기 — id로 ROWS 조회. ⚠️행 JSON을 onclick에 인라인 금지(메모 따옴표에 깨짐) |
 | `addMember() / delMember()` | 멤버 DB CRUD. **거래가 1건이라도 있으면 delMember는 차단** — `transactions.member` FK가 cascade라 거래가 통째로 사라지는데 구글 시트 백업엔 그 삭제가 전파되지 않아 복구 근거가 없다 |
 | `addMaster(key) / delMaster(key, val)` | 카테고리·결제수단·계좌 CRUD |
-| `refreshCatList()` | 입력 시트 select 옵션 갱신 |
+| `refreshCatList()` | 입력 시트 select 옵션 갱신 — 카테고리·결제수단·계좌를 **그 멤버의 최근 200건 기준 사용 횟수순**(`byUse`, 동률은 설정 순서)으로 |
+| `habitRows(m) / topAccountFor(m,cat) / autoAccount()` | 입력 습관(2026-10-05). 새 입력 시트는 고른 카테고리의 **단골 계좌를 미리 고른다**(실데이터 일치율 84.5%) — 라벨 옆 `#fAccountHint`로 자동 선택임을 밝힌다(틀린 계좌가 조용히 저장되면 잔액이 틀어진다). ⚠️사용자가 계좌를 직접 고르면(`acctAuto=false`) 이후 덮지 않는다. ⚠️설정에서 지운 계좌는 옵션에 없으면 고르지 않는다(되살리지 않음). ⚠️수정 시트는 저장된 계좌 그대로. `test_input_habit.js`가 고정 |
 | `openPicker(sel,title) / pickOptIdx(i) / updateSelBtn(sel)` | 커스텀 하단 시트 피커 열기·선택·버튼 표시 갱신 |
 | `viewAnalysis() / buildInsights() / bigSpends(rows)` | 분석 탭 렌더 + 스마트 진단·절약팁 + 일회성 이상치(카테고리 중앙값 대비 ≥2.5배·표본≥3) |
 | `taxCalc(member) / tyDeduct(credit,thirty,salary)` | 연말정산 집계(역년·연환산) / 소득공제액 — **최저사용금액(총급여 25%)은 공제율 낮은 신용부터 소진**되므로 신용<문턱이면 초과분 전체가 30% |
@@ -635,6 +637,7 @@ node scripts/test_boot_cache.js                         # 스냅샷 캐시·부�
 node scripts/test_period.js                             # 주기 판정 (집계·필터를 건드렸다면)
 node scripts/test_net.js                                # 순액 집계 (한도·분석 금액을 건드렸다면)
 node scripts/test_optimistic.js                         # 저장 직후 즉시 반영 (저장·삭제·로드를 건드렸다면)
+node scripts/test_input_habit.js                        # 입력 시트 기본값·입력칸 16px (입력 시트·입력칸 CSS를 건드렸다면)
 node scripts/check_authgate.js                          # 로그인 게이트 + 캐시 삭제 4지점
 node scripts/shot_theme.js                              # 라이트/다크 실렌더 + 대비 실측 (눈으로 볼 PNG를 남긴다)
 node scripts/test_date_field.js                         # 날짜 필드 (입력 시트를 건드렸다면)
@@ -696,6 +699,10 @@ Windows 작업 사본은 CRLF, 리포 blob은 LF라 작업 사본과 비교하�
 
 ### 모바일 대응 주의사항
 - `<input list="datalist">` 사용 금지 → iOS Safari 미지원
+- ⚠️ **입력칸 글자는 16px 이상**(2026-10-05). iOS 사파리는 그보다 작은 칸에 포커스하면 화면을 확대하고 되돌리지 않는다 —
+  금액·메모·검색·한도 칸이 전부 14~15px였다. 새 입력칸을 만들면 `1rem` 이상으로. 좁은 행의 매핑 셀렉트(`.tym-sel`)만
+  `@supports (-webkit-touch-callout:none)`(iOS 전용)에서 16px로 키운다. `test_input_habit.js`가 클래스별로 검사한다
+- 새 입력 시트는 금액 칸에 **자동 포커스**(`openSheet` 끝). 탭 핸들러 안에서 동기로 불러야 iOS가 키보드를 띄운다 — `setTimeout`으로 미루지 말 것
 - **날짜 필드는 네이티브 `<input type=date>`를 투명하게 덮고 표시만 직접 그린다**(2026-08-24).
   브라우저가 그리는 `yyyy. mm. dd.`(한국 로케일)는 **CSS·`lang` 속성으로 못 바꾼다** — 3종을 실측해 확인했다.
   탭은 여전히 네이티브가 받으므로 폰의 날짜 휠/캘린더는 그대로 뜬다. 표시는 `2026년 8월 24일 (월)`.
