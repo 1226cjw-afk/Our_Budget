@@ -1542,8 +1542,12 @@ function applyLoad({mem, tx, lim, mst, cfg, mtm}){
    작은 표 5개 + 최근 RECENT_DAYS일 거래가 오면 1차 렌더(onPartial), 전량이 오면 2차 렌더.
    ⚠️ 7개를 **한꺼번에** 던진다. 1차를 기다렸다 2차를 시작하면 싱가포르 왕복이 직렬로 쌓인다.
    ⚠️ 1차 렌더 동안 ROWS는 45일치뿐이다 — 창 밖 숫자를 그리지 않게 needsFullRows()가 막는다.
-   onPartial을 안 주면(CRUD 후 reloadAndRender·retryLoad) 전량만 기다렸다 한 번에 끝난다. */
+   onPartial을 안 주면(CRUD 후 reloadAndRender·retryLoad) 전량만 기다렸다 한 번에 끝난다.
+   ⚠️ 더 나중에 시작된 loadAll이 있으면 이 결과는 버린다(false 반환). 저장 직후 백그라운드 동기화가
+   연달아 돌 때, 먼저 출발한 쪽 응답이 늦게 오면 방금 저장한 행이 화면에서 사라지기 때문이다. */
+let _loadSeq = 0;
 async function loadAll(onPartial){
+  const seq = ++_loadSeq;
   const small = Promise.all([
     sb.from("members").select("name").order("id"),
     sb.from("category_limits").select("*"),
@@ -1551,20 +1555,25 @@ async function loadAll(onPartial){
     sb.from("app_settings").select("*"),
     sb.from("tax_map").select("*")
   ]);
-  const recent = sb.from("transactions").select("*")
-                   .gte("date", recentCutoff()).order("date",{ascending:false}).order("id");
+  // 1차 창은 그걸 그릴 사람(onPartial)이 있을 때만 받는다 — 예전엔 CRUD 재로드마다 버려질 쿼리가 하나 더 나갔다
+  const recent = onPartial
+    ? sb.from("transactions").select("*")
+        .gte("date", recentCutoff()).order("date",{ascending:false}).order("id")
+    : null;
   const full = fetchTransactions();
   full.catch(()=>{});   // 전량이 1차보다 먼저 실패해도 unhandled rejection이 되지 않게
 
   const [[mem, lim, mst, cfg, mtm], rec] = await Promise.all([small, recent]);
+  if(seq !== _loadSeq) return false;   // 그새 더 새 로드가 출발했다 — 그쪽이 반영한다
   // 1차: 최근분으로 먼저 그린다. 실패하면 조용히 건너뛰고 전량을 기다린다(판정은 2차가 한다)
-  if(onPartial && !mem.error && !rec.error){
+  if(onPartial && rec && !mem.error && !rec.error){
     ROWS_PARTIAL = true;
     applyLoad({mem, tx:rec, lim, mst, cfg, mtm});
     onPartial();
   }
   // 2차: 전량. applyLoad가 던지면 ROWS_PARTIAL을 내리지 않는다(부분인 채로 '전량'이라 표시하면 안 됨)
   const tx = await full;
+  if(seq !== _loadSeq) return false;
   applyLoad({mem, tx, lim, mst, cfg, mtm});
   ROWS_PARTIAL = false;
   // ⚠️ 캐시 쓰기는 **화면을 그린 뒤** 한가할 때 한다. 여기서 동기로 하면 직렬화가
@@ -1572,10 +1581,43 @@ async function loadAll(onPartial){
   // 못 쓰고 탭이 닫혀도 손해는 '다음 접속에 캐시가 없다'뿐이다
   const idle = window.requestIdleCallback ? window.requestIdleCallback.bind(window) : (f=>setTimeout(f,0));
   idle(() => saveSnapshot({mem, tx, lim, mst, cfg, mtm}));
+  return true;
 }
 
-/* 데이터 재로드 + 재렌더 — CRUD 후 공통 마무리 */
+/* 데이터 재로드 + 재렌더 — 드문 CRUD(멤버·마스터) 후 공통 마무리 */
 async function reloadAndRender(){ await loadAll(); render(); }
+
+/* ── 저장 직후 즉시 반영 (낙관적 갱신) ──
+   예전엔 저장 → 전체 재로드(표 6개 + 거래 전량) → 그제야 목록에 새 행이 보였다.
+   한국→싱가포르 DB 왕복이 가장 비싼 구간인데, 가장 자주 하는 동작에 그 왕복이 두 번 붙어 있었다.
+   이제 insert/update가 돌려준 행(=DB가 저장한 그대로)을 ROWS에 바로 넣어 그리고,
+   전체 동기화는 뒤에서 돈다(다른 기기 입력도 그때 들어온다).
+   ⚠️ 정렬은 DB와 같아야 한다(날짜↓ → id↑, fetchTransactions의 order). 다르면 동기화가 끝날 때
+   같은 날 행들이 자리를 바꿔 튄다. id는 uuid라 문자열 비교 = Postgres 비교다. */
+const rowOrder = (a,b) => a.date<b.date ? 1 : a.date>b.date ? -1 : (a.id<b.id ? -1 : a.id>b.id ? 1 : 0);
+function patchRows(add, removeIds){
+  const drop = new Set([...(removeIds||[]), ...add.map(r=>r.id)]);
+  ROWS = stampRows(ROWS.filter(r=>!drop.has(r.id)).concat(add).sort(rowOrder));
+}
+// 화면에 영향을 주는 전역 전부 — 동기화 결과가 로컬 반영과 같으면 다시 그리지 않는다
+// (같은 화면을 또 그리면 진입 애니메이션이 한 번 더 돌아 깜빡여 보인다)
+const stateSig = () => JSON.stringify([MEMBERS,ROWS,LIMITS,MASTER,BILLING_STARTS,USER_ICONS,
+                                       WARN_TH,AN_PERIODS,MTMAP,CTMAP,TAX_READY,TY_SALARY,loadWarn]);
+async function syncInBackground(){
+  const before = stateSig();
+  try{
+    if(!(await loadAll())) return;     // 더 새 동기화가 출발했다 — 그쪽이 그린다
+  }catch(e){
+    if(isAuthErr(e)){ clearSnapshot(); showAuth(); return; }
+    console.warn("백그라운드 동기화 실패:", e);   // 로컬 반영은 끝났다. 다음 새로고침에서 맞춰진다
+    return;
+  }
+  if(stateSig() === before) return;
+  // 검색창에 입력 중이면 #main을 갈아끼우지 않는다 — 한글 조합이 자모로 깨진다(setSearch 주석)
+  const ae = document.activeElement;
+  if(ae && ae.id === "searchBox") return;
+  renderKeepScroll();
+}
 
 /* ── 구글 시트 백업 (단방향, fire-and-forget) ── */
 function backupToSheet(action, payload){
@@ -1609,18 +1651,17 @@ async function saveEntry(){
   btn.textContent="저장 중..."; btn.disabled=true;
   const wasEdit=!!editId;
   try {
-    let savedId=editId;
-    if(wasEdit){
-      const res=await sb.from("transactions").update(row).eq("id",editId);
-      if(dbErr(res,"저장 오류")) return;
-    } else {
-      const res=await sb.from("transactions").insert(row).select("id").single();
-      if(dbErr(res,"저장 오류")) return;
-      savedId=res.data&&res.data.id;
-    }
-    backupToSheet("upsert",{id:savedId,...row});  // 구글 시트 백업
-    closeSheet(); await reloadAndRender();
+    // 저장된 행 전체를 돌려받는다 — 그걸 그대로 ROWS에 넣어 재로드 없이 즉시 그린다(patchRows)
+    const res = wasEdit
+      ? await sb.from("transactions").update(row).eq("id",editId).select("*").single()
+      : await sb.from("transactions").insert(row).select("*").single();
+    if(dbErr(res,"저장 오류")) return;
+    const saved=res.data;
+    backupToSheet("upsert",{id:saved.id,...row});  // 구글 시트 백업
+    patchRows([saved]);
+    closeSheet(); renderKeepScroll();
     toast(wasEdit?"수정 완료":"저장 완료");
+    syncInBackground();
   } catch(e){ toast("오류: "+e.message); }
   finally{ btn.textContent=wasEdit?"수정하기":"저장하기"; btn.disabled=false; }
 }
@@ -1645,8 +1686,10 @@ async function saveTransfer(amount){
     const res=await sb.from("transactions").insert([out,inn]).select();
     if(dbErr(res,"저장 오류")) return;
     (res.data||[]).forEach(row=>backupToSheet("upsert",row));  // 구글 시트 백업(출금·입금 2건)
-    closeSheet(); await reloadAndRender();
+    patchRows(res.data||[]);
+    closeSheet(); renderKeepScroll();
     toast("이동 완료");
+    syncInBackground();
   } catch(e){ toast("오류: "+e.message); }
   finally{ btn.textContent="저장하기"; btn.disabled=false; }
 }
@@ -1662,7 +1705,9 @@ async function delEntry(id){
   const res=await sb.from("transactions").delete().in("id",ids);
   if(dbErr(res,"삭제 오류")) return;
   ids.forEach(x=>backupToSheet("delete",{id:x}));  // 구글 시트 백업(양쪽 모두)
-  await reloadAndRender(); toast(mate?"이동(2건) 삭제 완료":"삭제 완료");
+  patchRows([], ids);
+  renderKeepScroll(); toast(mate?"이동(2건) 삭제 완료":"삭제 완료");
+  syncInBackground();
 }
 
 /* ── 한도 저장 (멤버별) — 빈값/0이면 한도 삭제 ── */
@@ -1672,7 +1717,10 @@ async function saveLimit(member, cat){
     ? await sb.from("category_limits").upsert({member, category:cat, monthly_limit:v},{onConflict:"member,category"})
     : await sb.from("category_limits").delete().eq("member",member).eq("category",cat);
   if(dbErr(res,"한도 저장 오류")) return;
-  await reloadAndRender(); toast(v>0?"한도 저장":"한도 삭제");
+  if(!LIMITS[member]) LIMITS[member]={};
+  if(v>0) LIMITS[member][cat]=v; else delete LIMITS[member][cat];
+  renderKeepScroll(); toast(v>0?"한도 저장":"한도 삭제");
+  syncInBackground();
 }
 
 /* ── 멤버 추가/삭제 (설정 탭) ── */

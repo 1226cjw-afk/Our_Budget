@@ -81,6 +81,7 @@ Our_Budget/
 │   ├── test_boot_cache.js # 스냅샷 캐시 + 부분 로드 가드 (브라우저 불필요, ~1초)
 │   ├── test_period.js   #   주기 판정 불변식 (멤버별 시작일·타임스탬프 판정 동치)
 │   ├── test_net.js      #   순액 집계(한도 limitUsage · 분석 netSplit) 계약 — 순수익 불변식
+│   ├── test_optimistic.js # 저장 직후 즉시 반영 — 왕복 1회·DB 정렬 일치·응답 역전·불필요 재렌더
 │   ├── perf_logic.js    #   계산 성능 — 행 수를 늘려가며 집계·렌더 비용과 '차수'를 잰다
 │   └── poll_deploy.js   #   배포 반영 폴링
 ├── docs/superpowers/    # 스펙·플랜 (배포 안 됨)
@@ -397,7 +398,8 @@ FCP만 1,000ms→114ms로 당겨진 탓에 **스피너를 더 오래 쳐다보�
 | `doLogin(ev) / doLogout()` | 공용 계정 로그인 / 로그아웃(`signOut` 후 `location.reload()`로 전역 상태를 확실히 비움) |
 | `openPwChange() / doPwChange(ev)` | 설정 탭 비밀번호 변경. **현재 비밀번호를 재확인한 뒤** `updateUser` (위 '로그인 게이트' 절의 이유) |
 | `isAuthErr(e)` | 인증 실패를 일반 로드 오류와 구분 (`401`·`JWT`·`PGRST301`·`Invalid Refresh Token`) — 화면 분기의 기준 |
-| `loadAll(onPartial?)` | 작은 표 5개 + **최근 45일 거래** + **전량 거래**를 한꺼번에 발사. `onPartial`을 주면 최근분이 오는 즉시 1차 렌더(`ROWS_PARTIAL=true`)하고 전량이 오면 2차 렌더 + 스냅샷 저장. 안 주면 전량만 기다린다(CRUD·↻·재시도 경로). ⚠️1차를 `await`한 뒤 2차를 시작하지 말 것 — 싱가포르 왕복이 직렬로 쌓인다 |
+| `loadAll(onPartial?)` | 작은 표 5개 + **최근 45일 거래** + **전량 거래**를 한꺼번에 발사. `onPartial`을 주면 최근분이 오는 즉시 1차 렌더(`ROWS_PARTIAL=true`)하고 전량이 오면 2차 렌더 + 스냅샷 저장. 안 주면 전량만 기다리고 **최근분 쿼리 자체를 안 낸다**(CRUD·↻·재시도 경로). ⚠️1차를 `await`한 뒤 2차를 시작하지 말 것 — 싱가포르 왕복이 직렬로 쌓인다. ⚠️**더 나중에 시작된 `loadAll`이 있으면 결과를 버리고 `false`**(`_loadSeq`) — 저장 직후 동기화가 연달아 돌 때 먼저 출발한 응답이 늦게 오면 방금 저장한 행이 사라진다 |
+| `patchRows(add, removeIds) / syncInBackground()` | **저장 직후 즉시 반영**(2026-10-05). `saveEntry`·`saveTransfer`·`delEntry`는 insert/update가 `.select("*")`로 돌려준 행을 `ROWS`에 바로 넣어 그리고, 전체 동기화는 뒤에서 돈다(`saveLimit`은 `LIMITS`를 직접 고친다). 예전엔 저장 → 전체 재로드가 끝나야 새 행이 보여 **왕복이 2회** 직렬이었다. ⚠️`patchRows`의 정렬(`rowOrder`: 날짜↓→id↑)은 `fetchTransactions`의 `order`와 같아야 한다 — 다르면 동기화가 끝날 때 같은 날 행들이 자리를 바꿔 튄다. ⚠️동기화 결과가 로컬과 같으면(`stateSig`) 다시 그리지 않고, 검색창 입력 중엔 `#main`을 갈아끼우지 않는다(한글 조합). `test_optimistic.js`가 셋 다 고정 |
 | `applyLoad(res)` | 응답 6종 → 전역(MEMBERS·ROWS·LIMITS·MASTER·MTMAP·CTMAP·BILLING_STARTS…). **순수 변환**이라 DB에서 왔든 캐시에서 왔든 결과가 같다 — 캐시 복원이 이 함수를 그대로 타는 것이 스냅샷 설계의 핵심 |
 | `saveSnapshot/readSnapshot/clearSnapshot` | 원본 응답 6종을 `localStorage`에 저장·복원·삭제. 폴백이 섞였거나 2MB 초과면 저장 안 함. 버전(`SNAP_V`) 불일치·깨진 JSON은 `null`로 떨어진다(예외 아님) |
 | `hasStoredSession() / bootFromSnapshot()` | 저장된 세션 '존재' 확인 / 캐시로 첫 화면 즉시 렌더. ⚠️`await getSession()` **앞에서** 불러야 의미가 있다 |
@@ -447,7 +449,7 @@ FCP만 1,000ms→114ms로 당겨진 탓에 **스피너를 더 오래 쳐다보�
 | `comma(n) / dbErr(res,pre?)` | 콤마 숫자 포맷 / Supabase 응답 에러 공통 처리(에러면 토스트 후 true — `if(dbErr(res))return;` 패턴) |
 | `pills(items,cur,fn) / segBtns(items,cur,fn)` | 필 바(.filter)·세그먼트(.seg) 버튼 공통 빌더 — items는 문자열 또는 [값,라벨] 쌍 배열, jsq/esc 내장 |
 | `catsOf(m)` | 멤버 카테고리 목록 = master_data 설정 + 저장된 한도 카테고리 합집합 (한도 탭·입력 시트 공용) |
-| `reloadAndRender()` | `loadAll()+render()` — CRUD 후 공통 마무리 |
+| `reloadAndRender()` | `loadAll()+render()` — 드문 CRUD(멤버·마스터 추가·삭제) 후 마무리. 거래·한도 저장은 이걸 쓰지 않는다(위 `patchRows`) |
 | `movePeriod(d) / resetPeriod() / viewedPeriod(m)` | 내역·분류 탭 ◀▶ 주기 탐색 (periodOffset 0 클램프, 누르면 scope='current') |
 | `bucketByPeriod(rows,n,ref)` / `mixedPeriods()` | 최근 n주기 버킷팅(**행마다 그 멤버 주기**, 인덱스 n-1=이번 주기) / 멤버 간 시작일이 갈리는 상태인지 — 위 '결제 주기' 절 참조 |
 | `rowTime(r) / inPeriodRow(r,p) / stampRows(rows)` | 행 날짜의 숫자판(없으면 그 자리에서 채움) / 행 단위 주기 판정 — **집계의 안쪽 루프** / 로드 직후 일괄 심기. ⚠️`inPeriod(문자열,p)`로 되돌리면 행마다 `parseDate`가 주기 수만큼 돌아 40,000행에서 11ms→247ms가 된다. 문자열판은 `test_period.js`의 참조 구현 전용 |
@@ -632,6 +634,7 @@ node scripts/test_lazy_chart.js                         # 차트 지연 로드 �
 node scripts/test_boot_cache.js                         # 스냅샷 캐시·부분 로드 가드 (첫 화면을 건드렸다면)
 node scripts/test_period.js                             # 주기 판정 (집계·필터를 건드렸다면)
 node scripts/test_net.js                                # 순액 집계 (한도·분석 금액을 건드렸다면)
+node scripts/test_optimistic.js                         # 저장 직후 즉시 반영 (저장·삭제·로드를 건드렸다면)
 node scripts/check_authgate.js                          # 로그인 게이트 + 캐시 삭제 4지점
 node scripts/shot_theme.js                              # 라이트/다크 실렌더 + 대비 실측 (눈으로 볼 PNG를 남긴다)
 node scripts/test_date_field.js                         # 날짜 필드 (입력 시트를 건드렸다면)
