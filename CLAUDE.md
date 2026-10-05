@@ -99,7 +99,11 @@ Our_Budget/
 검증: `node scripts/check_assets.js` — 앱 외 경로가 404인지, `/`가 200인지 함께 본다.
 
 CSS · JS 모두 `public/index.html` 안에 인라인. 외부 의존성:
-- `@supabase/supabase-js@2` — `<head>`에 `defer`. 파싱 비차단이고 `DOMContentLoaded` 이후에만 쓰므로 안전
+- ⚠️ **CDN 라이브러리는 정확한 버전으로 고정한다**(2026-10-05): `supabase-js@2.117.2` · `chart.js@4.5.1`.
+  범위 URL(`@2`·무버전)은 jsdelivr 캐시가 **7일**이라 일주일마다 첫 화면 경로에서 다시 받고, 새 버전이 테스트 없이
+  가족 폰에 자동 적용된다(당시 `@2`가 이미 2.117.2로 떠 있었다). 고정 URL은 **1년 `immutable`** — 바이트 동일함을 확인하고 바꿨다.
+  올릴 땐 버전 문자열만 바꾸면 된다. `test_lazy_chart.js`가 범위 버전으로 돌아가면 FAIL 한다
+- `@supabase/supabase-js` — `<head>`에 `defer`. 파싱 비차단이고 `DOMContentLoaded` 이후에만 쓰므로 안전
   (`defer`는 명세상 DOMContentLoaded **직전**에 실행이 끝나 시작 시점에 `window.supabase`가 이미 있다)
 - `chart.js` — **`<head>`에 두지 않는다. `ensureChart()`가 분석 탭에서 지연 로드한다**(2026-08-24).
   ⚠️ 되돌리지 말 것: `defer`는 DOMContentLoaded를 **막는다**. 앱은 그 시점에 `getSession`→`loadAll`을 시작하므로,

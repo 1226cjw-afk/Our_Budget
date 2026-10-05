@@ -74,7 +74,12 @@ ok("head에 chart.js <script>가 없다",
    !/<script[^>]*src=["'][^"']*npm\/chart\.js/.test(html),
    "defer chart.js가 되살아났다 — DOMContentLoaded가 다시 72KB를 기다린다");
 ok("supabase-js는 여전히 defer로 <head>에 있다",
-   /<script defer src="https:\/\/cdn\.jsdelivr\.net\/npm\/@supabase\/supabase-js@2">/.test(html));
+   /<script defer src="https:\/\/cdn\.jsdelivr\.net\/npm\/@supabase\/supabase-js@2[^"]*">/.test(html));
+// 범위 버전(@2·무버전)은 jsdelivr 캐시가 7일이고 새 버전이 테스트 없이 자동 적용된다.
+// 정확한 버전은 1년 immutable (2026-10-05 실측)
+ok("supabase-js가 정확한 버전으로 고정돼 있다",
+   /<script defer src="https:\/\/cdn\.jsdelivr\.net\/npm\/@supabase\/supabase-js@\d+\.\d+\.\d+">/.test(html),
+   "범위 버전은 주 1회 첫 화면 경로에서 다시 받고, 메이저 안 업데이트가 몰래 적용된다");
 ok("DB에 preconnect가 걸려 있다",
    /rel="preconnect"[^>]*supabase\.co/.test(html),
    "첫 쿼리가 DNS+TCP+TLS(~290ms)를 그 자리에서 치른다");
@@ -110,7 +115,9 @@ ok("DB에 preconnect가 걸려 있다",
   ev("ensureChart()"); ev("ensureChart()"); ev("ensureChart()");
   ok("ensureChart를 3번 불러도 <script>는 1개", env.added.length === 1,
      `${env.added.length}개 삽입됨 — 같은 라이브러리를 여러 번 받는다`);
-  ok("삽입된 src가 chart.js", (env.added[0] || {}).src === "https://cdn.jsdelivr.net/npm/chart.js");
+  ok("삽입된 src가 버전 고정된 chart.js",
+     /^https:\/\/cdn\.jsdelivr\.net\/npm\/chart\.js@\d+\.\d+\.\d+$/.test((env.added[0] || {}).src || ""),
+     `src=${(env.added[0] || {}).src} — 무버전이면 다음 메이저(v5)가 나오는 날 분석 탭이 조용히 깨질 수 있다`);
 }
 
 // ── 3. 이미 로드돼 있으면 네트워크를 타지 않는다 ──

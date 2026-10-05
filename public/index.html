@@ -12,8 +12,8 @@
 <meta name="apple-mobile-web-app-title" content="우리집 가계부">
 
 <!-- ── 네트워크 태그는 무조건 <head> 맨 앞 ──
-     아래 apple-touch-icon이 base64 26KB짜리 한 줄이라, 이 태그들이 그 뒤에 있으면
-     preload 스캐너가 26KB를 다 받은 뒤에야 CDN·DB를 발견한다(실측: 발견이 문서 끝까지 밀렸다). -->
+     아래 apple-touch-icon이 base64 한 줄이라(지금은 2KB, 옛 이모지 PNG는 26KB였다), 이 태그들이 그 뒤에 있으면
+     preload 스캐너가 그걸 다 받은 뒤에야 CDN·DB를 발견한다(26KB 시절 실측: 발견이 문서 끝까지 밀렸다). -->
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 <!-- DB에도 preconnect: 첫 쿼리는 DOMContentLoaded 이후에 나가는데, 그때 DNS+TCP+TLS를
      처음부터 하면 실측 ~290ms를 그 자리에서 쓴다(TCP 275ms·TLS 288ms, 서울 PoP 기준).
@@ -34,11 +34,15 @@
 <!-- defer: HTML 파싱을 막지 않음(헤더·스피너 즉시 페인트). DOMContentLoaded 이후에만 쓰여 안전.
      ⚠️ 여기에 chart.js를 다시 추가하지 말 것 — defer는 DOMContentLoaded를 막으므로
      분석 탭 전용 라이브러리가 첫 DB 요청 앞에 줄을 선다. 지연 로드는 ensureChart(). -->
-<script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<!-- ⚠️ 버전은 정확히 고정한다(@2 같은 범위 금지). 범위 URL은 캐시가 7일이라 일주일마다 첫 화면 경로에서
+     다시 받고, 새 버전이 나오면 테스트 없이 가족 폰에 자동 적용된다. 고정 URL은 1년 immutable
+     (2026-10-05 실측: @2 → max-age=604800 / @2.117.2 → max-age=31536000, immutable, 바이트 동일).
+     올릴 땐 버전 문자열만 바꾸고 test_lazy_chart.js 의 기대값도 같이 바꿀 것. -->
+<script defer src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2"></script>
 <!-- 파비콘(SVG)·홈화면 아이콘(PNG data URI) — 단일 파일 배포라 외부 이미지 없이 인라인 -->
 <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D'http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg'%20viewBox%3D'0%200%2064%2064'%3E%3Crect%20width%3D'64'%20height%3D'64'%20rx%3D'14'%20fill%3D'%2314161A'%2F%3E%3Ctext%20x%3D'32'%20y%3D'46'%20font-family%3D'-apple-system%2Csystem-ui%2Csans-serif'%20font-size%3D'38'%20font-weight%3D'700'%20fill%3D'%23FFFFFF'%20text-anchor%3D'middle'%3E%E2%82%A9%3C%2Ftext%3E%3C%2Fsvg%3E">
 <link rel="apple-touch-icon" href="data:image/png;base64,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">
-<!-- ⚠️ 네트워크 태그는 위(아이콘 data URI 앞)로 옮겼다 — 여기 두면 26KB 아이콘이 다 와야 발견된다.
+<!-- ⚠️ 네트워크 태그는 위(아이콘 data URI 앞)로 옮겼다 — 여기 두면 아이콘이 다 와야 발견된다.
      chart.js는 여기서 뺐다: defer는 DOMContentLoaded를 막으므로 분석 탭 전용 72KB가
      첫 DB 요청을 붙잡고 있었다(2026-08-24 실측). 지금은 ensureChart()가 탭 열 때 받는다. -->
 <script>
@@ -2570,7 +2574,7 @@ function ensureChart(){
   if(window.Chart) return Promise.resolve(true);
   if(!_chartP) _chartP = new Promise(res=>{
     const s=document.createElement("script");
-    s.src="https://cdn.jsdelivr.net/npm/chart.js";
+    s.src="https://cdn.jsdelivr.net/npm/chart.js@4.5.1";   // 버전 고정 — <head>의 supabase-js 주석 참조
     s.onload =()=>res(true);
     s.onerror=()=>{ _chartP=null; res(false); };   // 실패해도 앱은 살아야 한다(차트만 생략) + 다음에 재시도
     document.head.appendChild(s);
