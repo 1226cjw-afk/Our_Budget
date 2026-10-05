@@ -1217,6 +1217,26 @@ function bucketByPeriod(rows, n, refMember){
   });
   return out;
 }
+/* 진행 중인 주기를 지난 주기와 '같은 시점'으로 맞춘다.
+   ⚠️ 이번 주기는 아직 진행 중인데 지난 주기는 다 찬 값이라, 그대로 비교하면 주기 초반엔 늘
+   "지출 ▼64% · 평균 대비 −52%"(초록)가 뜨고 급증 진단은 주기 말에만 걸린다(2026-10-05 실제 화면).
+   → 각 행의 '주기 안 경과일'이 그 멤버의 오늘 경과일 이하인 행만 남긴다. 멤버마다 주기 시작일이
+   다르므로 경과일도 행마다 그 멤버 기준이다(bucketByPeriod와 같은 원칙). 이번 주기 버킷은 그대로다. */
+const DAY_MS = 864e5;
+function samePointBuckets(rowsByPeriod, n, refMember){
+  const noon = parseDate(todayStr()).getTime();
+  const pc = {};
+  const psOf = m => pc[m] || (pc[m] = recentPeriods(n, MEMBERS.includes(m) ? m : refMember));
+  const elOf = m => Math.floor((noon - psOf(m)[n-1].sT) / DAY_MS);
+  return rowsByPeriod.map((rs, i) =>
+    rs.filter(r => Math.floor((rowTime(r) - psOf(r.member)[i].sT) / DAY_MS) <= elOf(r.member)));
+}
+// 이번 주기 진행 상황 {day: 오늘이 몇째 날(1부터), len: 주기 일수}
+function periodProgress(member){
+  const p = billingPeriod(member);
+  return { day: Math.floor((parseDate(todayStr()).getTime() - p.sT) / DAY_MS) + 1,
+           len: Math.round((p.eT - p.sT) / DAY_MS) };
+}
 /* '전체' 필터인데 멤버들의 주기 시작일이 갈리는 상태 — 표시 라벨은 기준 멤버 것이지만
    집계는 각자 주기라, 그 사실을 화면에 밝혀야 라벨과 숫자가 어긋나 보이지 않는다 */
 const mixedPeriods = () => memberFilter==="전체" &&
@@ -2325,11 +2345,21 @@ function viewAnalysis(){
   // 카테고리별 추이 (라인) — 같은 5개
   const trend = topCats.map(c => ({cat:c, data: nets.map(n => n.exp[c]||0)}));
 
-  _anStash = {labels, period, incomeByPeriod, stackSeries, donut:donutArr, totExp, trend};
+  const prog = periodProgress(_anMem);
+  _anStash = {labels, period, incomeByPeriod, stackSeries, donut:donutArr, totExp, trend, prog};
 
-  // 요약 스탯
-  const avg  = Math.round(period.reduce((s,d)=>s+d.exp,0)/(period.length||1));
-  const last = period[period.length-1]?.exp||0, prev = period[period.length-2]?.exp||0, lastInc = period[period.length-1]?.inc||0;
+  // 요약 스탯 — 이번 주기(진행 중)는 지난 주기들의 '같은 날까지' 값과 비교한다(samePointBuckets 주석).
+  // ⚠️ 다 찬 지난 주기와 그대로 비교하지 말 것 — 주기 초반엔 늘 '크게 줄었다(초록)'가 뜬다
+  const same    = samePointBuckets(rowsByPeriod, AN_PERIODS, _anMem);
+  const sameExp = same.map(rs => netSplit(rs).expTot);
+  const np = period.length;
+  // 기록 시작 전 주기(행 0건)는 평균에서 뺀다 — 0을 섞으면 평균이 낮아져 늘 '평균 초과'로 보인다.
+  // 이번 주기도 뺀다(예전엔 자기 자신이 평균에 섞여 있었다)
+  const prevIdx = rowsByPeriod.map((_,i)=>i).filter(i => i < np-1 && rowsByPeriod[i].length);
+  const avg  = prevIdx.length ? Math.round(prevIdx.reduce((s,i)=>s+sameExp[i],0)/prevIdx.length) : 0;
+  const last = period[np-1]?.exp||0, lastInc = period[np-1]?.inc||0;
+  const hasPrev = np>=2 && rowsByPeriod[np-2].length>0;
+  const prev = hasPrev ? sameExp[np-2] : 0;
   const trPct  = prev?Math.round((last-prev)/prev*100):0;
   const avgPct = avg?Math.round((last-avg)/avg*100):0;
   const net    = lastInc-last;
@@ -2347,7 +2377,7 @@ function viewAnalysis(){
   // 일회성 큰 지출 = 개별 거래가 '자기 카테고리 평소(중앙값)'보다 크게 튄 이상치
   const anom = bigSpends(rowsByPeriod.flat());
 
-  const insights = buildInsights(_anMem, periods, rowsByPeriod, curCatArr, totExp);
+  const insights = buildInsights(_anMem, periods, rowsByPeriod, curCatArr, totExp, same);
 
   // ── HTML ──
   const trChip = p => `<span class="am-d ${p>0?'r':p<0?'g':'f'}">${p>0?'▲':p<0?'▼':'–'}${Math.abs(p)}%</span>`;
@@ -2355,18 +2385,22 @@ function viewAnalysis(){
 
   // 1) 메트릭 카드 (지출 / 수입 / 평균 대비)
   h+=`<div class="astat">
-    <div class="am"><div class="am-l">이번 주기 지출</div><div class="am-v r">${won(last)}</div>${prev?`<div class="am-sub">${trChip(trPct)} <span style="color:var(--ink-3)">전 주기</span></div>`:`<div class="am-sub" style="color:var(--ink-3)">기록 시작</div>`}</div>
+    <div class="am"><div class="am-l">이번 주기 지출</div><div class="am-v r">${won(last)}</div>${
+      !hasPrev ? `<div class="am-sub" style="color:var(--ink-3)">기록 시작</div>`
+      : prev ? `<div class="am-sub">${trChip(trPct)} <span style="color:var(--ink-3)">전 주기 같은 날</span></div>`
+      : `<div class="am-sub" style="color:var(--ink-3)">전 주기 같은 날 0원</div>`}</div>
     <div class="am"><div class="am-l">이번 주기 수입</div><div class="am-v g">${won(lastInc)}</div><div class="am-sub" style="color:var(--ink-3)">순 ${net>=0?'+':'-'}${wonShort(Math.abs(net))}</div></div>
-    <div class="am"><div class="am-l">평균 대비</div><div class="am-v ${avgPct>0?'r':avgPct<0?'g':''}">${avgPct>=0?'+':''}${avgPct}%</div><div class="am-sub" style="color:var(--ink-3)">평균 ${wonShort(avg)}</div></div>
+    <div class="am"><div class="am-l">평균 대비</div><div class="am-v ${avgPct>0?'r':avgPct<0?'g':''}">${avgPct>=0?'+':''}${avgPct}%</div><div class="am-sub" style="color:var(--ink-3)">같은 날 평균 ${wonShort(avg)}</div></div>
   </div>
-  <div style="font-size:.7rem;color:var(--ink-3);margin:-4px 0 12px">같은 카테고리의 환불·정산 입금은 지출에서 차감해 계산해요</div>`;
+  <div style="font-size:.7rem;color:var(--ink-3);margin:-4px 0 12px;line-height:1.6">이번 주기 ${prog.day}/${prog.len}일째 — 지난 주기도 같은 날까지만 잘라 비교해요.<br>같은 카테고리의 환불·정산 입금은 지출에서 차감해 계산해요</div>`;
 
   // 2) 주기별 지출 구성 — 카테고리 스택 막대 + 수입 막대 (한눈에 주기별 카테고리 지출/수입)
   if(catTotals.length || incomeByPeriod.some(v=>v>0)){
     h+=`<div class="panel"><div class="p-t">주기별 지출 구성<span class="p-sub">카테고리 누적</span></div>
-      <canvas id="chartPeriod" height="200"></canvas>${mixedPeriods()
-        ? `<div style="font-size:.7rem;color:var(--ink-3);margin-top:10px;line-height:1.6">※ 멤버마다 결제주기 시작일이 달라, 가로축 라벨은 ${esc(_anMem)} 기준이고 집계는 각자의 주기로 나눴어요.</div>`
-        : ``}</div>`;
+      <canvas id="chartPeriod" height="200"></canvas>
+      <div style="font-size:.7rem;color:var(--ink-3);margin-top:10px;line-height:1.6">※ 흐린 마지막 막대는 진행 중인 주기예요(${prog.day}/${prog.len}일째) — 아직 다 차지 않아 낮게 보여요.${mixedPeriods()
+        ? `<br>※ 멤버마다 결제주기 시작일이 달라, 가로축 라벨은 ${esc(_anMem)} 기준이고 집계는 각자의 주기로 나눴어요.`
+        : ``}</div></div>`;
   }
 
   // 3) 카테고리별 지출 비중 (도넛, 이번 주기)
@@ -2405,7 +2439,8 @@ function viewAnalysis(){
 }
 
 /* 카테고리 기반 스마트 분석 — 과지출 진단 + 절약 팁 생성 */
-function buildInsights(mem, periods, rowsByPeriod, curCatArr, totExp){
+function buildInsights(mem, periods, rowsByPeriod, curCatArr, totExp, same){
+  same = same || rowsByPeriod;
   if(!totExp) return [{ic:"🌱",tone:"good",t:"이번 주기는 아직 지출이 없어요.",b:"지출이 쌓이면 카테고리별 과지출 진단과 절약 팁을 보여드릴게요."}];
   const out=[];
 
@@ -2434,9 +2469,12 @@ function buildInsights(mem, periods, rowsByPeriod, curCatArr, totExp){
 
   // 3) 평소보다 급증한 카테고리 (이전 주기 평균 대비)
   //    비교 대상(curCatArr)이 순액이므로 평소 값도 주기별 순액으로 — 한쪽만 총액이면 정산 입금만큼 '급증'이 가려진다
-  const prevCnt=Math.max(periods.length-1,1);
+  //    평소 값은 지난 주기의 '같은 날까지'(same) — 다 찬 주기와 비교하면 급증이 주기 말에만 잡힌다.
+  //    기록 시작 전 주기(0건)는 평균에서 뺀다
+  const prevIdx=rowsByPeriod.map((_,i)=>i).filter(i=>i<rowsByPeriod.length-1 && rowsByPeriod[i].length);
+  const prevCnt=Math.max(prevIdx.length,1);
   const prevAvg={};
-  rowsByPeriod.slice(0,-1).forEach(rs=>Object.entries(netSplit(rs).exp).forEach(([c,a])=>prevAvg[c]=(prevAvg[c]||0)+a));
+  prevIdx.forEach(i=>Object.entries(netSplit(same[i]).exp).forEach(([c,a])=>prevAvg[c]=(prevAvg[c]||0)+a));
   Object.keys(prevAvg).forEach(c=>prevAvg[c]/=prevCnt);
   let surge=null;
   curCatArr.forEach(([c,a])=>{
@@ -2444,7 +2482,7 @@ function buildInsights(mem, periods, rowsByPeriod, curCatArr, totExp){
     if(base>=10000 && a>=base*1.3){ const up=Math.round((a-base)/base*100); if(!surge||up>surge.up) surge={c,up,a,base}; }
   });
   if(surge) out.push({ic:"📈",tone:"warn",t:`'${surge.c}' 지출이 평소보다 ${surge.up}% 늘었어요`,
-    b:`평소 약 ${won(Math.round(surge.base))} → 이번 ${won(surge.a)}. 일시적인 지출인지, 새 습관이 생긴 건지 점검해보세요.`});
+    b:`지난 주기 같은 날까지 평균 약 ${won(Math.round(surge.base))} → 이번 ${won(surge.a)}. 일시적인 지출인지, 새 습관이 생긴 건지 점검해보세요.`});
 
   // 4) 절약 팁 — 조절 가능한 변동 지출 중 가장 큰 항목
   const flexTop=curCatArr.find(([c])=>!FIXED_CATS.has(c));
@@ -2508,15 +2546,21 @@ function drawAnalysisCharts(){
   // 색은 CSS 토큰에서 읽는다 — 하드코딩하면 OS 다크모드에서 축·격자가 옛 색으로 남는다
   const tickC=cssVar("--ink-2"), gridC=cssVar("--line"), subC=cssVar("--ink-3"), surface=cssVar("--bg");
   const axes={x:{ticks:{color:tickC,font:{size:11}},grid:{display:false}},y:{ticks:{color:subC,font:{size:10},maxTicksLimit:5,callback:v=>wonShort(v)},grid:{color:gridC}}};
+  // 마지막 주기는 진행 중이다 — 다 찬 주기처럼 그리면 '지출이 뚝 떨어졌다'로 읽힌다.
+  // 라벨에 진행 일수를 달고, 막대는 흐리게, 추이선의 마지막 구간은 점선으로.
+  const lastI = _anStash.labels.length-1, pg = _anStash.prog;
+  const xLabels = _anStash.labels.map((l,i) => i===lastI && pg ? [l, `진행 중 ${pg.day}/${pg.len}일`] : l);
+  const fade = c => /^#[0-9a-f]{6}$/i.test(c) ? c+"73" : c;   // 45% 알파 — 토큰 hex에 붙인다
 
   // 카테고리 스택 막대 — 지출만, 축 하나.
   // ⚠️ 수입을 오른쪽 보조축으로 되돌리지 말 것. 두 축은 배율을 임의로 정하는 순간
   //    없는 상관관계를 만들어낸다(차트 실수 1순위). 수입은 아래 요약 스탯과 내역·계좌 탭에 있다.
   const pc=$("chartPeriod");
   if(pc && _anStash.stackSeries){
-    const ds=_anStash.stackSeries.map(s=>({type:"bar",label:s.cat,data:s.data,backgroundColor:catColor(s.cat),stack:"exp",borderRadius:3,borderSkipped:false,maxBarThickness:38,
-      borderColor:surface,borderWidth:{top:2,right:0,bottom:0,left:0}}));  // 세그먼트 사이 2px 서피스 갭
-    _charts.push(new Chart(pc,{type:"bar",data:{labels:_anStash.labels,datasets:ds},
+    const ds=_anStash.stackSeries.map(s=>{ const c=catColor(s.cat);
+      return {type:"bar",label:s.cat,data:s.data,backgroundColor:s.data.map((_,i)=>i===lastI?fade(c):c),stack:"exp",borderRadius:3,borderSkipped:false,maxBarThickness:38,
+      borderColor:surface,borderWidth:{top:2,right:0,bottom:0,left:0}}; });  // 세그먼트 사이 2px 서피스 갭
+    _charts.push(new Chart(pc,{type:"bar",data:{labels:xLabels,datasets:ds},
       options:{responsive:true,interaction:{mode:"index",intersect:false},
         plugins:{legend:{labels:{color:tickC,font:{size:10},boxWidth:8,padding:6}},
           tooltip:{callbacks:{label:ctx=>` ${ctx.dataset.label}: ${won(ctx.parsed.y)}`}}},
@@ -2537,8 +2581,9 @@ function drawAnalysisCharts(){
   // 라인: 카테고리별 추이
   const tc=$("chartTrend");
   if(tc && _anStash.trend.length){
-    _charts.push(new Chart(tc,{type:"line",data:{labels:_anStash.labels,datasets:_anStash.trend.map(t=>({
-      label:t.cat,data:t.data,borderColor:catColor(t.cat),backgroundColor:catColor(t.cat),tension:.35,borderWidth:2,pointRadius:3,pointHoverRadius:5,fill:false}))},
+    _charts.push(new Chart(tc,{type:"line",data:{labels:xLabels,datasets:_anStash.trend.map(t=>({
+      label:t.cat,data:t.data,borderColor:catColor(t.cat),backgroundColor:catColor(t.cat),tension:.35,borderWidth:2,pointRadius:3,pointHoverRadius:5,fill:false,
+      segment:{borderDash:ctx=>ctx.p1DataIndex===lastI?[5,4]:undefined}}))},
       options:{responsive:true,interaction:{mode:"index",intersect:false},plugins:{legend:{labels:{color:tickC,font:{size:10},boxWidth:8,padding:8}},tooltip:{callbacks:{label:ctx=>` ${ctx.dataset.label}: ${won(ctx.parsed.y)}`}}},scales:axes}}));
   }
 }

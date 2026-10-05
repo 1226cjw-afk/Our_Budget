@@ -83,6 +83,7 @@ Our_Budget/
 │   ├── test_net.js      #   순액 집계(한도 limitUsage · 분석 netSplit) 계약 — 순수익 불변식
 │   ├── test_optimistic.js # 저장 직후 즉시 반영 — 왕복 1회·DB 정렬 일치·응답 역전·불필요 재렌더
 │   ├── test_input_habit.js # 입력 시트 — 자주 쓰는 순 정렬·단골 계좌 자동 선택·입력칸 16px
+│   ├── test_samepoint.js # 분석 탭 '같은 시점' 비교 — 진행 중 주기를 다 찬 주기와 비교하지 않는가
 │   ├── perf_logic.js    #   계산 성능 — 행 수를 늘려가며 집계·렌더 비용과 '차수'를 잰다
 │   └── poll_deploy.js   #   배포 반영 폴링
 ├── docs/superpowers/    # 스펙·플랜 (배포 안 됨)
@@ -439,7 +440,8 @@ FCP만 1,000ms→114ms로 당겨진 탓에 **스피너를 더 오래 쳐다보�
 | `suggestKind(method) / suggestCatKind(cat)` | 이름 규칙 추천. `체크\|직불\|선불` → check를 `카드`보다 **먼저** 검사할 것 ('우리 체크카드'가 credit으로 새는 것 방지) |
 | `taxMapSection(m,kind,t)` | 소득·지출 매핑 UI 공용 빌더 (연말정산 화면용). 소득은 입금 있는 카테고리로 좁힘 |
 | `setTaxMap / applyTaxSuggest / saveTySalary / resetTySalary / copyTaxDDL` | 매핑 단건 저장(빈값=삭제) / 미분류 일괄 추천 / 총급여 수동값(0이면 삭제=추정 복귀) / 설치 SQL 복사 |
-| `drawAnalysisCharts() / destroyCharts()` | 도넛 + 주기별 스택막대(지출=카테고리·왼축, 수입=오른 보조축) + 추이 라인 / 인스턴스 일괄 파괴 |
+| `drawAnalysisCharts() / destroyCharts()` | 도넛 + 주기별 스택막대(지출만·축 하나 — 이중 축은 제거됨) + 추이 라인 / 인스턴스 일괄 파괴. **마지막 주기는 진행 중 표시**: x 라벨 2줄(`진행 중 11/30일`)·막대 45% 알파·추이선 마지막 구간 점선 |
+| `samePointBuckets(byPeriod,n,ref) / periodProgress(m)` | 분석 탭 '같은 시점' 비교(2026-10-05). 지난 주기를 **이번 주기와 같은 경과일까지만** 잘라 요약(전 주기 대비·평균 대비)과 급증 진단에 쓴다 — 경과일은 행마다 **그 멤버의** 주기 기준. ⚠️다 찬 지난 주기와 그대로 비교하지 말 것: 주기 초반엔 늘 "▼64% · 평균 대비 −52%"(초록)가 뜨고 급증은 주기 말에만 잡혔다. 평균에서 이번 주기와 기록 전 빈 주기는 뺀다. `test_samepoint.js`가 고정 |
 | `ensureChart() / drawWhenChartReady(fn)` | chart.js 지연 로드(1회만 삽입, 실패 시 재시도 가능) / 도착을 기다렸다 그리기. ⚠️**기다리는 사이 화면이 바뀌면 그리지 않는다** — `render()`가 올리는 `_renderSeq`를 캡처해 대조한다. 빼면 없어진 캔버스에 그리거나, 새로 그린 차트를 다음 `destroyCharts()`가 지운다. `startApp()` 끝에서 idle에 미리 받아둬 분석 탭 첫 진입도 안 기다린다(크리티컬 패스 밖) |
 | `expOf(rs) / incOf(rs)` | 지출·수입 합계 헬퍼 (이동 제외) |
 | `cssVar(n)` | `getComputedStyle(document.documentElement).getPropertyValue(n)` — **차트 색은 전부 이걸로 읽는다.** 하드코딩하면 OS 다크모드에서 캔버스만 옛 색으로 남는다(캔버스는 이미 칠해진 픽셀이라 CSS가 못 바꾼다) |
@@ -638,6 +640,7 @@ node scripts/test_period.js                             # 주기 판정 (집계�
 node scripts/test_net.js                                # 순액 집계 (한도·분석 금액을 건드렸다면)
 node scripts/test_optimistic.js                         # 저장 직후 즉시 반영 (저장·삭제·로드를 건드렸다면)
 node scripts/test_input_habit.js                        # 입력 시트 기본값·입력칸 16px (입력 시트·입력칸 CSS를 건드렸다면)
+node scripts/test_samepoint.js                          # 분석 탭 같은 시점 비교 (분석 요약·진단을 건드렸다면)
 node scripts/check_authgate.js                          # 로그인 게이트 + 캐시 삭제 4지점
 node scripts/shot_theme.js                              # 라이트/다크 실렌더 + 대비 실측 (눈으로 볼 PNG를 남긴다)
 node scripts/test_date_field.js                         # 날짜 필드 (입력 시트를 건드렸다면)
