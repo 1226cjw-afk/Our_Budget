@@ -154,6 +154,20 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .hd-btn svg{width:15px;height:15px}
 .hd-btn.rot svg{animation:sp .75s linear infinite;color:var(--ink)}
 
+/* ── 터치 영역 넓히기 (2026-10-25) ──
+   보이는 크기는 그대로 두고 **누르는 영역만** ::after 로 키운다(레이아웃·디자인 불변).
+   실측(audit_ux.js, elementFromPoint): 내역 수정·삭제 22×19px · 주기 라벨 높이 22px · 새로고침 32px ·
+   주기 ◀▶ 30×26px · 설정 삭제 42×24px — 손가락(≈44px)보다 한참 작았다.
+   ⚠️ 가로 확장은 이웃 대상과의 간격 절반 이하로 둘 것 — 넘으면 옆 버튼을 누른 게 이 버튼으로 간다. */
+.hd-chip,.hd-btn,.pnav button,.pnav-t,.b-edit,.b-del,.m-del,.m-ico,.s-x,.picker-cl{position:relative}
+.hd-chip::after,.hd-btn::after{content:"";position:absolute;inset:-8px -3px}          /* 칩·버튼 간격 6px */
+.pnav button::after{content:"";position:absolute;inset:-9px -7px}
+.pnav-t::after{content:"";position:absolute;inset:-10px -8px}
+.b-edit::after,.b-del::after{content:"";position:absolute;inset:-12px -7px}            /* .i-act 간격 14px */
+.m-del::after{content:"";position:absolute;inset:-10px -4px}                           /* 옆 셀렉트와 8px */
+.m-ico::after{content:"";position:absolute;inset:-5px}
+.s-x::after,.picker-cl::after{content:"";position:absolute;inset:-7px -4px}
+
 /* ── 네비 (하단 고정 탭바) ──
    선택 표시는 색이 아니라 잉크 + 상단 2px 인디케이터다. */
 .nav{
@@ -187,6 +201,9 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
   font-size:.8125rem;font-weight:550;
   border:1px solid var(--line-2);color:var(--ink-2);background:transparent;
   white-space:nowrap;transition:all .15s;
+  /* <button>이다(옛 <span onclick>은 키보드로 못 가고 스크린리더가 버튼으로 안 읽었다).
+     button 의 UA 기본값이 줄높이를 'normal'로 바꿔 높이가 34→30px로 줄어든다 — 상속으로 되돌린다 */
+  line-height:inherit;letter-spacing:inherit;
 }
 .pill.on{background:var(--ink);border-color:var(--ink);color:var(--on-ink);font-weight:600}
 .sec{padding:0 20px}
@@ -201,7 +218,7 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .pnav button{width:30px;height:26px;display:flex;align-items:center;justify-content:center;color:var(--ink-2)}
 .pnav button svg{width:15px;height:15px}
 .pnav button:disabled{color:var(--line-2)}
-.pnav-t{font-size:.8125rem;font-weight:600;letter-spacing:-.01em}
+.pnav-t{font-size:.8125rem;font-weight:600;letter-spacing:-.01em;cursor:pointer}
 
 /* ── 내역 검색 ── */
 .searchw{padding:14px 20px 0}
@@ -244,8 +261,9 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
   padding:13px 0;
   border-bottom:1px solid var(--line);
   background:none;border-radius:0;
-  transition:opacity .15s;
+  transition:opacity .15s;cursor:pointer;
 }
+/* 행 전체가 '수정'이다. 예전엔 누르면 흐려지기만 하고(:active) 아무 일도 없었다 — 누를 수 있어 보이는데 반응이 없었다 */
 .item:active{opacity:.6}
 .i-ic{
   width:34px;height:34px;min-width:34px;
@@ -269,7 +287,7 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .chip.trf{color:var(--s1);font-weight:600}
 /* 테두리 없는 텍스트 버튼 — 행마다 상자가 2개씩 뜨면 룰선 리스트가 도로 카드처럼 보인다.
    ⚠️ 없애지는 말 것: 계좌간 이동은 수정이 막혀 있어 여기 삭제가 유일한 제거 수단이다. */
-.i-act{display:flex;gap:10px;flex-shrink:0;padding-bottom:1px}
+.i-act{display:flex;gap:14px;flex-shrink:0;padding-bottom:1px}
 .b-edit,.b-del{padding:2px 0;font-size:.75rem;font-weight:550;border:none;background:none;transition:color .15s}
 .b-edit{color:var(--ink-3)}
 .b-edit:hover{color:var(--ink)}
@@ -325,7 +343,7 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .l-track{position:relative;margin-bottom:7px}
 .l-bar-w{height:5px;background:var(--fill-2);border-radius:3px;overflow:hidden}
 .l-pace{position:absolute;top:-3px;bottom:-3px;width:2px;margin-left:-1px;background:var(--ink);border-radius:1px}
-.l-cap{font-size:.7rem;color:var(--ink-3);line-height:1.6;padding:8px 0 4px}
+.l-cap{font-size:.75rem;color:var(--ink-3);line-height:1.6;padding:8px 0 4px}
 .l-tgl{margin-left:auto;font-size:.75rem;font-weight:550;color:var(--ink-3)}
 .lrow{display:flex;align-items:center;gap:10px;padding:11px 0;cursor:pointer}
 .lrow-w{border-bottom:1px solid var(--line)}
@@ -373,6 +391,8 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .a-tag{font-size:.6875rem;font-weight:600;padding:1px 7px;border-radius:6px;border:1px solid var(--line-2);color:var(--ink-3)}
 .a-tag.rec{background:var(--fill);color:var(--ink-2)}
 .a-v{font-size:.875rem;font-weight:600;white-space:nowrap;letter-spacing:-.02em}
+.a-cat{color:var(--ink-3);font-size:.75rem;margin-left:4px}   /* 같은 메모가 여러 카테고리에 있을 때만 붙는다 */
+.a-more{font-size:.75rem;color:var(--ink-3);padding:10px 0 2px;text-align:right}
 
 /* 분석 요약 메트릭 — 세로 룰선으로 나눈 칸 */
 .astat{display:flex;margin-bottom:0;border-bottom:1px solid var(--line)}
@@ -508,6 +528,11 @@ body.sheet-open{overflow:hidden}
   transition:border-color .15s,box-shadow .15s;
 }
 .inp:focus{border-color:var(--ink);box-shadow:0 0 0 3px color-mix(in srgb,var(--ink) 9%,transparent)}
+/* 금액 — 시트에서 가장 중요한 값이라 크기·굵기로 위계를 준다(색 예산은 늘리지 않는다).
+   단위 '원'을 칸 안에 붙여 자릿수를 읽기 쉽게 — 오른쪽 여백은 그 자리다 */
+.amtw{position:relative}
+#fAmount{font-size:1.375rem;font-weight:650;letter-spacing:-.02em;padding:10px 40px 10px 14px}
+.amt-u{position:absolute;right:15px;top:50%;transform:translateY(-50%);font-size:1rem;font-weight:550;color:var(--ink-3);pointer-events:none}
 .inp option{background:var(--bg)}
 
 /* 날짜 — 네이티브 <input type=date> 를 투명하게 덮고 표시는 .date-disp 가 담당한다.
@@ -569,6 +594,11 @@ body.sheet-open{overflow:hidden}
   background:var(--ink);color:var(--on-ink);
   border-radius:8px;font-size:.9375rem;font-weight:650;margin-top:8px;
   transition:opacity .15s,transform .15s;
+  /* 시트 바닥에 붙는다(sticky). 390×844 에서도 버튼이 화면 끝에 반쯤 걸려 있었고, 작은 폰(667px)에선
+     카테고리를 고른 뒤 스크롤해야 보였다. 둘레의 바탕색 링은 그림자가 아니라 **가림막**이다 —
+     버튼 뒤로 지나가는 입력칸이 틈새로 비치지 않게. (그림자 규칙: FAB·하단 시트 1단계뿐 — 이건 해당 없음) */
+  position:sticky;bottom:calc(12px + env(safe-area-inset-bottom,0px));z-index:1;
+  box-shadow:0 0 0 12px var(--bg);
 }
 .submit:active{transform:translateY(1px);opacity:.85}
 .submit:disabled{opacity:.5;cursor:not-allowed}
@@ -583,6 +613,8 @@ body.sheet-open{overflow:hidden}
   padding:22px 0 8px;border-bottom:1px solid var(--line-2);margin-bottom:0;
   display:flex;align-items:center;gap:8px;
 }
+/* 섹션 제목 옆 꼬리표(멤버 이름·'전체 공통'). 옛 인라인 .66rem(10.6px)은 한글에 너무 작았다 → 11px 하한 */
+.m-tag{font-size:.6875rem;color:var(--ink-3);font-weight:600}
 .m-list{margin-bottom:12px}
 .m-item{
   display:flex;justify-content:space-between;align-items:center;gap:10px;
@@ -964,7 +996,8 @@ body.sheet-open{overflow:hidden}
           <input class="date-native" type="date" id="fDate" aria-label="날짜" onchange="syncDateDisp()" oninput="syncDateDisp()">
         </div>
       </div>
-      <div class="frow"><label class="flb">금액</label><input class="inp" id="fAmount" inputmode="numeric" placeholder="0">
+      <div class="frow"><label class="flb" for="fAmount">금액</label>
+        <div class="amtw"><input class="inp" id="fAmount" inputmode="numeric" placeholder="0" autocomplete="off"><span class="amt-u" aria-hidden="true">원</span></div>
         <div class="qamt">
           <button type="button" onclick="bumpAmt(1000)">+1천</button>
           <button type="button" onclick="bumpAmt(5000)">+5천</button>
@@ -1004,7 +1037,7 @@ body.sheet-open{overflow:hidden}
         </button>
         <select id="fToAccount" style="display:none"></select>
       </div>
-      <div class="frow"><label class="flb">세부내역</label><input class="inp" id="fMemo" placeholder="메모 (선택)"></div>
+      <div class="frow"><label class="flb" for="fMemo">세부내역</label><input class="inp" id="fMemo" placeholder="메모 (선택)" enterkeyhint="done"></div>
       <button class="submit" id="saveBtn" onclick="saveEntry()">저장하기</button>
     </div>
   </div>
@@ -1131,8 +1164,12 @@ const empty    = (ic,msg) => `<div class="empty"><div class="e-ic">${ic}</div><p
 // Supabase 응답 에러 공통 처리 — 에러면 토스트 후 true (호출부는 if(dbErr(res))return; 한 줄)
 const dbErr    = (res,pre="오류") => { if(res.error){ toast(pre+": "+res.error.message); return true; } return false; };
 // 필 바(.filter) / 세그먼트(.seg) 버튼 공통 빌더 — items: [값,라벨] 쌍 또는 문자열 배열
-const pills    = (items,cur,fn) => `<div class="filter">${items.map(it=>{const[v,lb]=Array.isArray(it)?it:[it,it];return `<span class="pill${cur===v?' on':''}" onclick="${fn}('${jsq(v)}')">${esc(lb)}</span>`;}).join("")}</div>`;
-const segBtns  = (items,cur,fn) => items.map(m=>`<button class="${cur===m?'on':''}" onclick="${fn}('${jsq(m)}')">${esc(m)}</button>`).join("");
+// ⚠️ <button>이어야 한다 — 옛 <span onclick>은 키보드로 갈 수 없고 스크린리더가 '버튼'으로 읽지 않았다(audit_ux.js)
+const pill     = (on,onclick,label) => `<button type="button" class="pill${on?' on':''}" aria-pressed="${on}" onclick="${onclick}">${esc(label)}</button>`;
+const pills    = (items,cur,fn) => `<div class="filter">${items.map(it=>{const[v,lb]=Array.isArray(it)?it:[it,it];return pill(cur===v,`${fn}('${jsq(v)}')`,lb);}).join("")}</div>`;
+const segBtns  = (items,cur,fn) => items.map(m=>`<button type="button" class="${cur===m?'on':''}" aria-pressed="${cur===m}" onclick="${fn}('${jsq(m)}')">${esc(m)}</button>`).join("");
+// onclick 이 달린 div(행·카드)를 키보드·스크린리더에서도 버튼으로 — Enter/Space 처리는 아래 keydown 리스너
+const asBtn    = (extra="") => ` role="button" tabindex="0"${extra}`;
 // 기기 기본 사용자가 멤버 목록에 있으면 그 사람을, 없으면 첫 멤버를 기본값으로
 const defMember = () => (DEVICE_USER && MEMBERS.includes(DEVICE_USER)) ? DEVICE_USER : (MEMBERS[0]||null);
 // 멤버의 카테고리 목록 — master_data 설정 + 이미 한도가 저장된 카테고리(레거시 보존) 합집합
@@ -1841,7 +1878,7 @@ function openIconPicker(cat){
   $("pickerOpts").innerHTML=
     `<div class="emo-grid">${EMOJI_SET.map(e=>`<button class="emo${icon(cat)===e?' on':''}" onclick="saveIcon('${e}')">${e}</button>`).join("")}</div>
      <div style="padding:6px 18px 18px;display:flex;gap:8px">
-       <input class="search-inp" id="emoCustom" placeholder="직접 입력 (이모지)" maxlength="12" style="flex:1;padding-right:15px">
+       <input class="search-inp" id="emoCustom" aria-label="아이콘 직접 입력" placeholder="직접 입력 (이모지)" maxlength="12" style="flex:1;padding-right:15px">
        <button class="m-save" onclick="saveIcon($('emoCustom').value.trim())">적용</button>
        <button class="m-save" style="color:var(--ink-2);background:var(--fill);border-color:var(--line)" onclick="saveIcon('')">기본</button>
      </div>`;
@@ -1933,6 +1970,9 @@ async function addMaster(key){
 }
 async function delMaster(key,val){
   if(!masterMember) return;
+  // 확인 없이 지우던 유일한 삭제였다(거래·멤버·한도 삭제는 다 묻는다). 바로 옆이 연말정산 셀렉트라 잘못 누르기 쉽다.
+  // 지워도 이미 저장된 거래의 값은 그대로라는 걸 밝힌다 — '내역까지 사라지나' 하고 망설이지 않게
+  if(!confirm(`'${val}'을(를) ${masterMember}의 ${MASTER_KEYS[key]} 목록에서 지울까요?\n이미 저장된 내역은 그대로 남아요.`)) return;
   const type=MASTER_TYPE[key];
   const res=await sb.from("master_data").delete().eq("member",masterMember).eq("type",type).eq("value",val);
   if(dbErr(res)) return;
@@ -1942,7 +1982,7 @@ async function delMaster(key,val){
 /* ── 네비 / 필터 ── */
 function buildNav(){
   $("nav").innerHTML = TABS.map(([k,ic,lb])=>
-    `<button class="tab${k===tab?' on':''}" onclick="goTab('${k}')"><span class="tab-ic">${ic}</span>${lb}</button>`
+    `<button class="tab${k===tab?' on':''}"${k===tab?' aria-current="page"':''} onclick="goTab('${k}')"><span class="tab-ic" aria-hidden="true">${ic}</span>${lb}</button>`
   ).join("");
 }
 function goTab(k){ tab=k; buildNav(); render(); }
@@ -1956,8 +1996,8 @@ function setTyMember(m){ tyMember=m; render(); }
 
 /* ── 기기 기본 사용자 (localStorage) ── */
 function openDeviceUser(){
-  const opts=MEMBERS.map(m=>`<div class="picker-opt${DEVICE_USER===m?' on':''}" onclick="setDeviceUser('${jsq(m)}')">👤 ${esc(m)}</div>`).join("");
-  $("duOpts").innerHTML=opts+`<div class="picker-opt${!DEVICE_USER?' on':''}" onclick="setDeviceUser('')">공용 (정하지 않음)</div>`;
+  const opts=MEMBERS.map(m=>`<div class="picker-opt${DEVICE_USER===m?' on':''}"${asBtn()} onclick="setDeviceUser('${jsq(m)}')">👤 ${esc(m)}</div>`).join("");
+  $("duOpts").innerHTML=opts+`<div class="picker-opt${!DEVICE_USER?' on':''}"${asBtn()} onclick="setDeviceUser('')">공용 (정하지 않음)</div>`;
   document.body.classList.add("sheet-open");  // 배경 스크롤 잠금
   $("duOv").classList.add("open");
 }
@@ -2096,10 +2136,10 @@ function filterBar(){
   const arrow = d => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg>`;
   return `<div class="pnav">
     <button onclick="movePeriod(-1)" aria-label="이전 주기"${allOn?" disabled":""}>${arrow("m15 18-6-6 6-6")}</button>
-    <div class="pnav-t" onclick="resetPeriod()">${esc(label)}</div>
+    <div class="pnav-t"${asBtn(' aria-label="'+esc(label)+' — 누르면 이번 주기로"')} onclick="resetPeriod()">${esc(label)}</div>
     <button onclick="movePeriod(1)" aria-label="다음 주기"${(allOn||periodOffset>=0)?" disabled":""}>${arrow("m9 18 6-6-6-6")}</button>
-  </div>${memberFilterPills().replace(/<\/div>$/,
-    `<span class="pill${allOn?" on":""}" onclick="setScope('all')">전체 기간</span></div>`)}`;
+  </div>${memberFilterPills().replace(/<\/div>$/,   // 치환은 함수형 — 문자열이면 $ 가 특수 패턴으로 읽힌다
+    () => pill(allOn, "setScope('all')", "전체 기간") + `</div>`)}`;
 }
 // 주기 이동 (◀ 과거 / ▶ 미래, 이번 주기까지) — 누르면 '이번 주기' 스코프로 전환
 function movePeriod(d){ periodOffset=Math.min(0,periodOffset+d); scope="current"; render(); }
@@ -2115,7 +2155,7 @@ function viewList(){
   const all=scoped();
   if(!all.length) return `<div class="sec">${empty("📭","내역이 없어요.\n＋ 버튼으로 추가해보세요.")}</div>`;
   const searchBar=`<div class="searchw"><div>
-    <input class="search-inp" id="searchBox" placeholder="메모·카테고리·계좌 검색" value="${esc(searchQ)}" oninput="setSearch(this.value)">
+    <input class="search-inp" id="searchBox" aria-label="내역 검색" enterkeyhint="search" placeholder="메모·카테고리·계좌 검색" value="${esc(searchQ)}" oninput="setSearch(this.value)">
     <button class="search-x" id="searchClear" onclick="setSearch('')" aria-label="검색 지우기" style="display:${searchQ?'flex':'none'}">✕</button>
   </div></div>`;
   return searchBar+`<div id="listResults">${listResultsHtml(all)}</div>`;
@@ -2144,10 +2184,13 @@ function dayGroupHtml(date, dr){
     if(r.method) sub.push(esc(r.method));
     if(r.member) sub.push(`<span class="chip mem">${esc(r.member)}</span>`);
     if(r.memo)   sub.push(`<span class="memo">${esc(r.memo)}</span>`);
-    h+=`<div class="item"><div class="i-ic">${icon(r.category)}</div><div class="i-bd">
+    // 행 전체 탭 = 수정(손가락 편의). 키보드·스크린리더 경로는 안쪽 '수정' 버튼이 맡는다 — 행에 role=button 을
+    // 주면 버튼 안에 버튼이 든 꼴이 된다. ⚠️ 안쪽 버튼은 stopPropagation 필수: 빼면 '삭제'를 누를 때 수정 시트까지 열린다
+    const what=`${esc(r.category)} ${pf}${won(r.amount)}`;
+    h+=`<div class="item" data-row-tap onclick="editEntry('${r.id}')"><div class="i-ic" aria-hidden="true">${icon(r.category)}</div><div class="i-bd">
       <div class="i-top"><span class="i-cat">${esc(r.category)}</span><span class="i-amt ${cls}">${pf}${won(r.amount)}</span></div>
       <div class="i-foot"><div class="i-sub">${sub.join(" · ")}</div>
-        <div class="i-act"><button class="b-edit" onclick="editEntry('${r.id}')">수정</button><button class="b-del" onclick="delEntry('${r.id}')">삭제</button></div></div>
+        <div class="i-act"><button class="b-edit" aria-label="${what} 수정" onclick="event.stopPropagation();editEntry('${r.id}')">수정</button><button class="b-del" aria-label="${what} 삭제" onclick="event.stopPropagation();delEntry('${r.id}')">삭제</button></div></div>
     </div></div>`;
   });
   return h+`</div>`;
@@ -2219,7 +2262,7 @@ function catCard(cat,v,pct,drill){
     ? `<div class="c-sub">수입 +${won(v.inc)} · 지출 -${won(v.exp)}</div>` : "";
   const meter = pct>0
     ? `<div class="c-st"><div class="barw"><div class="bar" style="width:${pct}%"></div></div><span class="c-pct">${pct}%</span></div>` : "";
-  const clk=drill?` class="ccard link" onclick="drillTo('${jsq(cat)}')"`:` class="ccard"`;
+  const clk=drill?` class="ccard link"${asBtn(` aria-label="${esc(cat)} 내역 보기"`)} onclick="drillTo('${jsq(cat)}')"`:` class="ccard"`;
   return `<div${clk}><div class="c-h"><div class="c-l"><div class="c-ic">${icon(cat)}</div><div class="c-nm">${esc(cat)}</div></div><span class="c-bd ${net>=0?'bg':'br'}">${net>=0?'+':''}${won(net)}</span></div>${sub}${meter}</div>`;
 }
 // 분류 카드 → 내역 탭 드릴다운 (검색어로 해당 항목만 필터, 주기·멤버 필터 유지)
@@ -2283,7 +2326,7 @@ function toggleLimEdit(cat){
 }
 function limEditHtml(cat, limit){
   // 입력·버튼 탭이 행의 토글로 번지지 않게 막는다
-  return `<div class="l-edit" onclick="event.stopPropagation()"><input id="lim_${esc(limitMember)}_${esc(cat)}" inputmode="numeric" placeholder="월 한도 (비우면 삭제)" value="${limit?comma(limit):''}" oninput="fmtNum(this)" onkeydown="if(event.key==='Enter')saveLimit('${jsq(limitMember)}','${jsq(cat)}')"><button onclick="saveLimit('${jsq(limitMember)}','${jsq(cat)}')">저장</button></div>`;
+  return `<div class="l-edit" onclick="event.stopPropagation()"><input id="lim_${esc(limitMember)}_${esc(cat)}" aria-label="${esc(cat)} 월 한도" inputmode="numeric" placeholder="월 한도 (비우면 삭제)" value="${limit?comma(limit):''}" oninput="fmtNum(this)" onkeydown="if(event.key==='Enter')saveLimit('${jsq(limitMember)}','${jsq(cat)}')"><button onclick="saveLimit('${jsq(limitMember)}','${jsq(cat)}')">저장</button></div>`;
 }
 // 진행 바 + 오늘 눈금. pace = 주기 경과율(0~1)
 const limBar = (pct, st, pace) =>
@@ -2332,7 +2375,7 @@ function viewLimit(){
     const state=it.pct>=100?"over":it.pct>=WARN_TH?"warn":"ok";
     const p=state==="ok"?proj(it):0;
     const open=limEdit===it.cat;
-    h+=`<div class="lcard ${state} link" onclick="toggleLimEdit('${jsq(it.cat)}')">
+    h+=`<div class="lcard ${state} link"${asBtn(` aria-expanded="${open}"`)} onclick="toggleLimEdit('${jsq(it.cat)}')">
       <div class="l-h"><div class="c-l"><div class="c-ic">${icon(it.cat)}</div><div class="c-nm">${esc(it.cat)}</div></div><div class="l-pct ${state}">${it.pct}%</div></div>
       ${limBar(it.pct,state,pace)}
       <div class="l-meta"><span>${won(it.used)} <span class="l-lim">/ ${won(it.limit)}</span></span><span class="l-tgl">${open?'닫기':'변경'}</span></div>`;
@@ -2347,7 +2390,7 @@ function viewLimit(){
     h+=`<div class="sec-t">한도 미설정<span>${noLim.length}개 · 탭해서 설정</span></div>`;
     noLim.forEach(it=>{
       const open=limEdit===it.cat;
-      h+=`<div class="lrow-w"><div class="lrow" onclick="toggleLimEdit('${jsq(it.cat)}')">
+      h+=`<div class="lrow-w"><div class="lrow"${asBtn(` aria-expanded="${open}"`)} onclick="toggleLimEdit('${jsq(it.cat)}')">
         <div class="c-ic">${icon(it.cat)}</div><div class="c-nm">${esc(it.cat)}</div>
         <span class="lrow-s">${it.used<0?`${won(-it.used)} 순입금`:it.used?`${won(it.used)} 사용`:''}</span>
         <span class="l-tgl">${open?'닫기':'설정'}</span></div>${open?limEditHtml(it.cat,0):''}</div>`;
@@ -2451,10 +2494,15 @@ function viewAnalysis(){
   // 일회성 큰 지출 = 개별 거래가 '자기 카테고리 평소(중앙값)'보다 크게 튄 이상치
   const anom = bigSpends(rowsByPeriod.flat());
 
-  const insights = buildInsights(_anMem, periods, rowsByPeriod, curCatArr, totExp, same);
+  // 주기 초반(1/4 전)엔 비율·증감을 '판정'하지 않는다 — 한도 탭 속도 경고와 같은 원칙(PACE_MIN).
+  // 숫자는 그대로 보여주되 빨강·초록을 빼고, 진단(쏠림·급증·고정비)은 buildInsights가 보류한다
+  const early  = prog.day/prog.len < PACE_MIN;
+  const minDay = Math.ceil(prog.len*PACE_MIN);
+  const insights = buildInsights(_anMem, periods, rowsByPeriod, curCatArr, totExp, same, early, minDay);
 
   // ── HTML ──
-  const trChip = p => `<span class="am-d ${p>0?'r':p<0?'g':'f'}">${p>0?'▲':p<0?'▼':'–'}${Math.abs(p)}%</span>`;
+  const tone   = p => early ? 'f' : p>0?'r':p<0?'g':'f';
+  const trChip = p => `<span class="am-d ${tone(p)}">${p>0?'▲':p<0?'▼':'–'}${Math.abs(p)}%</span>`;
   let h=`<div class="sec">`;
 
   // 1) 메트릭 카드 (지출 / 수입 / 평균 대비)
@@ -2464,15 +2512,16 @@ function viewAnalysis(){
       : prev ? `<div class="am-sub">${trChip(trPct)} <span style="color:var(--ink-3)">전 주기 같은 날</span></div>`
       : `<div class="am-sub" style="color:var(--ink-3)">전 주기 같은 날 0원</div>`}</div>
     <div class="am"><div class="am-l">이번 주기 수입</div><div class="am-v g">${won(lastInc)}</div><div class="am-sub" style="color:var(--ink-3)">순 ${net>=0?'+':'-'}${wonShort(Math.abs(net))}</div></div>
-    <div class="am"><div class="am-l">평균 대비</div><div class="am-v ${avgPct>0?'r':avgPct<0?'g':''}">${avgPct>=0?'+':''}${avgPct}%</div><div class="am-sub" style="color:var(--ink-3)">같은 날 평균 ${wonShort(avg)}</div></div>
+    <div class="am"><div class="am-l">평균 대비</div><div class="am-v ${tone(avgPct)==='f'?'':tone(avgPct)}">${avgPct>=0?'+':''}${avgPct}%</div><div class="am-sub" style="color:var(--ink-3)">같은 날 평균 ${wonShort(avg)}</div></div>
   </div>
-  <div style="font-size:.7rem;color:var(--ink-3);margin:-4px 0 12px;line-height:1.6">이번 주기 ${prog.day}/${prog.len}일째 — 지난 주기도 같은 날까지만 잘라 비교해요.<br>같은 카테고리의 환불·정산 입금은 지출에서 차감해 계산해요</div>`;
+  <div style="font-size:.75rem;color:var(--ink-3);margin:10px 0 12px;line-height:1.6">이번 주기 ${prog.day}/${prog.len}일째 — 지난 주기도 같은 날까지만 잘라 비교해요.${early
+      ? `<br>아직 주기 초반이라 몇 건만으로도 비율이 크게 흔들려요 — 증감 색과 진단은 ${minDay}일째부터예요.` : ``}<br>같은 카테고리의 환불·정산 입금은 지출에서 차감해 계산해요</div>`;
 
   // 2) 주기별 지출 구성 — 카테고리 스택 막대 + 수입 막대 (한눈에 주기별 카테고리 지출/수입)
   if(catTotals.length || incomeByPeriod.some(v=>v>0)){
     h+=`<div class="panel"><div class="p-t">주기별 지출 구성<span class="p-sub">카테고리 누적</span></div>
       <canvas id="chartPeriod" height="200"></canvas>
-      <div style="font-size:.7rem;color:var(--ink-3);margin-top:10px;line-height:1.6">※ 흐린 마지막 막대는 진행 중인 주기예요(${prog.day}/${prog.len}일째) — 아직 다 차지 않아 낮게 보여요.${mixedPeriods()
+      <div style="font-size:.75rem;color:var(--ink-3);margin-top:10px;line-height:1.6">※ 흐린 마지막 막대는 진행 중인 주기예요(${prog.day}/${prog.len}일째) — 아직 다 차지 않아 낮게 보여요.${mixedPeriods()
         ? `<br>※ 멤버마다 결제주기 시작일이 달라, 가로축 라벨은 ${esc(_anMem)} 기준이고 집계는 각자의 주기로 나눴어요.`
         : ``}</div></div>`;
   }
@@ -2498,8 +2547,14 @@ function viewAnalysis(){
     ${insights.map(x=>`<div class="ins ${x.tone||''}"><div class="ins-ic">${x.ic}</div><div class="ins-bd"><div class="ins-t">${esc(x.t)}</div><div class="ins-b">${esc(x.b)}</div></div></div>`).join("")}
   </div>`;
 
-  // 6) 반복 지출
-  h+=`<div class="panel"><div class="p-t">반복 지출<span class="p-sub">2주기 이상</span></div>${rec.length?rec.map(x=>`<div class="arow"><span class="a-mo">${icon(x.cat)} ${esc(x.memo)}</span><span class="a-tag rec">${x.span}주기</span><span class="a-v">${won(x.total)}</span></div>`).join(''):'<div class="p-body">없음</div>'}</div>`;
+  // 6) 반복 지출 — 묶음 기준은 (카테고리, 메모)라서 같은 메모가 여러 카테고리에 있으면 메모만 보고는
+  //    같은 줄이 두 번 나온 것처럼 보였다 → 그때만 카테고리를 붙인다. 길어지면 상위 REC_MAX개 + 나머지 요약
+  const REC_MAX = 8, memoKey = x => x.memo.replace(/\(.*\)/,"").trim();
+  const memoN = {}; rec.forEach(x => { memoN[memoKey(x)] = (memoN[memoKey(x)]||0) + 1; });
+  const recRest = rec.slice(REC_MAX);
+  h+=`<div class="panel"><div class="p-t">반복 지출<span class="p-sub">2주기 이상</span></div>${rec.length?rec.slice(0,REC_MAX).map(x=>`<div class="arow"><span class="a-mo">${icon(x.cat)} ${esc(x.memo)}${memoN[memoKey(x)]>1?`<span class="a-cat">· ${esc(x.cat)}</span>`:''}</span><span class="a-tag rec">${x.span}주기</span><span class="a-v">${won(x.total)}</span></div>`).join('')
+      + (recRest.length ? `<div class="a-more">외 ${recRest.length}건 · ${won(recRest.reduce((s,x)=>s+x.total,0))}</div>` : '')
+    :'<div class="p-body">없음</div>'}</div>`;
 
   // 7) 일회성 큰 지출 — 자기 카테고리 평소 금액 대비 크게 튄 항목만
   h+=`<div class="panel"><div class="p-t">일회성 큰 지출<span class="p-sub">평소 대비 튄 항목</span></div>${
@@ -2513,15 +2568,22 @@ function viewAnalysis(){
 }
 
 /* 카테고리 기반 스마트 분석 — 과지출 진단 + 절약 팁 생성 */
-function buildInsights(mem, periods, rowsByPeriod, curCatArr, totExp, same){
+function buildInsights(mem, periods, rowsByPeriod, curCatArr, totExp, same, early, minDay){
   same = same || rowsByPeriod;
   if(!totExp) return [{ic:"🌱",tone:"good",t:"이번 주기는 아직 지출이 없어요.",b:"지출이 쌓이면 카테고리별 과지출 진단과 절약 팁을 보여드릴게요."}];
   const out=[];
 
+  /* 주기 초반(1/4 전)엔 비율 진단을 보류한다 — 한도 탭 속도 경고와 같은 원칙(PACE_MIN).
+     ⚠️ 하루 이틀치로는 거래 한 건이 비율을 통째로 정한다. 주기 첫날 구독료 4만원 한 건이면
+     '구독에 100% 쏠림(경고) · 평소보다 264% 급증 · 고정 100%'가 한꺼번에 떠서, 매달 첫 주마다
+     구독을 줄이라고 했다(2026-10-25 화면). 한도 초과·임박은 비율이 아니라 사실이라 그대로 둔다. */
+  if(early) out.push({ic:"🌱",tone:"info",t:`주기 초반이라 진단은 ${minDay}일째부터 보여드려요`,
+    b:"지금은 거래 몇 건이 비율을 크게 흔들어서 쏠림·급증·고정비 진단이 과장돼요. 한도 초과·임박은 그대로 알려드려요."});
+
   // 1) 최대 지출 카테고리 집중도
   const [topCat, topAmt]=curCatArr[0];
   const topPct=Math.round(topAmt/totExp*100);
-  out.push({ic:icon(topCat),tone: topPct>=40?"warn":"info",
+  if(!early) out.push({ic:icon(topCat),tone: topPct>=40?"warn":"info",
     t:`가장 큰 지출은 '${topCat}' · 전체의 ${topPct}%`,
     b: topPct>=40
       ? `이번 주기 지출이 '${topCat}'(${won(topAmt)})에 쏠려 있어요. 한 카테고리가 40%를 넘으면 예산이 흔들리기 쉬워요 — 이 항목부터 줄일 여지를 찾아보세요.`
@@ -2540,6 +2602,7 @@ function buildInsights(mem, periods, rowsByPeriod, curCatArr, totExp, same){
     b: overs.map(o=>`'${o.c}' ${o.pct}% (${won(o.used-o.l)} 초과)`).join(" · ")+" — 다음 주기엔 이 카테고리를 가장 먼저 조여보세요."});
   if(nears.length) out.push({ic:"⚠️",tone:"info",t:`한도 임박 ${nears.length}건`,
     b: nears.map(o=>`'${o.c}' ${o.pct}%`).join(" · ")+" — 한도까지 여유가 얼마 없어요."});
+  if(early) return out;   // 이하 급증·절약 팁·고정비는 전부 비율 판정이다(위 주석)
 
   // 3) 평소보다 급증한 카테고리 (이전 주기 평균 대비)
   //    비교 대상(curCatArr)이 순액이므로 평소 값도 주기별 순액으로 — 한쪽만 총액이면 정산 입금만큼 '급증'이 가려진다
@@ -2738,7 +2801,7 @@ function tyAmounts(member, kind){
    value 빈 문자열('')은 '(미지정)' 결제수단을 가리키는 정상 키다 — tax_map의 value가 not null default '' */
 function taxSelect(member, kind, value, cur){
   const opts = kind==="category" ? TY_CAT_KINDS : TY_KINDS;
-  return `<select class="tym-sel${cur?'':' un'}" onchange="setTaxMap('${jsq(member)}','${kind}','${jsq(value)}',this.value)">
+  return `<select class="tym-sel${cur?'':' un'}" aria-label="${value?esc(value):'(미지정)'} 연말정산 구분" onchange="setTaxMap('${jsq(member)}','${kind}','${jsq(value)}',this.value)">
       <option value=""${cur?'':' selected'}>미분류</option>
       ${Object.keys(opts).map(k=>`<option value="${k}"${cur===k?' selected':''}>${opts[k]}</option>`).join("")}
     </select>`;
@@ -2869,7 +2932,7 @@ function viewTaxYear(){
   // 0) 테이블 미설치 안내 — 이게 없으면 매핑이 저장되지 않아 모든 집계가 0원이 된다
   if(!TAX_READY){
     h+=`<div class="m-section" style="border-color:color-mix(in srgb,var(--exp) 30%,transparent)">
-      <div class="m-title">설치 안내 <span style="font-size:.66rem;color:var(--exp);font-weight:700">필수</span></div>
+      <div class="m-title">설치 안내 <span class="m-tag" style="color:var(--exp);font-weight:700">필수</span></div>
       <div style="font-size:.8rem;color:var(--ink-2);line-height:1.75;margin-bottom:12px">
         <b style="color:var(--exp)">tax_map 테이블이 없어 매핑을 저장할 수 없습니다.</b> 그래서 지금은 모든 집계가 0원으로 나와요.<br>
         Supabase 대시보드 → SQL Editor에서 아래를 한 번 실행해주세요.
@@ -2897,7 +2960,7 @@ function viewTaxYear(){
       ? `<div class="alert" style="margin-bottom:12px">⚠️ 월급 입금이 ${t.salaryCnt}건뿐이라 ${t.m}개월치를 다 반영하지 못했어요. 추정이 실제보다 낮을 수 있으니 연봉을 직접 입력해주세요.</div>`
       : ``}
     <div class="m-add">
-      <input id="ty_sal" inputmode="numeric" placeholder="총급여 직접 입력 (비우면 추정값)"
+      <input id="ty_sal" aria-label="총급여 직접 입력" inputmode="numeric" placeholder="총급여 직접 입력 (비우면 추정값)"
         value="${t.manual?comma(t.manual):''}" oninput="fmtNum(this)">
       <button onclick="saveTySalary('${jsq(tyMember)}')">저장</button>
     </div>
@@ -2937,7 +3000,7 @@ function viewTaxYear(){
         <span class="tyu-x"><span class="tyu-v">${won(t.S)}</span>
           <div class="tyu-s">연환산 ${won(R(t.Sp))}</div></span></div>
     </div>
-    <div style="font-size:.7rem;color:var(--ink-3);margin-top:9px;line-height:1.65">
+    <div style="font-size:.75rem;color:var(--ink-3);margin-top:9px;line-height:1.65">
       큰 숫자는 ${t.m}월까지 실제 사용액, 아래는 이 추세의 연말 예상치 · 막대는 연환산 기준${t.ytd.none>0?` · 공제 제외 ${won(t.ytd.none)}`:``}
     </div>`;
   if(unmapArr.length){
@@ -2970,7 +3033,7 @@ function viewTaxYear(){
         남은 공제 여력 <b style="color:var(--inc)">${won(R(t.room))}</b>${t.toTh>0
           ? ` · 그전에 25% 문턱까지 <b style="color:var(--warn)">${won(R(t.toTh))}</b>를 더 써야 공제가 시작돼요`:``}
       </div>
-      <div style="font-size:.66rem;font-weight:700;color:var(--ink-3);margin:15px 0 -5px;letter-spacing:.3px">지금부터 1원의 공제 효과</div>
+      <div style="font-size:.6875rem;font-weight:700;color:var(--ink-3);margin:15px 0 -5px;letter-spacing:.3px">지금부터 1원의 공제 효과</div>
       <div class="tyn">
         ${nCard("신용카드", mr.credit, t.need15, tyColor("credit"), mr.credit>mr.thirty)}
         ${nCard("체크·현금", mr.thirty, t.need30, tyColor("check"), mr.thirty>mr.credit)}
@@ -2999,7 +3062,7 @@ function viewTaxYear(){
       <div class="tysc-t"><span class="tysc-n">${nm}</span><span class="tysc-v" style="color:${col}">${won(R(v))}</span></div>
       <div class="tysc-bw"><div class="tysc-b" style="width:${Math.max(2,v/mx*100)}%;background:${col}"></div></div></div>`;
     h+=`<div class="panel"><div class="p-t">남은 ${t.remain}개월 비교<span class="p-sub">연말 공제액</span></div>
-      <div style="font-size:.75rem;color:var(--ink-3);line-height:1.7;margin:-4px 0 13px">
+      <div style="font-size:.75rem;color:var(--ink-3);line-height:1.7;margin:10px 0 13px">
         지금 페이스(월 ${wonShort(R(t.pace))})로 남은 ${t.remain}개월에 ${won(R(t.future))}를 더 쓴다고 볼 때
       </div>
       <div class="tysc">
@@ -3029,7 +3092,7 @@ function viewTaxYear(){
     };
     h+=`<div class="panel"><div class="p-t">월별 사용 추이<span class="p-sub">신용·체크·현금</span></div>
       <canvas id="chartTyMonth" height="200"></canvas>
-      ${t.salary>0?`<div style="font-size:.7rem;color:var(--ink-3);margin-top:10px;line-height:1.6">점선 = 문턱을 12개월로 나눈 월 적정 페이스 ${won(R(t.th/12))}</div>`:``}
+      ${t.salary>0?`<div style="font-size:.75rem;color:var(--ink-3);margin-top:10px;line-height:1.6">점선 = 문턱을 12개월로 나눈 월 적정 페이스 ${won(R(t.th/12))}</div>`:``}
     </div>`;
   } else { _tyStash=null; }
 
@@ -3063,7 +3126,7 @@ function taxMapSection(member, kind, t){
   };
 
   let h=`<div class="m-section">
-    <div class="m-title">${isCat?'소득 카테고리 매핑':'결제수단 매핑'} <span style="font-size:.66rem;color:var(--ink-3);font-weight:600">${esc(member)}</span></div>
+    <div class="m-title">${isCat?'소득 카테고리 매핑':'결제수단 매핑'} <span class="m-tag">${esc(member)}</span></div>
     <div style="font-size:.75rem;color:var(--ink-2);line-height:1.75;margin-bottom:12px">
       ${isCat
         ? `어떤 입금을 <b style="color:var(--ink)">급여(총급여)</b>로 볼지 지정합니다. 여기서 소득으로 지정한 카테고리만 25% 문턱 계산에 들어가요.`
@@ -3238,7 +3301,7 @@ function viewMaster(){
   }
   h+=`</div>
     <div class="m-add">
-      <input id="m_input_member" placeholder="새 멤버 이름" onkeydown="if(event.key==='Enter')addMember()">
+      <input id="m_input_member" aria-label="새 멤버 이름" placeholder="새 멤버 이름" onkeydown="if(event.key==='Enter')addMember()">
       <button onclick="addMember()">추가</button>
     </div>
   </div>`;
@@ -3264,14 +3327,14 @@ function viewMaster(){
 
   // 앱 설정 (전역 — app_settings)
   h+=`<div class="m-section">
-    <div class="m-title">앱 설정 <span style="font-size:.66rem;color:var(--ink-3);font-weight:600">전체 공통</span></div>
+    <div class="m-title">앱 설정 <span class="m-tag">전체 공통</span></div>
     <div class="set-row">
       <div style="flex:1;min-width:0">
         <div class="set-nm">한도 경고 임계값</div>
         <div class="set-ds">한도 사용률이 이 값(%)을 넘으면 주황 경고 (50~99)</div>
       </div>
       <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
-        <input class="set-in" id="set_warn" type="number" min="50" max="99" inputmode="numeric" value="${WARN_TH}">
+        <input class="set-in" id="set_warn" aria-label="한도 경고 임계값(%)" type="number" min="50" max="99" inputmode="numeric" value="${WARN_TH}">
         <button class="m-save" onclick="saveAppSetting('warn_threshold','set_warn',50,99,80,'%')">저장</button>
       </div>
     </div>
@@ -3281,7 +3344,7 @@ function viewMaster(){
         <div class="set-ds">분석·분류 탭에서 보여줄 최근 주기 개수 (2~6)</div>
       </div>
       <div style="display:flex;gap:6px;align-items:center;flex-shrink:0">
-        <input class="set-in" id="set_periods" type="number" min="2" max="6" inputmode="numeric" value="${AN_PERIODS}">
+        <input class="set-in" id="set_periods" aria-label="분석 표시 주기 수" type="number" min="2" max="6" inputmode="numeric" value="${AN_PERIODS}">
         <button class="m-save" onclick="saveAppSetting('analysis_periods','set_periods',2,6,3,'주기')">저장</button>
       </div>
     </div>
@@ -3300,26 +3363,26 @@ function viewMaster(){
     return h+`</div>`;
   }
 
-  // 멤버 선택 바
-  h+=`<div style="margin-bottom:16px">
-    <div style="font-size:.65rem;font-weight:700;color:var(--ink-3);letter-spacing:.8px;margin-bottom:10px">항목 관리할 멤버</div>
-    <div class="seg">${segBtns(MEMBERS, masterMember, "setMasterMember")}</div>
-  </div>
-  <div style="display:flex;align-items:center;gap:10px;padding:12px 15px;background:var(--fill);border:1px solid var(--line-2);border-radius:14px;margin-bottom:18px">
-    <span style="font-size:1.05rem">👤</span>
-    <span style="font-size:.87rem;color:var(--ink-2)"><b style="color:var(--ink)">${esc(masterMember)}</b>의 항목을 관리합니다</span>
+  // 멤버별 항목 — 여기부터 아래 섹션은 전부 고른 멤버의 것이다.
+  // ⚠️ 옛 구조는 10.4px 라벨이 위 CSV 버튼에 바싹 붙어 있어 내보내기의 일부처럼 보였고, 그 아래 회색 상자
+  //    ("정우의 항목을 관리합니다")는 바로 위 세그먼트와 같은 말을 반복했다(radius 14px 도 시트 전용 규칙 위반).
+  //    → 다른 섹션과 같은 룰선 제목으로 끊고, 아래 섹션 제목마다 멤버 꼬리표(.m-tag)를 단다 — 스크롤해도 누구 것인지 보이게
+  h+=`<div class="m-section">
+    <div class="m-title">멤버별 항목 <span class="m-tag">아래 설정은 고른 멤버에게만 적용</span></div>
+    <div class="seg" style="margin-top:12px">${segBtns(MEMBERS, masterMember, "setMasterMember")}</div>
   </div>`;
+  const who = `<span class="m-tag">${esc(masterMember)}</span>`;
 
   // 결제 주기 설정 (멤버별)
   const _bs=BILLING_STARTS[masterMember]||25;
   const _edTxt=_bs>1?`다음달 <b style="color:var(--ink)">${_bs-1}일</b>`:`<b style="color:var(--ink)">말일</b>`;
   h+=`<div class="m-section">
-    <div class="m-title">결제 주기 설정</div>
+    <div class="m-title">결제 주기 설정 ${who}</div>
     <div style="font-size:.82rem;color:var(--ink-2);margin-bottom:14px;line-height:1.8">
       <b style="color:var(--ink)">${esc(masterMember)}</b> 현재: 매월 <b style="color:var(--ink)">${_bs}일</b> ~ ${_edTxt}
     </div>
     <div class="m-add">
-      <input id="m_billing_start_${esc(masterMember)}" type="number" min="1" max="28" inputmode="numeric"
+      <input id="m_billing_start_${esc(masterMember)}" aria-label="결제 주기 시작일" type="number" min="1" max="28" inputmode="numeric"
         value="${_bs}" placeholder="1~28" style="max-width:90px;text-align:center">
       <button onclick="saveBillingStart('${jsq(masterMember)}')">일로 변경</button>
     </div>
@@ -3332,9 +3395,9 @@ function viewMaster(){
     // 연말정산 매핑을 여기서도 관리 (categories=소득 여부, methods=공제 구분)
     const tKind = key==="categories" ? "category" : key==="methods" ? "method" : null;
     const tBag  = tKind ? ((tKind==="category"?CTMAP:MTMAP)[masterMember]||{}) : {};
-    h+=`<div class="m-section"><div class="m-title">${label} 관리</div>`;
-    if(key==="categories") h+=`<div style="font-size:.72rem;color:var(--ink-3);margin:-6px 0 8px;line-height:1.6">💡 아이콘을 누르면 이모지를 바꿀 수 있어요 (모든 멤버 공통 적용)<br>💵 오른쪽 선택은 <b style="color:var(--ink-2)">연말정산에서 이 카테고리 입금을 소득으로 볼지</b>입니다</div>`;
-    if(key==="methods")    h+=`<div style="font-size:.72rem;color:var(--ink-3);margin:-6px 0 8px;line-height:1.6">💳 오른쪽 선택은 <b style="color:var(--ink-2)">연말정산 공제 구분</b>입니다 (신용 15% · 체크/현금 30% · 제외)</div>`;
+    h+=`<div class="m-section"><div class="m-title">${label} 관리 ${who}</div>`;
+    if(key==="categories") h+=`<div style="font-size:.75rem;color:var(--ink-3);margin:8px 0 4px;line-height:1.6">💡 아이콘을 누르면 이모지를 바꿀 수 있어요 (모든 멤버 공통 적용)<br>💵 오른쪽 선택은 <b style="color:var(--ink-2)">연말정산에서 이 카테고리 입금을 소득으로 볼지</b>입니다</div>`;
+    if(key==="methods")    h+=`<div style="font-size:.75rem;color:var(--ink-3);margin:8px 0 4px;line-height:1.6">💳 오른쪽 선택은 <b style="color:var(--ink-2)">연말정산 공제 구분</b>입니다 (신용 15% · 체크/현금 30% · 제외)</div>`;
     h+=`<div class="m-list">`;
     if(items.length) items.forEach(v=>{
       const ico=key==="categories"?`<button class="m-ico" onclick="openIconPicker('${jsq(v)}')" aria-label="아이콘 변경">${icon(v)}</button>`:"";
@@ -3370,7 +3433,7 @@ function viewMaster(){
         h+=`</div>`;
       }
     }
-    h+=`<div class="m-add"><input id="m_input_${key}" placeholder="${label} 추가" onkeydown="if(event.key==='Enter')addMaster('${key}')"><button onclick="addMaster('${key}')">추가</button></div></div>`;
+    h+=`<div class="m-add"><input id="m_input_${key}" aria-label="${label} 추가" placeholder="${label} 추가" onkeydown="if(event.key==='Enter')addMaster('${key}')"><button onclick="addMaster('${key}')">추가</button></div></div>`;
   });
 
   return h+`</div>`;
@@ -3508,6 +3571,13 @@ document.addEventListener("keydown",e=>{
   else if($("overlay").classList.contains("open")) closeSheet();
   // authOv(로그인 게이트)는 의도적으로 제외 — ESC로 닫히면 게이트가 아니다
 });
+/* role=button 을 단 div(분류 카드·한도 행·피커 옵션·주기 라벨)는 브라우저가 Enter/Space 를 클릭으로
+   바꿔주지 않는다(<button>만 해준다) — 여기서 대신. Space 는 기본 동작(스크롤)을 막아야 한다 */
+document.addEventListener("keydown",e=>{
+  const t=e.target;
+  if((e.key!=="Enter" && e.key!==" ") || !t || t.tagName==="BUTTON" || !t.getAttribute || t.getAttribute("role")!=="button") return;
+  e.preventDefault(); t.click();
+});
 
 /* ── 커스텀 피커 ── */
 let pickerSel = null;
@@ -3520,7 +3590,7 @@ function openPicker(selId, title){
     $("pickerOpts").innerHTML = '<div style="padding:24px 20px;text-align:center;color:var(--ink-3);font-size:.85rem">항목이 없어요. 설정에서 추가해주세요.</div>';
   } else {
     $("pickerOpts").innerHTML = opts.map((o,i)=>
-      `<div class="picker-opt${sel.value===o.value?' on':''}" onclick="pickOptIdx(${i})">${esc(o.text)}</div>`
+      `<div class="picker-opt${sel.value===o.value?' on':''}"${asBtn()} onclick="pickOptIdx(${i})">${esc(o.text)}</div>`
     ).join("");
   }
   $("overlay").style.overflow = "hidden";  // 배경(입력 시트) 스크롤 잠금

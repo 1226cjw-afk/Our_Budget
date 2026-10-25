@@ -173,6 +173,21 @@ const dbRowsSorted = db => db.transactions.slice().sort(dbOrder).map(r => r.id);
        "저장 뒤 왕복이 다시 직렬로 붙는다");
   }
 
+  // 내역 행 전체가 '수정'이다(2026-10-25). 안쪽 버튼이 전파를 막지 않으면 '삭제'를 누를 때 수정 시트까지 열린다
+  {
+    const A = boot(seed(), () => 1);
+    await A.ev("loadAll()");
+    const g = A.ev("dayGroupHtml(ROWS[0].date, [ROWS[0]])");
+    ok("내역 행을 누르면 수정", /class="item" data-row-tap onclick="editEntry\('/.test(g));
+    ok("행 안의 수정·삭제는 행 탭으로 번지지 않는다",
+       /class="b-edit"[^>]*onclick="event\.stopPropagation\(\);editEntry/.test(g) &&
+       /class="b-del"[^>]*onclick="event\.stopPropagation\(\);delEntry/.test(g),
+       "삭제를 누르면 확인창 뒤에 수정 시트가 열린다");
+    const dm = code.slice(code.indexOf("async function delMaster("), code.indexOf("async function delMaster(") + 600);
+    ok("카테고리·결제수단·계좌 삭제는 확인을 거친다", /if\(!confirm\(/.test(dm.slice(0, dm.indexOf("sb.from"))),
+       "바로 옆이 연말정산 셀렉트라 잘못 누르면 확인 없이 지워진다");
+  }
+
   // ── 2. CRUD 재로드는 '최근 45일' 쿼리를 내지 않는다 ─────────
   {
     const A = boot(seed(), () => 1);

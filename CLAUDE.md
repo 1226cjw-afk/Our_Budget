@@ -86,6 +86,8 @@ Our_Budget/
 │   ├── test_samepoint.js # 분석 탭 '같은 시점' 비교 — 진행 중 주기를 다 찬 주기와 비교하지 않는가
 │   ├── test_limit_view.js # 한도 탭 오늘 눈금·속도 경고·접힌 입력칸 + 진입 모션 1회
 │   ├── perf_logic.js    #   계산 성능 — 행 수를 늘려가며 집계·렌더 비용과 '차수'를 잰다
+│   ├── audit_ux.js      #   UX 실측 — 실제 터치 영역·라벨·키보드 접근·글자 크기·요소 겹침 (9화면, 가짜 DB)
+│   ├── test_ui_flow.js  #   실제 좌표로 눌러보기 — 행 탭=수정·삭제 전파 차단·Enter·작은 폰 저장 버튼
 │   └── poll_deploy.js   #   배포 반영 폴링
 ├── docs/superpowers/    # 스펙·플랜 (배포 안 됨)
 ├── backup_appscript.gs  # 구글 시트 백업용 GAS 코드 (참고용, 배포는 Apps Script에 수동 반영)
@@ -439,11 +441,11 @@ FCP만 1,000ms→114ms로 당겨진 탓에 **스피너를 더 오래 쳐다보�
 | `saveLimit(member, cat)` | 멤버별 한도 upsert — **빈값/0이면 해당 행 delete**(한도 해제) |
 | `editEntry(id)` | 수정 시트 열기 — id로 ROWS 조회. ⚠️행 JSON을 onclick에 인라인 금지(메모 따옴표에 깨짐) |
 | `addMember() / delMember()` | 멤버 DB CRUD. **거래가 1건이라도 있으면 delMember는 차단** — `transactions.member` FK가 cascade라 거래가 통째로 사라지는데 구글 시트 백업엔 그 삭제가 전파되지 않아 복구 근거가 없다 |
-| `addMaster(key) / delMaster(key, val)` | 카테고리·결제수단·계좌 CRUD |
+| `addMaster(key) / delMaster(key, val)` | 카테고리·결제수단·계좌 CRUD. 삭제는 **확인을 거친다**(2026-10-25까지 확인 없이 지우던 유일한 삭제였다 — 바로 옆이 연말정산 셀렉트라 잘못 누르기 쉽다). 이미 저장된 거래 값은 그대로 남는다 |
 | `refreshCatList()` | 입력 시트 select 옵션 갱신 — 카테고리·결제수단·계좌를 **그 멤버의 최근 200건 기준 사용 횟수순**(`byUse`, 동률은 설정 순서)으로 |
 | `habitRows(m) / topAccountFor(m,cat) / autoAccount()` | 입력 습관(2026-10-05). 새 입력 시트는 고른 카테고리의 **단골 계좌를 미리 고른다**(실데이터 일치율 84.5%) — 라벨 옆 `#fAccountHint`로 자동 선택임을 밝힌다(틀린 계좌가 조용히 저장되면 잔액이 틀어진다). ⚠️사용자가 계좌를 직접 고르면(`acctAuto=false`) 이후 덮지 않는다. ⚠️설정에서 지운 계좌는 옵션에 없으면 고르지 않는다(되살리지 않음). ⚠️수정 시트는 저장된 계좌 그대로. `test_input_habit.js`가 고정 |
 | `openPicker(sel,title) / pickOptIdx(i) / updateSelBtn(sel)` | 커스텀 하단 시트 피커 열기·선택·버튼 표시 갱신 |
-| `viewAnalysis() / buildInsights() / bigSpends(rows)` | 분석 탭 렌더 + 스마트 진단·절약팁 + 일회성 이상치(카테고리 중앙값 대비 ≥2.5배·표본≥3) |
+| `viewAnalysis() / buildInsights() / bigSpends(rows)` | 분석 탭 렌더 + 스마트 진단·절약팁 + 일회성 이상치(카테고리 중앙값 대비 ≥2.5배·표본≥3). **주기 1/4(`PACE_MIN`) 전엔 비율 진단(쏠림·급증·절약팁·고정비)을 보류**하고 증감 색(빨강·초록)을 뺀다 — 한도 탭 속도 경고와 같은 원칙. 주기 첫날 구독료 한 건이면 '100% 쏠림·264% 급증·고정 100%'가 한꺼번에 떠서 매달 첫 주마다 구독을 줄이라고 했다. 한도 초과·임박은 사실이라 그대로. 반복 지출은 같은 메모가 여러 카테고리에 있을 때만 카테고리를 붙이고 8개까지(`외 N건`). `test_samepoint.js` ④ |
 | `taxCalc(member) / tyDeduct(credit,thirty,salary)` | 연말정산 집계(역년·연환산) / 소득공제액 — **최저사용금액(총급여 25%)은 공제율 낮은 신용부터 소진**되므로 신용<문턱이면 초과분 전체가 30% |
 | `tyAdvice(t) / viewTaxYear() / drawTaxChart()` | 상태별 핵심 조언 분기 / 연말정산 화면 / 월별 스택막대+월 적정페이스 점선 |
 | `tyNeed(kind,C,D,salary)` | 공제 한도를 채우는 데 **앞으로 더 써야 할 금액**(수단별). 문턱·한도 경계에서 케이스가 갈려 닫힌 식은 틀리기 쉬움 → 단조 증가 함수 이분탐색으로 통일 |
@@ -546,6 +548,23 @@ FCP만 1,000ms→114ms로 당겨진 탓에 **스피너를 더 오래 쳐다보�
     서브셋 조각을 더 받는다 — 실측 **+25KB·요청 +1**. 인라인 SVG면 0바이트다.
 - 섹션 제목(`.p-t`·`.m-title`)에는 이모지를 넣지 않는다(2026-08-24에 21건 제거).
 - 숫자는 body에 `font-variant-numeric:tabular-nums`, 전역 `:focus-visible`은 잉크 링
+
+**UX 계약 (2026-10-25) — 검사 `node scripts/audit_ux.js`** (9화면 실렌더, 가짜 DB. 고치기 전 69건 → 0건)
+- **터치 영역**: 누르는 영역은 `elementFromPoint`로 실측해 **24px 이상**(WCAG 2.5.8 AA, 미달이면 FAIL), 44px 권고.
+  작은 컨트롤은 **보이는 크기를 바꾸지 말고 `::after`로 누르는 영역만** 넓힌다(헤더 칩·새로고침·주기 ◀▶·주기 라벨·
+  내역 수정/삭제·설정 삭제·아이콘·시트 취소). 내역 수정·삭제는 22×19px → 35×43px.
+  ⚠️ 가로 확장은 이웃과의 간격 절반 이하로 — 넘으면 옆 버튼을 누른 게 이쪽으로 간다(그래서 `.i-act` 간격이 14px이다)
+- **누를 수 있는 것은 `<button>`**: 필은 `pill()`이 `<button aria-pressed>`로 만든다(옛 `<span onclick>`은 키보드로 못 가고
+  스크린리더가 버튼으로 안 읽었다). 버튼일 수 없는 div(분류 카드·한도 행·피커 옵션·주기 라벨)는 `asBtn()`으로
+  `role=button tabindex=0`을 달고, 전역 keydown 리스너가 Enter/Space를 클릭으로 바꾼다.
+  ⚠️ `.pill`의 `line-height:inherit`을 지우지 말 것 — button UA 기본값 때문에 높이가 34→30px로 준다
+- **내역 행 전체 = 수정**(`data-row-tap`). 예전엔 누르면 흐려지기만 하고(`:active`) 아무 일도 없었다.
+  ⚠️ 안쪽 수정·삭제 버튼의 `event.stopPropagation()`을 빼지 말 것 — 빼면 삭제를 누를 때 수정 시트까지 열린다(`test_optimistic.js`).
+  행에 role=button을 주지 않는 건 의도다(버튼 안에 버튼). 키보드·스크린리더 경로는 안쪽 '수정' 버튼(aria-label에 카테고리·금액)
+- **입력칸엔 이름**: 보이는 라벨이 있으면 `<label for>`, 없으면 `aria-label`. placeholder만으로는 스크린리더가 이름을 못 읽는다
+- **글자 하한**: 마이크로 라벨(탭 이름·지표 라벨·꼬리표 `.m-tag`)은 11px, **읽어야 하는 설명문·각주는 12px**(`.75rem`). 11px 미만 금지
+- ⚠️ **음수 margin으로 밑줄 있는 앞 요소에 파고들지 말 것.** `.m-title`·`.p-t`·`.astat`은 border-bottom이 있어서
+  `margin:-6px`이면 그 선이 다음 줄 글자 윗부분을 긋는다(설정·분석·연말정산 3곳이 실제로 그랬다). 감사가 '앞 요소와 겹침'으로 잡는다
 
 > ⚠️ 한도 탭(`viewLimit`) 카테고리 목록은 `MASTER[멤버].categories`(master_data DB) 기준 + 기존 저장 한도. 지출 발생 카테고리(`spent`)로 만들면 '계좌간 이동'처럼 설정에 없는 항목까지 한도 UI가 떠서 안 됨.
 
@@ -665,6 +684,8 @@ node scripts/test_samepoint.js                          # 분석 탭 같은 시�
 node scripts/test_limit_view.js                         # 한도 탭·진입 모션 (한도 탭·render()를 건드렸다면)
 node scripts/check_authgate.js                          # 로그인 게이트 + 캐시 삭제 4지점
 node scripts/shot_theme.js                              # 라이트/다크 실렌더 + 대비 실측 (눈으로 볼 PNG를 남긴다)
+node scripts/audit_ux.js                                # 터치 영역·라벨·키보드·겹침 (마크업·CSS를 건드렸다면, ~1분)
+node scripts/test_ui_flow.js                            # 내역 행·입력 시트를 실제로 눌러본다 (목록·시트를 건드렸다면)
 node scripts/test_date_field.js                         # 날짜 필드 (입력 시트를 건드렸다면)
 node scripts/measure_timeline.js --4g                   # 어디서 시간이 가는지 구간 분해 (성능 얘기는 이걸로)
 ```
@@ -724,6 +745,10 @@ Windows 작업 사본은 CRLF, 리포 blob은 LF라 작업 사본과 비교하�
 
 ### 모바일 대응 주의사항
 - `<input list="datalist">` 사용 금지 → iOS Safari 미지원
+- **입력 시트의 저장 버튼은 시트 바닥에 붙는다**(`.submit` sticky, 2026-10-25). 옛 배치는 375×667 폰에서 버튼이 808~854px(화면 밖)에
+  있어 카테고리를 고른 뒤 스크롤해야 눌렀다(실측). 둘레의 `box-shadow:0 0 0 12px var(--bg)`는 그림자가 아니라 **가림막**이다
+  — 지우면 버튼 뒤로 지나가는 입력칸이 틈새로 비친다. ⚠️ iOS에서 키보드가 떠 있을 땐 레이아웃 뷰포트가 안 줄어 여전히 키보드 뒤다(그때는 이전과 같다)
+- 금액 칸은 22px·굵게 + 칸 안 '원' 단위(`.amt-u`, `pointer-events:none`) — 시트에서 가장 중요한 값이라 크기로 위계를 준다(색은 안 늘린다)
 - ⚠️ **입력칸 글자는 16px 이상**(2026-10-05). iOS 사파리는 그보다 작은 칸에 포커스하면 화면을 확대하고 되돌리지 않는다 —
   금액·메모·검색·한도 칸이 전부 14~15px였다. 새 입력칸을 만들면 `1rem` 이상으로. 좁은 행의 매핑 셀렉트(`.tym-sel`)만
   `@supports (-webkit-touch-callout:none)`(iOS 전용)에서 16px로 키운다. `test_input_habit.js`가 클래스별로 검사한다

@@ -109,10 +109,38 @@ function frame(ev, m) {
   const rows = [row("정우", J.day(1, 0), 20000), row("정우", J.day(2, 0), 60000)];
   if (J.el + 1 < J.lenOf(1)) rows.push(row("정우", J.day(1, J.el + 1), 500000));
   setup(ev, rows);
+  // 진단은 주기 1/4 이후에만 낸다(④). 오늘이 주기 초반이어도 이 검사가 돌도록 '진행 상황'만 중간으로 고정한다
+  // — 행 판정(samePointBuckets)은 실제 오늘 기준 그대로다
+  ev(`periodProgress = () => ({day:15, len:30})`);
   const h = ev(`memberFilter="정우"; viewAnalysis()`);
   // 인사이트 문구는 esc()를 거쳐 ' 가 &#39; 로 들어간다
   ok("급증 진단이 같은 시점 평균으로 잡힌다", /(&#39;|')식비(&#39;|') 지출이 평소보다 200% 늘었어요/.test(h),
      "다 찬 전 주기(52만)를 평소로 보면 6만은 급증이 아니다 — 주기 말에야 잡힌다");
+}
+
+// ── ④ 주기 초반(1/4 전)엔 비율 진단·증감 색을 보류한다 ──────────
+// 주기 첫날 구독료 한 건이면 '100% 쏠림 · 264% 급증 · 고정 100%'가 한꺼번에 떠서, 매달 첫 주마다 구독을 줄이라고 했다
+{
+  const ev = boot();
+  setup(ev, []);
+  const J = frame(ev, "정우");
+  const rows = [row("정우", J.day(1, 0), 20000), row("정우", J.day(2, 0), 60000),
+                row("정우", J.day(2, 0), 5000, "구독"), row("정우", J.day(1, 0), 5000, "구독"),
+                row("정우", J.day(0, 0), 5000, "구독")];
+  setup(ev, rows);
+  ev(`LIMITS={정우:{식비:50000},지현:{}}`);   // 식비 6만 / 한도 5만 → 초과(사실)는 초반에도 알린다
+  ev(`periodProgress = () => ({day:2, len:31})`);
+  const h = ev(`memberFilter="정우"; viewAnalysis()`);
+  ok("초반엔 급증 진단이 없다", !/평소보다 \d+% 늘었어요/.test(h), "거래 한두 건으로 '급증' 경고가 뜬다");
+  ok("초반엔 쏠림·고정비 진단이 없다", !/가장 큰 지출은/.test(h) && !/고정 \d+% · 변동/.test(h));
+  ok("초반이라 보류한다고 밝힌다(며칠째부터)", /주기 초반이라 진단은 8일째부터/.test(h));
+  ok("한도 초과는 초반에도 알린다(비율이 아니라 사실)", /한도 초과 1건/.test(h));
+  ok("초반엔 증감에 빨강·초록을 쓰지 않는다", !/class="am-d [rg]"/.test(h) && !/평균 대비<\/div><div class="am-v [rg]"/.test(h),
+     (h.match(/평균 대비<\/div><div class="am-v[^"]*"/) || [""])[0]);
+
+  ev(`periodProgress = () => ({day:8, len:31})`);
+  const h8 = ev(`viewAnalysis()`);
+  ok("1/4이 지나면(8/31일째) 진단이 돌아온다", /가장 큰 지출은/.test(h8) && !/주기 초반이라 진단은/.test(h8));
 }
 
 console.log(fails ? `\n${fails}건 FAIL` : "\nALL PASS");
