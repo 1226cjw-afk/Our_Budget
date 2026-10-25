@@ -14,7 +14,9 @@
 const fs = require("fs");
 const path = require("path");
 
-const SRC = path.join(__dirname, "..", "public", "index.html");
+// 인자로 다른 파일을 줄 수 있다 — 위 경고대로 '일부러 깨뜨린 사본'에 대고 FAIL 을 확인하는 용도
+// (2026-10-25까지는 인자를 안 받아서, 반증하려면 원본을 직접 깨야 했다)
+const SRC = process.argv[2] || path.join(__dirname, "..", "public", "index.html");
 const html = fs.readFileSync(SRC, "utf8");
 
 const style = (html.match(/<style>([\s\S]*?)<\/style>/) || [, ""])[1];
@@ -150,6 +152,13 @@ for (const [name, re] of [
 const gold = (html.match(/rgba\(\s*201\s*,\s*147\s*,\s*58/g) || []).length
            + (html.match(/#C9933A/gi) || []).length;
 check("골드 잔재가 없다", gold === 0, gold + "건 (rgba(201,147,58) 또는 #C9933A)");
+// 위 '생 hex' 검사는 <style> 안만 본다. 인라인 style 의 rgba(색) 은 토큰이 아니라서 다크모드를 못 따라온다.
+// ⚠️ 2026-10-25까지 연말정산 설치 안내 테두리에 옛 팔레트 핑크 rgba(240,84,112) 가 살아 있었다.
+// 그림자용 검정 rgba(0,0,0,a) 만 허용하고, 색이 필요하면 color-mix(… var(--토큰) …) 를 쓴다.
+const strayRgba = [...outside.matchAll(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/g)]
+  .filter(m => !(m[1] === "0" && m[2] === "0" && m[3] === "0")).map(m => m[0] + ")");
+check("인라인에 색 rgba 가 없다", strayRgba.length === 0,
+  strayRgba.join(" ") + " — color-mix(in srgb,var(--토큰) N%,transparent) 로");
 
 /* ══════ 5. 고아 class — 마크업이 참조하는데 CSS 에 없는 것 ══════ */
 // 정적 <body> 와 JS 템플릿 문자열의 class="..." 를 모두 모은다.

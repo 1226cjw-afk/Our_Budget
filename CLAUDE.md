@@ -363,10 +363,17 @@ FCP만 1,000ms→114ms로 당겨진 탓에 **스피너를 더 오래 쳐다보�
   실측 2,045ms → **32ms**(느린 DB 흉내: 세션 1,200ms + 쿼리 800ms).
   - ⚠️ **캐시에 담는 건 '파생된 전역'이 아니라 쿼리 6종의 원본 응답이다.** 복원도 `applyLoad`를 그대로 타므로
     파생이 한 벌이고 캐시 화면과 DB 화면이 어긋날 수 없다. 전역을 직렬화하면 파생이 두 벌이 된다 — 되돌리지 말 것.
+    - ⚠️ 행의 `_t`(주기 판정용 숫자)도 파생값이다. `stampRows`가 **응답 객체에 직접** 심기 때문에 그대로 직렬화하면
+      원칙이 조용히 깨진다(2026-10-25까지 실제로 그랬다) → `saveSnapshot`이 빼고 담는다. 남겨두면 기기 시간대가
+      바뀐 뒤(여행) 옛 시간대 경계값이 복원돼 주기 첫날 거래가 이웃 주기로 밀린다. 크기도 8% 준다. `test_boot_cache.js`가 고정
   - ⚠️ **`bootFromSnapshot()`을 `await getSession()` 뒤로 옮기지 말 것.** 앱은 멀쩡히 동작하는데
     효과만 사라진다(화면으로는 안 보이는 회귀) — `test_boot_cache.js`가 소스 순서로 잡는다.
-  - ⚠️ 캐시를 지우는 자리 **4곳**: `SIGNED_OUT` · `if(!session)` · `startApp`의 `isAuthErr` · `doLogout`(signOut 전).
-    하나만 빠져도 로그아웃·세션만료 뒤에 금액이 다시 뜬다. `check_authgate.js`가 4곳을 각각 검사한다.
+  - ⚠️ 세션을 잃으면 **`authLost()` 하나로** 간다(캐시 삭제 → 로그인 화면). 부르는 자리: `SIGNED_OUT` · `if(!session)` ·
+    `startApp`·`syncInBackground`·`refreshData`·`retryLoad`·`reloadAndRender`의 `isAuthErr` 분기. 로그아웃은 `doLogout`이 signOut 전에 지운다.
+    **`showAuth()`를 직접 부르지 말 것** — 2026-10-25까지 `refreshData`·`retryLoad`가 그래서 캐시가 남았다
+    (세션 만료 뒤 다음 접속에 금액이 잠깐 다시 떴다). `check_authgate.js`가 `showAuth()` 직접 호출 수(=1, authLost 안)를 센다.
+  - 설정 저장(`saveBillingStart`·`saveAppSetting`·`saveIcon`)도 끝에 `syncInBackground()`를 부른다 — 안 부르면 스냅샷에
+    옛 값이 남아 다음 접속의 캐시 화면이 옛 시작일로 주기를 잘랐다가 최신 데이터가 올 때 숫자가 튄다.
   - 폴백이 섞인 응답(6종 중 하나라도 error)은 **저장하지 않는다** — 다음 접속에 폴백이 '사용자가 지운 설정'처럼 보인다.
   - 재방문 시 갱신 전까지 **지난 화면(최대 몇 초 전)**이 보인다. 신선한 데이터가 도착하면 제자리에서 바뀐다.
 
@@ -401,6 +408,7 @@ FCP만 1,000ms→114ms로 당겨진 탓에 **스피너를 더 오래 쳐다보�
 | 함수 | 역할 |
 |------|------|
 | `startApp()` | 세션 확보 뒤의 시작 절차 — `loadAll`·`renderMemberSeg`·`render`·기기사용자 모달. `DOMContentLoaded` 핸들러와 `doLogin` 양쪽에서 호출 |
+| `authLost()` | 세션을 잃었을 때의 **유일한** 경로 — `clearSnapshot()` 후 `showAuth()`. ⚠️`showAuth()`를 직접 부르면 캐시가 남는다(위 '첫 화면' 절) |
 | `showAuth() / hideAuth()` | 로그인 오버레이 토글. `.picker-ov`를 재사용하되 ESC 핸들러에 넣지 않아 **닫히지 않는다** |
 | `doLogin(ev) / doLogout()` | 공용 계정 로그인 / 로그아웃(`signOut` 후 `location.reload()`로 전역 상태를 확실히 비움) |
 | `openPwChange() / doPwChange(ev)` | 설정 탭 비밀번호 변경. **현재 비밀번호를 재확인한 뒤** `updateUser` (위 '로그인 게이트' 절의 이유) |
@@ -458,7 +466,9 @@ FCP만 1,000ms→114ms로 당겨진 탓에 **스피너를 더 오래 쳐다보�
 | `comma(n) / dbErr(res,pre?)` | 콤마 숫자 포맷 / Supabase 응답 에러 공통 처리(에러면 토스트 후 true — `if(dbErr(res))return;` 패턴) |
 | `pills(items,cur,fn) / segBtns(items,cur,fn)` | 필 바(.filter)·세그먼트(.seg) 버튼 공통 빌더 — items는 문자열 또는 [값,라벨] 쌍 배열, jsq/esc 내장 |
 | `catsOf(m)` | 멤버 카테고리 목록 = master_data 설정 + 저장된 한도 카테고리 합집합 (한도 탭·입력 시트 공용) |
-| `reloadAndRender()` | `loadAll()+render()` — 드문 CRUD(멤버·마스터 추가·삭제) 후 마무리. 거래·한도 저장은 이걸 쓰지 않는다(위 `patchRows`) |
+| `reloadAndRender()` | `loadAll()+render()` — 드문 CRUD(멤버·마스터 추가·삭제) 후 마무리. 거래·한도·연말정산 매핑·총급여 저장은 이걸 쓰지 않는다(위 `patchRows`, 아래 `patchTaxMap`). ⚠️더 새 로드가 출발했으면(`loadAll`이 `false`) 그리지 않는다 — 연달아 누르면 먼저 끝난 쪽이 옛 상태로 화면을 되돌렸다. 실패는 `refreshData`와 같은 갈래(인증→`authLost`, 그 외→오류 카드) |
+| `patchTaxMap(m,type,pairs)` | 연말정산 매핑 저장 직후 `MTMAP`/`CTMAP`에 바로 반영(applyLoad와 같은 규칙: 빈 문자열 키 허용, kind 빈값=해제) → `setTaxMap`·`applyTaxSuggest`가 왕복 1회로 끝난다. 총급여(`saveTySalary`·`resetTySalary`)는 `TY_SALARY`를 직접 고친다. 예전엔 셀렉트 하나마다 전체 재로드를 기다렸고, 연달아 바꾸면 방금 고른 셀렉트가 '미분류'로 잠깐 되돌아갔다. `test_optimistic.js` 7번 |
+| `ymd(d) / DOW` | Date → 로컬 `YYYY-MM-DD`(`todayStr`·`recentCutoff` 공용 — `toISOString`은 UTC라 오전 9시 전엔 하루 어긋난다) / 요일 이름 배열(날짜 필드·내역 날짜 헤더 공용) |
 | `movePeriod(d) / resetPeriod() / viewedPeriod(m)` | 내역·분류 탭 ◀▶ 주기 탐색 (periodOffset 0 클램프, 누르면 scope='current') |
 | `bucketByPeriod(rows,n,ref)` / `mixedPeriods()` | 최근 n주기 버킷팅(**행마다 그 멤버 주기**, 인덱스 n-1=이번 주기) / 멤버 간 시작일이 갈리는 상태인지 — 위 '결제 주기' 절 참조 |
 | `rowTime(r) / inPeriodRow(r,p) / stampRows(rows)` | 행 날짜의 숫자판(없으면 그 자리에서 채움) / 행 단위 주기 판정 — **집계의 안쪽 루프** / 로드 직후 일괄 심기. ⚠️`inPeriod(문자열,p)`로 되돌리면 행마다 `parseDate`가 주기 수만큼 돌아 40,000행에서 11ms→247ms가 된다. 문자열판은 `test_period.js`의 참조 구현 전용 |
@@ -507,6 +517,9 @@ FCP만 1,000ms→114ms로 당겨진 탓에 **스피너를 더 오래 쳐다보�
 - `--ink-3`가 라이트에서 3.22:1인 것은 의도다 — 마이크로 라벨·비텍스트 전용. **본문에 쓰지 말 것.**
 - 반투명이 필요하면 토큰을 늘리지 말고 `color-mix(in srgb, var(--ink) 8%, transparent)`.
   덕분에 셀렉터 안에 생 hex가 한 개도 없다(검사 항목).
+  JS 템플릿의 인라인 `style`도 같다 — 색 있는 `rgba(…)`는 검사기가 잡는다(그림자용 검정 `rgba(0,0,0,a)`만 허용).
+  2026-10-25까지 연말정산 설치 안내 테두리에 옛 팔레트 핑크 `rgba(240,84,112,.3)`가 남아 있었다.
+  `check_theme.js`는 다른 검사기처럼 **대상 파일을 인자로 받는다** — 깨뜨린 사본에 대고 FAIL을 확인할 것.
 
 **다크는 `@media (prefers-color-scheme: dark)` 안에서만.** 수동 토글을 만들지 말 것 — 요구가 "OS가
 다크일 때만"이었고 `check_theme.js`가 `data-theme` 흔적을 금지 항목으로 잡는다.

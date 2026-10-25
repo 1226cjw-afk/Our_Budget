@@ -47,7 +47,8 @@ function fakeSb(db, delay) {
       single() { st.single = true; return b; },
       insert(p) { st.op = "insert"; st.payload = p; return b; },
       update(p) { st.op = "update"; st.payload = p; return b; },
-      upsert(p) { st.op = "upsert"; st.payload = p; return b; },
+      upsert(p, o) { st.op = "upsert"; st.payload = p;
+                     st.conflict = String((o && o.onConflict) || "").split(",").filter(Boolean); return b; },
       delete() { st.op = "delete"; return b; },
       then(res, rej) {
         const call = { table, op: st.op, gte: st.gte };
@@ -83,7 +84,15 @@ function fakeSb(db, delay) {
       return { data: st.single ? d[0] : d, error: null };
     }
     if (st.op === "delete") { db[st.table] = rows.filter(r => !hit(r)); return { data: null, error: null }; }
-    return { data: null, error: null };   // upsert — 이 테스트에선 결과만 성공으로
+    if (st.op === "upsert") {
+      // ⚠️ 실제로 DB에 써야 한다. 예전엔 결과만 성공으로 돌려서, 동기화가 저장값을 되돌리는 회귀를 못 잡았다
+      [].concat(st.payload).forEach(p => {
+        const cur = st.conflict.length && rows.find(r => st.conflict.every(k => r[k] === p[k]));
+        if (cur) Object.assign(cur, p); else rows.push({ ...p });
+      });
+      return { data: null, error: null };
+    }
+    return { data: null, error: null };
   }
   return { sb: { from, auth: { onAuthStateChange(){}, getSession: async () => ({ data: { session: {} } }) } }, calls };
 }
@@ -156,7 +165,8 @@ const dbRowsSorted = db => db.transactions.slice().sort(dbOrder).map(r => r.id);
 (async () => {
   // ── 1. 소스 구조 ─────────────────────────────────────────
   ok("patchRows·syncInBackground가 있다", /function patchRows\s*\(/.test(code) && /async function syncInBackground\s*\(/.test(code));
-  for (const f of ["saveEntry", "saveTransfer", "delEntry", "saveLimit"]) {
+  for (const f of ["saveEntry", "saveTransfer", "delEntry", "saveLimit",
+                   "setTaxMap", "applyTaxSuggest", "saveTySalary", "resetTySalary"]) {
     const i = code.indexOf(`async function ${f}(`), j = code.indexOf("\nasync function", i + 10);
     const body = code.slice(i, j < 0 ? undefined : j);
     ok(`${f}가 전체 재로드를 기다리지 않는다`, i >= 0 && !/await\s+reloadAndRender\(\)/.test(body),
@@ -263,6 +273,69 @@ const dbRowsSorted = db => db.transactions.slice().sort(dbOrder).map(r => r.id);
     ok("빈값 저장은 한도를 즉시 지운다", A.ev("LIMITS['정우']['식비']") === undefined);
     await sleep(40);
     ok("동기화 뒤 DB와 일치", JSON.stringify(txRows(A).map(r => r.id)) === JSON.stringify(dbRowsSorted(db)));
+    ok("동기화 뒤에도 한도가 유지된다", A.ev("LIMITS['정우']['교통']") === 50000 && A.ev("LIMITS['정우']['식비']") === undefined);
+  }
+
+  // ── 7. 연말정산 매핑·총급여 — 저장 왕복 1회로 화면 반영, 전체 재로드를 기다리지 않는다 ──
+  // 예전엔 셀렉트 하나마다 전체 재로드를 기다렸고, 연달아 바꾸면 먼저 끝난 재로드가 옛 맵으로 다시 그렸다
+  {
+    const db = seed();
+    const A = boot(db, () => RTT);
+    await A.ev("loadAll()");
+    ok("(전제) tax_map 이 있다", A.ev("TAX_READY") === true);
+    let t0 = Date.now();
+    await A.ev("setTaxMap('정우','method','신용','credit')");
+    let dt = Date.now() - t0;
+    ok(`매핑 저장이 왕복 1회 안에 끝난다 (${dt}ms, RTT ${RTT}ms)`, dt < RTT * 1.8, "재로드 왕복을 기다리고 있다");
+    ok("결제수단 매핑이 즉시 반영된다", A.ev("MTMAP['정우']['신용']") === "credit");
+    await A.ev("setTaxMap('정우','method','','none')");
+    ok("'(미지정)' 결제수단(빈 문자열 키)도 매핑된다", A.ev("MTMAP['정우']['']") === "none");
+    await A.ev("setTaxMap('정우','category','월급','income')");
+    ok("소득 매핑은 CTMAP 으로", A.ev("CTMAP['정우']['월급']") === "income" && A.ev("MTMAP['정우']['월급']") === undefined);
+    await A.ev("setTaxMap('정우','method','신용','')");
+    ok("빈 kind 는 매핑을 즉시 해제한다", A.ev("MTMAP['정우']['신용']") === undefined);
+
+    A.$("ty_sal").value = "52,000,000";
+    t0 = Date.now();
+    await A.ev("saveTySalary('정우')");
+    dt = Date.now() - t0;
+    ok(`총급여 저장이 왕복 1회 안에 끝난다 (${dt}ms)`, dt < RTT * 1.8);
+    ok("총급여 수동값이 즉시 반영된다", A.ev("TY_SALARY['정우']") === 52000000);
+
+    await sleep(RTT * 4);
+    ok("동기화 뒤에도 매핑·총급여가 유지된다(DB와 일치)",
+       A.ev("CTMAP['정우']['월급']") === "income" && A.ev("MTMAP['정우']['']") === "none" &&
+       A.ev("MTMAP['정우']['신용']") === undefined && A.ev("TY_SALARY['정우']") === 52000000);
+    await A.ev("resetTySalary('정우')");
+    ok("총급여 초기화가 즉시 반영된다", A.ev("TY_SALARY['정우']") === undefined);
+
+    // 미분류 일괄 추천 — 올해 지출이 있는 결제수단만 저장·반영한다
+    const yr = String(new Date().getFullYear());
+    db.transactions.push(norm({ id: uuid(), date: db.today, amount: 5000, type: "지출", category: "식비",
+                                member: "지현", method: "우리 체크카드", account: "신한", memo: "체크" }));
+    await A.ev("loadAll()");
+    await A.ev("applyTaxSuggest('지현','method')");
+    ok("일괄 추천이 즉시 반영된다", db.today.startsWith(yr) && A.ev("MTMAP['지현']['우리 체크카드']") === "check");
+  }
+
+  // ── 8. 설정 저장이 스냅샷까지 갱신한다 ──
+  // 안 하면 다음 접속의 캐시 화면이 옛 시작일로 주기를 잘라, 최신 데이터가 올 때 숫자가 한 번 튄다
+  {
+    const db = seed();
+    const A = boot(db, () => 5);
+    await A.ev("loadAll()");
+    await sleep(20);   // 첫 로드의 스냅샷 저장(idle)
+    const cfgOf = () => (JSON.parse(A.env.localStorage.getItem("ourbudget.snapshot") || "null") || { cfg: [] }).cfg;
+    ok("(전제) 첫 스냅샷엔 옛 시작일", cfgOf().some(r => r.key === "billing_start_정우" && r.value === "25"));
+    A.$("m_billing_start_정우").value = "10";
+    await A.ev("saveBillingStart('정우')");
+    ok("결제 시작일이 즉시 반영된다", A.ev("BILLING_STARTS['정우']") === 10);
+    A.$("set_warn").value = "90";
+    await A.ev("saveAppSetting('warn_threshold','set_warn',50,99,80,'%')");
+    await sleep(60);
+    ok("결제 시작일 저장이 스냅샷까지 갱신한다", cfgOf().some(r => r.key === "billing_start_정우" && r.value === "10"),
+       "다음 접속 캐시 화면이 옛 주기로 그려진다");
+    ok("앱 설정 저장이 스냅샷까지 갱신한다", cfgOf().some(r => r.key === "warn_threshold" && r.value === "90"));
   }
 
   console.log(fails ? `\n${fails}건 FAIL` : "\nALL PASS");

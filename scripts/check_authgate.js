@@ -11,21 +11,18 @@ const must = [
   ["공용 계정 상수",             /const FAMILY_EMAIL\s*=\s*"[^"]+"/],
   ["persistSession 옵션",        /persistSession\s*:\s*true/],
   ["autoRefreshToken 옵션",      /autoRefreshToken\s*:\s*true/],
-  ["세션 없으면 showAuth",        /if\(!session\)\{\s*clearSnapshot\(\);\s*showAuth\(\)/],
-  ["SIGNED_OUT 복귀",            /onAuthStateChange[\s\S]{0,120}?SIGNED_OUT[\s\S]{0,60}?showAuth/],
   // ── 스냅샷 캐시(2026-09-01) ──
   // 캐시는 로그인 화면을 건너뛰고 금액을 그린다. 그래서 '언제 그리는가'와 '언제 지우는가'가
   // 게이트의 일부다 — 지우는 자리를 하나라도 빠뜨리면 로그아웃·세션만료 뒤에도 금액이 다시 뜬다.
+  // 지우는 일은 authLost() 한 곳이 맡는다(아래 'showAuth 직접 호출' 검사가 우회를 막는다).
+  ["세션 없으면 authLost",        /if\(!session\)\{\s*authLost\(\);\s*return;/],
+  ["SIGNED_OUT → authLost",      /onAuthStateChange[\s\S]{0,120}?SIGNED_OUT[\s\S]{0,40}?authLost\(\)/],
   ["storageKey가 AUTH_KEY와 한 벌", /storageKey\s*:\s*AUTH_KEY/],
   ["캐시 렌더는 저장된 세션이 있을 때만", /if\(hasStoredSession\(\)\)\s*bootFromSnapshot\(\)/],
-  ["SIGNED_OUT이 캐시를 지움",     /SIGNED_OUT[\s\S]{0,40}?clearSnapshot\(\)/],
-  ["세션 없으면 캐시를 지움",       /if\(!session\)\{\s*clearSnapshot\(\)/],
   ["스냅샷은 전량일 때만 저장",     /saveSnapshot[\s\S]{0,700}?res\.lim\.error\s*\|\|\s*res\.mst\.error/],
   ["로그인 폼 비밀번호 필드",      /id="authPw"[\s\S]{0,80}?autocomplete="current-password"/],
   ["비밀번호 관리자용 username",  /autocomplete="username"/],
   ["로그아웃 버튼",               /onclick="doLogout\(\)"/],
-  ["refreshData 인증오류 분기",   /refreshData[\s\S]{0,400}?isAuthErr\(e\)/],
-  ["retryLoad 인증오류 분기",     /retryLoad[\s\S]{0,300}?isAuthErr\(e\)/],
 ];
 
 const forbid = [
@@ -94,13 +91,40 @@ else {
   console.log(`${hit ? "FAIL" : "ok  "} 시작 핸들러가 loadAll을 직접 호출 (없어야 함)`);
 }
 
-// startApp 안의 인증오류 분기 — 여기서 캐시를 안 지우면 다음 접속에 '로그인 못 하는데 금액은 보이는' 상태가 된다
-const startBody = fnBody(src, "async function startApp(");
-if(startBody === null){ bad++; console.log("FAIL startApp 본문을 못 찾음"); }
+// authLost — 세션을 잃었을 때의 유일한 경로. 캐시를 지운 뒤에 로그인 화면을 띄워야 한다
+const lostBody = fnBody(src, "function authLost(");
+if(lostBody === null){ bad++; console.log("FAIL authLost 본문을 못 찾음"); }
 else {
-  const okA = /if\(isAuthErr\(e\)\)\{\s*clearSnapshot\(\);\s*showAuth\(\);\s*return;\s*\}/.test(startBody);
+  const iC = lostBody.indexOf("clearSnapshot()"), iS = lostBody.indexOf("showAuth()");
+  const okL = iC > 0 && iS > iC;
+  if(!okL) bad++;
+  console.log(`${okL ? "ok  " : "FAIL"} authLost가 캐시를 지우고 로그인 화면으로`);
+}
+
+// showAuth()를 authLost 밖에서 직접 부르면 그 자리는 캐시를 남긴다.
+// 2026-10-25까지 refreshData·retryLoad가 실제로 그랬다 — 지우는 자리가 4곳에 흩어져 있어
+// 새 경로를 만들 때마다 빠뜨릴 수 있었다. 이제 호출 자체를 한 곳으로 모으고 여기서 센다.
+// (주석 속 언급은 오탐이므로 주석을 걷어낸 코드만 본다. URL의 '//'는 앞이 ':'라 안 걷힌다)
+{
+  const script = [...src.matchAll(/<script>([\s\S]*?)<\/script>/g)].pop()[1];
+  const codeOnly = script.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[\s;{}()])\/\/[^\n]*/g, "$1");
+  const direct = (codeOnly.match(/(?<!function\s+)showAuth\(\)/g) || []).length;   // 선언은 호출이 아니다
+  const okD = direct === 1;   // authLost 안의 한 번
+  if(!okD) bad++;
+  console.log(`${okD ? "ok  " : "FAIL"} showAuth()는 authLost 안에서만 호출 (${direct}곳)`);
+}
+
+// 인증오류 분기 — 로드를 부르는 곳마다 에러 카드가 아니라 authLost로 가야 한다.
+// ⚠️ 함수 본문 단위로 본다(위 fnBody 주석) — 소스 전체에 걸면 다른 함수의 같은 조각에 매칭된다
+for (const anchor of ["async function startApp(", "async function syncInBackground(",
+                      "async function refreshData(", "async function retryLoad(",
+                      "async function reloadAndRender("]) {
+  const nm = anchor.replace(/^async function |\($/g, "");
+  const b = fnBody(src, anchor);
+  if(b === null){ bad++; console.log(`FAIL ${nm} 본문을 못 찾음`); continue; }
+  const okA = /if\(isAuthErr\(e\)\)\{\s*authLost\(\);\s*return;\s*\}/.test(b);
   if(!okA) bad++;
-  console.log(`${okA ? "ok  " : "FAIL"} startApp 인증오류가 캐시를 지우고 로그인 화면으로`);
+  console.log(`${okA ? "ok  " : "FAIL"} ${nm} 인증오류 → authLost (캐시 삭제 + 로그인 화면)`);
 }
 
 // doLogout — signOut 전에 캐시를 지워야 한다(지우기 전에 reload가 걸리면 캐시가 남는다)

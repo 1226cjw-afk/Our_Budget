@@ -164,6 +164,13 @@ function fnBody(s, anchor){
 
   ok("캐시 복원 전역 === 직접 로드 전역", viaCache === direct,
      "복원 경로가 파생을 다르게 한다 — 캐시 화면이 DB 화면과 어긋난다");
+
+  // 캐시엔 '원본 응답'만 — applyLoad가 응답 객체에 직접 심는 _t(주기 판정용 숫자)가 새어 들어가면
+  // 기기 시간대가 바뀐 뒤(여행) 옛 경계값이 그대로 복원돼 주기 첫날 거래가 이웃 주기로 밀린다
+  const packedTx = JSON.parse(raw).tx;
+  ok("스냅샷에 파생값 _t 가 없다", packedTx.length === 2 && packedTx.every(r => !("_t" in r)),
+     "applyLoad가 심은 파생값이 캐시로 새고 있다");
+  ok("복원하면 _t 가 다시 심긴다", JSON.parse(viaCache).ROWS.every(r => typeof r._t === "number"));
   // 실제로 값이 들어 있는지도 확인 (둘 다 빈 값이면 위 비교는 무의미하게 통과한다)
   const g = JSON.parse(direct);
   ok("파생이 실제로 채워졌다", g.MEMBERS.length === 2 && g.ROWS.length === 2 &&

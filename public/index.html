@@ -189,7 +189,6 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
   white-space:nowrap;transition:all .15s;
 }
 .pill.on{background:var(--ink);border-color:var(--ink);color:var(--on-ink);font-weight:600}
-.pill.dis{opacity:.35;pointer-events:none}
 .sec{padding:0 20px}
 .g{color:var(--inc)}.r{color:var(--exp)}
 
@@ -262,14 +261,12 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .i-foot{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;margin-top:1px}
 .i-sub{flex:1;min-width:0;font-size:.8125rem;color:var(--ink-3);font-weight:450;line-height:1.5}
 .i-sub .memo{color:var(--ink-2)}
-.chips{display:flex;flex-wrap:wrap;gap:4px}
 .chip{
   font-size:.75rem;color:var(--ink-3);background:none;
   padding:0;border:none;font-weight:450;
 }
 .chip.mem{color:var(--ink-2);font-weight:550}
 .chip.trf{color:var(--s1);font-weight:600}
-.i-memo{font-size:.8125rem;color:var(--ink-2);margin-top:2px;line-height:1.5}
 /* 테두리 없는 텍스트 버튼 — 행마다 상자가 2개씩 뜨면 룰선 리스트가 도로 카드처럼 보인다.
    ⚠️ 없애지는 말 것: 계좌간 이동은 수정이 막혀 있어 여기 삭제가 유일한 제거 수단이다. */
 .i-act{display:flex;gap:10px;flex-shrink:0;padding-bottom:1px}
@@ -375,7 +372,6 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 .a-mo{flex:1;font-size:.875rem;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:450}
 .a-tag{font-size:.6875rem;font-weight:600;padding:1px 7px;border-radius:6px;border:1px solid var(--line-2);color:var(--ink-3)}
 .a-tag.rec{background:var(--fill);color:var(--ink-2)}
-.a-tag.one{background:var(--fill);color:var(--ink-2)}
 .a-v{font-size:.875rem;font-weight:600;white-space:nowrap;letter-spacing:-.02em}
 
 /* 분석 요약 메트릭 — 세로 룰선으로 나눈 칸 */
@@ -1113,7 +1109,10 @@ let loadWarn     = [];
 const $        = id => document.getElementById(id);
 // 날짜 문자열 → Date ('YYYY-MM-DD'는 정오로 파싱해 타임존 경계 오차 방지)
 const parseDate = s => new Date(s.length===10 ? s+"T12:00:00" : s);
-const todayStr  = () => { const t=new Date(); return `${t.getFullYear()}-${String(t.getMonth()+1).padStart(2,"0")}-${String(t.getDate()).padStart(2,"0")}`; };
+// Date → 'YYYY-MM-DD' (로컬 날짜). toISOString은 UTC라 한국 시간 오전 9시 전엔 하루 어긋난다
+const ymd       = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+const todayStr  = () => ymd(new Date());
+const DOW       = ["일","월","화","수","목","금","토"];
 // 콤마 포함 금액 input 값 → 숫자
 const amtVal   = id => Number($(id).value.replace(/[^0-9]/g,""))||0;
 // 렌더당 수백 번 호출 — 포매터 1회 생성 후 재사용(매 호출 toLocaleString보다 빠름, 출력 동일)
@@ -1283,13 +1282,13 @@ document.addEventListener("DOMContentLoaded", async () => {
   buildNav();
   // 세션 만료·비밀번호 변경 시 로그인 화면으로 되돌린다.
   // 이게 없으면 빨간 '데이터 연결 오류' 카드가 떠서 원인을 오도한다(RLS 문제로 오인)
-  sb.auth.onAuthStateChange(ev => { if(ev==="SIGNED_OUT"){ clearSnapshot(); showAuth(); } });
+  sb.auth.onAuthStateChange(ev => { if(ev==="SIGNED_OUT") authLost(); });
   // 저장된 세션이 있으면 지난 화면을 **먼저** 그린다. getSession()은 액세스 토큰이 만료됐으면
   // 갱신 왕복을 await 하고(토큰 수명 1시간 → 하루 만에 여는 경우 거의 항상), 그 뒤에 6쿼리가 있다.
   // 그 2~3초 동안 스피너만 돌던 것을 없앤다 — 유효성은 바로 아래에서 확인하고, 아니면 화면을 비운다
   if(hasStoredSession()) bootFromSnapshot();
   const { data:{ session } } = await sb.auth.getSession();
-  if(!session){ clearSnapshot(); showAuth(); return; }   // 로그인 전엔 loadAll을 호출하지 않는다
+  if(!session){ authLost(); return; }   // 로그인 전엔 loadAll을 호출하지 않는다
   await startApp();
 });
 
@@ -1328,9 +1327,8 @@ async function startApp(){
   // 1차(최근 45일)가 오면 바로 그리고, 전량이 오면 아래에서 한 번 더 그린다
   try { await loadAll(()=>{ applyDeviceDefaults(); renderMemberSeg(); renderKeepScroll(); }); }
   catch(e) {
-    // 인증 문제면 에러 카드가 아니라 로그인 화면. 캐시도 지운다 — 남겨두면 다음 접속에
-    // 로그인 못 하는 상태로 금액만 다시 뜬다
-    if(isAuthErr(e)){ clearSnapshot(); showAuth(); return; }
+    // 인증 문제면 에러 카드가 아니라 로그인 화면 (캐시도 함께 지운다 — authLost 주석)
+    if(isAuthErr(e)){ authLost(); return; }
     loadError=e.message; console.error("초기화 오류:",e);
   }
   applyDeviceDefaults();
@@ -1348,6 +1346,12 @@ async function startApp(){
 /* ── 로그인 게이트 ── */
 // PostgREST는 세션 문제를 401/PGRST301로 알린다. 일반 로드 오류와 섞으면 안내가 틀어진다
 const isAuthErr = e => !!e && (e.status===401 || /JWT|jwt expired|PGRST301|Invalid Refresh Token/i.test(e.message||""));
+
+/* 세션을 잃었을 때의 유일한 경로 — 캐시를 지우고 로그인 화면으로.
+   ⚠️ showAuth()를 직접 부르지 말 것. 캐시를 남기면 다음 접속에 '로그인은 못 하는데 금액은 보이는'
+   상태가 된다(bootFromSnapshot은 세션 '존재'만 보고 그린다). 예전엔 이 두 줄이 자리마다 흩어져 있었고,
+   refreshData·retryLoad 두 곳은 showAuth()만 불러 캐시가 남았다 — check_authgate.js가 직접 호출을 금지한다. */
+function authLost(){ clearSnapshot(); showAuth(); }
 
 function showAuth(){
   // 뒤 화면을 비운다 — 초기 스피너가 영원히 돌지 않게, 그리고 세션이 끊겼을 때
@@ -1465,7 +1469,11 @@ function saveSnapshot(res){
     if(res.lim.error || res.mst.error || res.cfg.error || res.mtm.error) return false;
     const base = { v:SNAP_V, at:Date.now(), mem:res.mem.data||[], lim:res.lim.data||[],
                    mst:res.mst.data||[], cfg:res.cfg.data||[], mtm:res.mtm.data||[] };
-    const all = res.tx.data||[];
+    // ⚠️ _t(주기 판정용 숫자)는 빼고 담는다. applyLoad의 stampRows가 응답 객체에 **직접** 심은 파생값이라
+    // 그대로 직렬화하면 위의 '원본 응답만 담는다' 원칙이 조용히 깨진다(2026-10-25까지 그랬다).
+    // 실제 피해: 기기 시간대가 바뀌면(여행) 옛 시간대의 _t가 그대로 복원돼, 캐시 화면에서 주기 첫날 거래가
+    // 이웃 주기로 밀린다. 크기도 8% 줄어 SNAP_MAX까지 여유가 생긴다. 복원 때 stampRows가 다시 심는다.
+    const all = (res.tx.data||[]).map(({_t, ...r}) => r);
     let s = JSON.stringify({ ...base, tx:all, partial:false });
     if(s.length > SNAP_MAX){
       // ⚠️ 여기서 그냥 포기하면 **조용한 퇴화**가 된다 — 행이 늘어 한도를 넘는 날부터
@@ -1494,13 +1502,13 @@ function readSnapshot(){
 }
 function clearSnapshot(){ try{ localStorage.removeItem(SNAP_KEY); }catch(e){} }
 // 세션 '유효성'이 아니라 '존재'만 본다 — 유효성은 getSession()이 뒤에서 확인하고,
-// 실패하면 화면을 비우고 캐시를 지운다(showAuth 경로)
+// 실패하면 화면을 비우고 캐시를 지운다(authLost 경로)
 const hasStoredSession = () => { try{ return !!localStorage.getItem(AUTH_KEY); }catch(e){ return false; } };
 
-// 1차 로드가 받아올 창의 시작일. 로컬 날짜로 만든다 — toISOString은 UTC라 하루 어긋난다
+// 1차 로드가 받아올 창의 시작일 (로컬 날짜 — ymd 주석)
 function recentCutoff(){
   const d = new Date(); d.setDate(d.getDate() - RECENT_DAYS);
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+  return ymd(d);
 }
 
 // 응답 6종 → 전역. 순수 변환이라 DB에서 왔든 캐시에서 왔든 같은 결과가 나온다
@@ -1627,8 +1635,17 @@ async function loadAll(onPartial){
   return true;
 }
 
-/* 데이터 재로드 + 재렌더 — 드문 CRUD(멤버·마스터) 후 공통 마무리 */
-async function reloadAndRender(){ await loadAll(); render(); }
+/* 데이터 재로드 + 재렌더 — 드문 CRUD(멤버·마스터 추가·삭제) 후 공통 마무리.
+   ⚠️ 더 새 로드가 출발했으면(false) 그리지 않는다 — 그쪽이 그린다. 예전엔 무조건 그려서,
+   연달아 누르면 먼저 끝난 쪽이 아직 반영 전인 옛 상태로 화면을 한 번 되돌렸다.
+   실패는 refreshData와 같은 갈래로 — 예전엔 onclick 밖으로 던져져 화면에 아무 단서가 없었다 */
+async function reloadAndRender(){
+  try{ if(await loadAll()) render(); }
+  catch(e){
+    if(isAuthErr(e)){ authLost(); return; }
+    loadError=e.message; render();
+  }
+}
 
 /* ── 저장 직후 즉시 반영 (낙관적 갱신) ──
    예전엔 저장 → 전체 재로드(표 6개 + 거래 전량) → 그제야 목록에 새 행이 보였다.
@@ -1651,7 +1668,7 @@ async function syncInBackground(){
   try{
     if(!(await loadAll())) return;     // 더 새 동기화가 출발했다 — 그쪽이 그린다
   }catch(e){
-    if(isAuthErr(e)){ clearSnapshot(); showAuth(); return; }
+    if(isAuthErr(e)){ authLost(); return; }
     console.warn("백그라운드 동기화 실패:", e);   // 로컬 반영은 끝났다. 다음 새로고침에서 맞춰진다
     return;
   }
@@ -1797,8 +1814,10 @@ async function saveBillingStart(member){
   const res=await sb.from("app_settings").upsert({key:`billing_start_${member}`,value:String(v)},{onConflict:"key"});
   if(dbErr(res)) return;
   BILLING_STARTS[member]=v;
-  render();
+  renderKeepScroll();
   toast(`${member}의 주기: ${v>1?`매월 ${v}일 ~ 다음달 ${v-1}일`:"매월 1일 ~ 말일"}`);
+  // 스냅샷까지 새 값으로 — 안 하면 다음 접속의 캐시 화면이 옛 시작일로 주기를 잘라 숫자가 한 번 튄다
+  syncInBackground();
 }
 
 /* ── 앱 설정 저장 (전역, app_settings) ── */
@@ -1809,7 +1828,8 @@ async function saveAppSetting(key, elId, min, max, def, unit){
   if(dbErr(res)) return;
   if(key==="warn_threshold")WARN_TH=v;
   if(key==="analysis_periods")AN_PERIODS=v;
-  render(); toast(`저장했어요: ${v}${unit||""}`);
+  renderKeepScroll(); toast(`저장했어요: ${v}${unit||""}`);
+  syncInBackground();   // 스냅샷 갱신 (saveBillingStart 주석)
 }
 
 /* ── 카테고리 아이콘 설정 (app_settings의 cat_icon_*, 전 멤버 공통) ── */
@@ -1836,8 +1856,9 @@ async function saveIcon(emo){
     : await sb.from("app_settings").delete().eq("key",key);
   if(dbErr(res)) return;
   if(emo)USER_ICONS[cat]=emo; else delete USER_ICONS[cat];
-  closePicker(); render();
+  closePicker(); renderKeepScroll();
   toast(emo?`'${cat}' 아이콘 → ${emo}`:`'${cat}' 아이콘 기본값으로`);
+  syncInBackground();   // 스냅샷 갱신 (saveBillingStart 주석)
 }
 
 /* ── CSV 내보내기 (전체 거래내역, 엑셀용 UTF-8 BOM) ── */
@@ -1860,7 +1881,7 @@ async function refreshData(){
   const b=$("hdRefresh"); if(b)b.classList.add("rot");
   try{ await loadAll(); loadError=null; render(); toast("최신 데이터로 갱신했어요"); }
   catch(e){
-    if(isAuthErr(e)){ showAuth(); return; }   // 세션이 그새 끊겼으면 에러 카드가 아니라 로그인 화면
+    if(isAuthErr(e)){ authLost(); return; }   // 세션이 그새 끊겼으면 에러 카드가 아니라 로그인 화면
     loadError=e.message; render();
   }
   finally{ if(b)b.classList.remove("rot"); }
@@ -1893,7 +1914,6 @@ function fmtNum(el){ const r=el.value.replace(/[^0-9]/g,""); el.value=r?comma(r)
    네이티브 <input type=date> 는 투명(.date-native{opacity:0})이라 이 함수가 화면에 보이는
    유일한 경로다. ⚠️ $("fDate").value 를 코드로 바꾸는 곳에서 반드시 함께 부를 것 —
    빠뜨리면 값은 들어 있는데 칸이 비어 보인다(openSheet·editEntry 두 곳). */
-const DOW = ["일","월","화","수","목","금","토"];
 function syncDateDisp(){
   const el=$("fDate"), d=$("fDateDisp");
   if(!el || !d) return;
@@ -1994,7 +2014,7 @@ function render(){
   if(loadError){
     m.innerHTML=`<div class="sec"><div class="err-card">
       <div style="font-size:1.05rem;font-weight:700;color:var(--exp);margin-bottom:8px">⚠️ 데이터 연결 오류</div>
-      <div style="font-size:.82rem;color:var(--ink-2);margin-bottom:14px;line-height:1.75">${loadError}</div>
+      <div style="font-size:.82rem;color:var(--ink-2);margin-bottom:14px;line-height:1.75">${esc(loadError)}</div>
       <div style="font-size:.76rem;color:var(--ink-3);line-height:1.9">
         <b style="color:var(--ink-2)">해결 방법</b><br>
         1. 인터넷 연결을 확인하고 아래 '다시 시도'를 눌러보세요.<br>
@@ -2054,7 +2074,7 @@ async function retryLoad(){
   $("main").innerHTML='<div class="spin"></div>';
   try{ await loadAll(); loadError=null; }
   catch(e){
-    if(isAuthErr(e)){ showAuth(); return; }   // 위와 같은 이유
+    if(isAuthErr(e)){ authLost(); return; }   // 위와 같은 이유
     loadError=e.message;
   }
   render();
@@ -2112,9 +2132,8 @@ let LIST_I = 0;        // 다음에 그릴 그룹 인덱스
 let _listObs = null;   // IntersectionObserver — 재렌더마다 갈아끼운다(안 끊으면 detached 노드를 잡고 샌다)
 
 function dayGroupHtml(date, dr){
-  const days=["일","월","화","수","목","금","토"];
   const d=parseDate(date), de=expOf(dr);
-  let h=`<div class="dgroup"><div class="dhead"><span>${d.getMonth()+1}월 ${d.getDate()}일 (${days[d.getDay()]})</span><span class="dtot">${de>0?'지출 '+won(de):''}</span></div>`;
+  let h=`<div class="dgroup"><div class="dhead"><span>${d.getMonth()+1}월 ${d.getDate()}일 (${DOW[d.getDay()]})</span><span class="dtot">${de>0?'지출 '+won(de):''}</span></div>`;
   dr.forEach(r=>{
     const cls=r.type==="입금"?"g":"r", pf=r.type==="입금"?"+":"-";
     // 옛 칩 3개 나열 → 가운뎃점으로 이은 한 줄. 이동 leg 배지만 색으로 남긴다.
@@ -2849,7 +2868,7 @@ function viewTaxYear(){
 
   // 0) 테이블 미설치 안내 — 이게 없으면 매핑이 저장되지 않아 모든 집계가 0원이 된다
   if(!TAX_READY){
-    h+=`<div class="m-section" style="border-color:rgba(240,84,112,.3)">
+    h+=`<div class="m-section" style="border-color:color-mix(in srgb,var(--exp) 30%,transparent)">
       <div class="m-title">설치 안내 <span style="font-size:.66rem;color:var(--exp);font-weight:700">필수</span></div>
       <div style="font-size:.8rem;color:var(--ink-2);line-height:1.75;margin-bottom:12px">
         <b style="color:var(--exp)">tax_map 테이블이 없어 매핑을 저장할 수 없습니다.</b> 그래서 지금은 모든 집계가 0원으로 나와요.<br>
@@ -3090,7 +3109,16 @@ function drawTaxChart(){
         y:{beginAtZero:true,stacked:true,ticks:{color:subC,font:{size:10},callback:v=>wonShort(v)},grid:{color:gridC}}}}}));
 }
 
-/* ── 연말정산 설정 CRUD ── */
+/* ── 연말정산 설정 CRUD ──
+   저장이 끝나면 로컬 맵에 바로 반영하고 동기화는 뒤에서 돈다(거래·한도 저장과 같은 방식, patchRows 주석).
+   ⚠️ 예전엔 셀렉트 하나를 바꿀 때마다 전체 재로드(표 6개 + 거래 전량)를 기다렸다. 결제수단 8개를 연달아
+   매핑하면 먼저 끝난 재로드가 아직 반영 전인 옛 맵으로 다시 그려, 방금 고른 셀렉트가 '미분류'로 잠깐 되돌아갔다. */
+// tax_map 행을 로컬 맵에 반영 — applyLoad의 tax_map 파생과 같은 규칙(값 키는 빈 문자열 허용, kind 빈값 = 해제)
+function patchTaxMap(member, type, pairs){
+  const bag = type==="category" ? CTMAP : MTMAP;
+  const m = bag[member] || (bag[member] = {});
+  pairs.forEach(([v,k]) => { if(k) m[v||""] = k; else delete m[v||""]; });
+}
 /* type: 'category'(소득) | 'method'(지출). kind 빈값이면 매핑 해제(삭제). */
 async function setTaxMap(member, type, value, kind){
   if(!TAX_READY){ toast("tax_map 테이블을 먼저 만들어주세요 (연말정산 탭 설치 안내)"); return; }
@@ -3098,7 +3126,9 @@ async function setTaxMap(member, type, value, kind){
     ? await sb.from("tax_map").upsert({member,type,value,kind},{onConflict:"member,type,value"})
     : await sb.from("tax_map").delete().eq("member",member).eq("type",type).eq("value",value);
   if(dbErr(res,"매핑 저장 오류")) return;
-  await reloadAndRender();
+  patchTaxMap(member, type, [[value, kind]]);
+  renderKeepScroll();
+  syncInBackground();
 }
 /* 미분류 항목만 이름 규칙 추천값으로 일괄 저장 —
    추천값을 몰래 집계에 쓰지 않고 저장된 것만 반영한다(근거 없이 숫자가 움직이면 안 되므로) */
@@ -3117,8 +3147,10 @@ async function applyTaxSuggest(member, type){
   if(!rows.length){ toast("미분류 항목이 없어요"); return; }
   const res=await sb.from("tax_map").upsert(rows,{onConflict:"member,type,value"});
   if(dbErr(res,"매핑 저장 오류")) return;
+  patchTaxMap(member, type, rows.map(r=>[r.value, r.kind]));
+  renderKeepScroll();
   toast(`${rows.length}개 항목을 분류했어요`);
-  await reloadAndRender();
+  syncInBackground();
 }
 function copyTaxDDL(){
   const done=()=>toast("SQL을 복사했어요 — Supabase SQL Editor에 붙여넣기");
@@ -3131,14 +3163,18 @@ async function saveTySalary(member){
   const res = v>0 ? await sb.from("app_settings").upsert({key,value:String(v)},{onConflict:"key"})
                   : await sb.from("app_settings").delete().eq("key",key);
   if(dbErr(res,"총급여 저장 오류")) return;
+  if(v>0) TY_SALARY[member]=v; else delete TY_SALARY[member];   // applyLoad와 같은 규칙(0 이하는 '추정값')
+  renderKeepScroll();
   toast(v>0?`총급여 ${won(v)}로 저장했어요`:"자동 추정값으로 되돌렸어요");
-  await reloadAndRender();
+  syncInBackground();
 }
 async function resetTySalary(member){
   const res=await sb.from("app_settings").delete().eq("key",`ty_salary_${member}`);
   if(dbErr(res,"총급여 초기화 오류")) return;
+  delete TY_SALARY[member];
+  renderKeepScroll();
   toast("자동 추정값으로 되돌렸어요");
-  await reloadAndRender();
+  syncInBackground();
 }
 
 /* ── 계좌 탭 (멤버 필터 적용) ── */
