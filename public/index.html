@@ -1062,7 +1062,7 @@ const GAS_BACKUP_SECRET = "ourbudget-backup-2026";  // GAS 코드의 SECRET과 �
 const CAT_ICON     = {생활비:"🛒",고정비:"🏠",월급:"💵",이자:"📈",데이트:"❤️",식비:"🍽️",교통:"🚌",의료:"💊",쇼핑:"👜",문화:"🎬",교육:"📚",통신:"📱",보험:"🛡️",기타:"📌","계좌간 이동":"🔄"};
 /* 연말정산 — 결제수단별 소득공제 구분.
    공제율은 체크·현금영수증이 동일(30%)하지만, 사용 추이를 따로 보려고 화면에선 셋을 분리한다. */
-const TY_KINDS     = {credit:"신용", check:"체크", cash:"현금", none:"제외"};   // 지출: 결제수단별 공제 구분
+const TY_KINDS     = {credit:"신용", check:"체크", cash:"현금영수증", none:"제외"};   // ⚠️ cash 라벨을 '현금'으로 되돌리지 말 것 — 영수증 없는 현금을 고르게 만든다   // 지출: 결제수단별 공제 구분
 const TY_CAT_KINDS = {income:"소득", none:"제외"};                              // 소득: 카테고리별 총급여 산입 여부
 const TY_RATE  = {credit:.15, check:.30, cash:.30, none:0};
 /* 연말정산 3색 — 한 스택 막대에 함께 놓이므로 all-pairs 검증을 통과해야 한다.
@@ -2319,6 +2319,12 @@ function netSplit(rows){
       화면의 절반이 입력칸이었다. 한도 없는 카테고리는 아래 '한도 미설정'에 한 줄씩 접는다. */
 let limEdit = null;   // 입력칸을 편 카테고리 (한 번에 하나)
 const PACE_MIN = .25;
+/* 한도 판정·표시 — 한도 탭과 분석 탭 '한도 초과/임박' 진단이 같이 쓴다.
+   ⚠️ 판정을 반올림한 %로 하지 말 것(2026-11-01 수정). Math.round(99.6)=100이라 한도 10만원에 99,600원이면
+   '초과' 빨간 경고가 뜨고 메시지는 "-400원 초과"였다. 초과는 금액으로(used>=limit), 임박은 반올림 전 비율로 본다.
+   표시 %는 내림 — 그래야 '100%'가 뜨는 순간과 '초과' 판정이 정확히 같다. */
+const limPct   = (used, limit) => limit ? Math.max(0, Math.floor(used/limit*100)) : 0;
+const limState = (used, limit) => used>=limit ? "over" : used/limit*100>=WARN_TH ? "warn" : "ok";
 function toggleLimEdit(cat){
   limEdit = limEdit===cat ? null : cat;
   renderKeepScroll();
@@ -2343,9 +2349,9 @@ function viewLimit(){
   const cats=catsOf(limitMember);
   const items=cats.map(cat=>{
     const limit=memberLimits[cat]||0, used=spent[cat]||0;
-    return {cat,limit,used,pct:limit?Math.max(0,Math.round(used/limit*100)):0};
-  }).sort((a,b)=>b.pct-a.pct);
-  const over=items.filter(i=>i.limit&&i.pct>=100);
+    return {cat,limit,used,pct:limPct(used,limit),ratio:limit?used/limit:0};
+  }).sort((a,b)=>b.ratio-a.ratio);
+  const over=items.filter(i=>i.limit&&i.used>=i.limit);
   // 지금 속도로 주기 말 어림 — 한도 넘을 것 같으면 그 금액, 아니면 0
   const proj = it => (pace>=PACE_MIN && it.used>0 && it.used/pace > it.limit) ? Math.round(it.used/pace/1000)*1000 : 0;
 
@@ -2358,8 +2364,8 @@ function viewLimit(){
   const withLim=items.filter(i=>i.limit>0), noLim=items.filter(i=>!i.limit);
   if(withLim.length){
     const tl=withLim.reduce((s,i)=>s+i.limit,0), tu=withLim.reduce((s,i)=>s+i.used,0);
-    const tp=tl?Math.max(0,Math.round(tu/tl*100)):0;
-    const st=tp>=100?"over":tp>=WARN_TH?"warn":"ok";
+    const tp=limPct(tu,tl);
+    const st=limState(tu,tl);
     h+=`<div class="lcard ${st}">
       <div class="l-h"><div class="c-l"><div class="c-ic">📦</div><div class="c-nm">전체 한도 요약</div></div><div class="l-pct ${st}">${tp}%</div></div>
       ${limBar(tp,st,pace)}
@@ -2372,7 +2378,7 @@ function viewLimit(){
     return h+`</div>`;
   }
   withLim.forEach(it=>{
-    const state=it.pct>=100?"over":it.pct>=WARN_TH?"warn":"ok";
+    const state=limState(it.used,it.limit);
     const p=state==="ok"?proj(it):0;
     const open=limEdit===it.cat;
     h+=`<div class="lcard ${state} link"${asBtn(` aria-expanded="${open}"`)} onclick="toggleLimEdit('${jsq(it.cat)}')">
@@ -2595,8 +2601,8 @@ function buildInsights(mem, periods, rowsByPeriod, curCatArr, totExp, same, earl
   const limUsed=limitUsage(rowsByPeriod[rowsByPeriod.length-1]||[]);   // 한도 탭과 같은 기준(지출−입금)
   const overs=[], nears=[];
   Object.entries(lim).forEach(([c,l])=>{
-    if(!l) return; const used=limUsed[c]||0; const pct=Math.round(used/l*100);
-    if(pct>=100) overs.push({c,used,l,pct}); else if(pct>=WARN_TH) nears.push({c,pct});
+    if(!l) return; const used=limUsed[c]||0, pct=limPct(used,l), st=limState(used,l);
+    if(st==="over") overs.push({c,used,l,pct}); else if(st==="warn") nears.push({c,pct});
   });
   if(overs.length) out.push({ic:"🚨",tone:"warn",t:`한도 초과 ${overs.length}건`,
     b: overs.map(o=>`'${o.c}' ${o.pct}% (${won(o.used-o.l)} 초과)`).join(" · ")+" — 다음 주기엔 이 카테고리를 가장 먼저 조여보세요."});
@@ -2817,19 +2823,33 @@ function suggestKind(method){
   if(/체크|직불|선불/.test(s))            return "check";
   if(/현금영수증/.test(s))                 return "cash";
   if(/신용|카드/.test(s))                  return "credit";
-  if(/현금/.test(s))                       return "cash";
+  // ⚠️ 그냥 '현금'은 공제 대상이 아니다 — 30%는 현금영수증을 받은 현금만이다(조특법 §126의2).
+  //    2026-11-01까지 '현금'을 cash로 추천해 영수증 없는 현금이 30%로 잡혔다
   return "none";
 }
 const suggestCatKind = cat => SALARY_RE.test(String(cat||"")) ? "income" : "none";
 
-function taxCalc(member){
-  const now=new Date(), year=now.getFullYear(), m=now.getMonth()+1;
+/* 영수증 없는 현금으로 보이는 결제수단 이름 — 이미 cash(30%)로 매핑돼 있으면 tyNotes가 알린다 */
+const NO_RECEIPT_RE = /현금/;
+const isNoReceiptCash = meth => NO_RECEIPT_RE.test(meth) && !/영수증/.test(meth);
+
+function taxCalc(member, now){
+  now = now || new Date();
+  const year=now.getFullYear(), m=now.getMonth()+1;
+  /* 연환산은 '경과 일수'로 한다. ⚠️ x/m*12(현재 월을 다 지난 달로 치기)로 되돌리지 말 것 (2026-11-01 수정).
+     11/1이면 10개월+하루치를 11로 나눠 연말 예상이 ~9% 낮았고 남은 기간도 1개월로 잡혔다.
+     12월엔 m>=12라 연환산을 아예 안 해 12월 사용분이 통째로 빠졌다. 오늘 거래까지 포함하므로 오늘을 센다. */
+  const y0=new Date(year,0,1,12), today=new Date(year,now.getMonth(),now.getDate(),12);
+  const yearDays=Math.round((new Date(year+1,0,1,12)-y0)/DAY_MS);
+  const elapsed=Math.round((today-y0)/DAY_MS)+1;              // 1/1 = 1
+  const remainDays=yearDays-elapsed;
   const map=MTMAP[member]||{}, cmap=CTMAP[member]||{};
   const ytd={credit:0,check:0,cash:0,none:0,unmapped:0};
   const byMonth={credit:Array(12).fill(0), check:Array(12).fill(0), cash:Array(12).fill(0)};
   const unmapped={};            // {결제수단: 금액} — 지출 미매핑 경고 목록
   const incUnmapped={};         // {카테고리: 금액} — 소득 미매핑 경고 목록
-  let salaryRaw=0, salaryCnt=0, incUnmappedTot=0;
+  let salaryRaw=0, salaryCnt=0, incUnmappedTot=0, cashNoReceipt=0;
+  const incMonthSet=new Set();  // 소득 입금이 있었던 달
 
   ROWS.forEach(r=>{
     if(r.member!==member || String(r.date).slice(0,4)!==String(year)) return;
@@ -2837,7 +2857,7 @@ function taxCalc(member){
     if(r.type==="입금"){
       // 소득 판정은 오직 사용자 매핑(CTMAP)만 따른다 — 이름 규칙은 추천 UI에서만 쓴다
       const cat=r.category||"", ck=cmap[cat];
-      if(ck==="income"){ salaryRaw+=r.amount; salaryCnt++; }
+      if(ck==="income"){ salaryRaw+=r.amount; salaryCnt++; incMonthSet.add(String(r.date).slice(5,7)); }
       else if(!ck){ incUnmapped[cat]=(incUnmapped[cat]||0)+r.amount; incUnmappedTot+=r.amount; }
       return;
     }
@@ -2845,27 +2865,40 @@ function taxCalc(member){
     const meth=r.method||"", k=map[meth];
     if(!k){ ytd.unmapped+=r.amount; unmapped[meth]=(unmapped[meth]||0)+r.amount; return; }
     ytd[k]=(ytd[k]||0)+r.amount;
+    if(k==="cash" && isNoReceiptCash(meth)) cashNoReceipt+=r.amount;
     if(byMonth[k]){ const mi=Number(String(r.date).slice(5,7))-1; if(mi>=0&&mi<12) byMonth[k][mi]+=r.amount; }
   });
 
-  // 12월 전이면 현재 월로 나눠 ×12 — '이 추세로 가면 연말에 얼마'
-  const proj = x => m>=12 ? x : x/m*12;
-  const autoSalary = Math.round(proj(salaryRaw));
+  // 지출 연환산 — 경과 일수 비율로 ('이 추세로 가면 연말에 얼마'). 12/31이면 그대로
+  const frac = elapsed/yearDays;
+  const proj = x => x/frac;
+  /* 총급여 추정 = 소득 입금이 '있었던 달'의 평균 × 12.
+     ⚠️ 경과 일수나 현재 월로 나누지 말 것 — 급여는 한 달에 한 번 몰려 들어와서, 급여일 전이면
+     늘 한 달치가 모자란 채로 나눠져 낮게 나왔다(11/1에 10건 ÷ 11 × 12). 기록이 빠진 달은 평균에서도 빠진다. */
+  const incMonths = incMonthSet.size;
+  const autoSalary = incMonths ? Math.round(salaryRaw/incMonths*12) : 0;
   const manual = TY_SALARY[member]||0;
   const salary = manual || autoSalary;
+  // 끝난 달 중 소득 기록이 없는 달 수 — 급여일이 아직 안 온 이번 달은 세지 않는다
+  //   (예전 `salaryCnt < m` 판정은 매달 1일~급여일 전날까지 늘 경고를 띄웠다)
+  const doneMonths = m-1 + (incMonthSet.has(String(m).padStart(2,"0")) ? 1 : 0);
+  const missingMonths = Math.max(0, doneMonths - incMonths);
 
   const C=ytd.credit, D=ytd.check+ytd.cash, S=C+D;
   const projK={credit:proj(ytd.credit), check:proj(ytd.check), cash:proj(ytd.cash), none:proj(ytd.none)};
   const Cp=projK.credit, Dp=projK.check+projK.cash, Sp=Cp+Dp;
 
   // 남은 기간 시나리오 — 현재 페이스로 계속 쓴다고 보고, 그 돈을 어디로 돌릴지만 바꿔본다
-  const remain=Math.max(0,12-m), pace=m?S/m:0, future=pace*remain;
+  const pace=S/elapsed*yearDays/12, future=S/elapsed*remainDays;   // pace = 월 환산
+  const remainLabel = remainDays>=60 ? `약 ${Math.round(remainDays/yearDays*12)}개월` : `${remainDays}일`;
   return {
-    year, m, ytd, byMonth, unmapped, incUnmapped, incUnmappedTot, salary, manual, autoSalary, salaryCnt,
+    year, m, asOf:`${m}/${now.getDate()}`, elapsed, yearDays, remainDays, remainLabel,
+    ytd, byMonth, unmapped, incUnmapped, incUnmappedTot, salary, manual, autoSalary, salaryCnt, salaryRaw,
+    incMonths, missingMonths, cashNoReceipt,
     th:salary*.25, limit:TY_LIMIT(salary), C, D, S, projK, Cp, Dp, Sp,
     ded:tyDeduct(Cp,Dp,salary),            // 현 추세 유지 시 연말 공제액
     dedNow:tyDeduct(C,D,salary),           // 지금까지 확정분
-    remain, pace, future,
+    pace, future,
     scCredit:tyDeduct(C+future, D, salary),      // 남은 기간 전부 신용
     scCheck :tyDeduct(C, D+future, salary),      // 남은 기간 전부 체크·현금
     // '제외'로 둔 금액을 공제 대상(30%)으로 봤다면 얼마였을지 — 제외가 결정적인지 보여주는 대조군
@@ -2914,6 +2947,19 @@ function tyNotes(t){
     out.push({ic:"🚫",tone:"info",t:`'제외'로 둔 ${won(t.ytd.none)}이 결과를 좌우하고 있어요`,
       b:`이 금액을 공제 대상으로 보면 연말 공제액이 ${won(R(t.ded))} → ${won(R(t.dedIfNone))}으로 바뀝니다. 이체·계좌출금은 원래 대상이 아니지만, 그중 현금영수증을 발행했거나 실제 카드 결제인 항목이 섞여 있다면 매핑을 고쳐주세요.`});
   }
+  // 영수증 없는 현금이 30%로 잡혀 있으면 공제액이 부푼다 — 이름이 '현금'인데 '현금영수증'으로 매핑된 결제수단
+  if(t.cashNoReceipt>0){
+    out.push({ic:"🧾",tone:"warn",t:`영수증 없는 현금 ${won(t.cashNoReceipt)}이 공제 대상으로 잡혀 있어요`,
+      b:`현금은 현금영수증을 받은 것만 30% 공제돼요. 이름이 '현금'인 결제수단이 '현금영수증'으로 매핑돼 있는데, 영수증을 안 받은 현금이라면 아래 결제수단 매핑에서 '제외'로 바꿔주세요.`});
+  }
+  /* 총급여가 실수령 기준 자동 추정이면 문턱이 낮게 잡혀 공제액이 부푼다. 얼마나 흔들리는지 한 예로 보여준다.
+     ⚠️ 15%는 세법 값이 아니라 '예시'다(4대보험+원천세가 보통 10~20%). 계산에 쓰지 말고 이 안내에만 쓸 것 */
+  if(!t.manual && t.salary>0){
+    const g=t.salary*1.15, dg=tyDeduct(t.Cp,t.Dp,g);
+    const tier = t.salary<=70000000 && g>70000000;
+    out.push({ic:"💼",tone:"info",t:"총급여가 통장 입금액(실수령) 기준이에요",
+      b:`세법상 총급여는 세금·4대보험을 떼기 전 금액이라 입금액보다 보통 10~20% 많아요. 예를 들어 15% 많다면 25% 문턱이 ${won(R(t.th))} → ${won(R(g*.25))}로 올라가 연말 공제액이 ${won(R(t.ded))} → ${won(R(dg))}가 됩니다.${tier?' 7천만원 기준도 넘어가 공제 한도가 300만 → 250만원으로 줄어요.':''} 정확한 판단을 위해 총급여를 직접 입력해주세요.`});
+  }
   return out;
 }
 
@@ -2927,7 +2973,7 @@ function viewTaxYear(){
   const R=Math.round;
 
   let h=`<div class="sec">`;
-  h+=`<div class="ty-cap">${t.year}년 1월~12월(역년) 기준 · 현재 ${t.m}월까지의 실적을 <b style="color:var(--ink-2)">연환산</b>해 연말을 예측합니다. 결제주기와 무관해요.</div>`;
+  h+=`<div class="ty-cap">${t.year}년 1월~12월(역년) 기준 · 오늘(${t.asOf})까지 ${t.elapsed}일의 실적을 <b style="color:var(--ink-2)">연환산</b>해 연말을 예측합니다. 결제주기와 무관해요.</div>`;
 
   // 0) 테이블 미설치 안내 — 이게 없으면 매핑이 저장되지 않아 모든 집계가 0원이 된다
   if(!TAX_READY){
@@ -2948,16 +2994,16 @@ function viewTaxYear(){
     <div class="m-title">총급여 (연봉)</div>
     <div class="ty-sal">
       <span class="ty-sal-v">${t.salary>0?won(t.salary):"미설정"}</span>
-      <span class="ty-bdg ${t.manual?'man':'auto'}">${t.manual?'수동 입력':'자동 추정'}</span>
+      <span class="ty-bdg ${t.manual?'man':'auto'}">${t.manual?'수동 입력':'자동 추정 · 실수령'}</span>
     </div>
     <div style="font-size:.74rem;color:var(--ink-3);line-height:1.7;margin-bottom:12px">
       ${t.salaryCnt
-        ? `소득으로 지정한 카테고리의 올해 입금 <b style="color:var(--ink-2)">${t.salaryCnt}건 ${won(R(t.autoSalary/12*t.m))}</b>을 ${t.m}개월로 나눠 ×12 → 추정 ${won(t.autoSalary)}`
+        ? `소득으로 지정한 카테고리의 올해 입금 <b style="color:var(--ink-2)">${t.salaryCnt}건 ${won(t.salaryRaw)}</b>을 입금이 있던 ${t.incMonths}개월로 나눠 ×12 → 추정 ${won(t.autoSalary)}`
         : `소득으로 지정된 카테고리가 없어 자동 추정이 불가능해요. 아래 '소득 카테고리 매핑'에서 지정해주세요.`}
       ${t.manual?`<br>수동값 <b style="color:var(--ink)">${won(t.manual)}</b>이 적용 중입니다.`:``}
     </div>
-    ${!t.manual&&t.salaryCnt>0&&t.salaryCnt<t.m
-      ? `<div class="alert" style="margin-bottom:12px">⚠️ 월급 입금이 ${t.salaryCnt}건뿐이라 ${t.m}개월치를 다 반영하지 못했어요. 추정이 실제보다 낮을 수 있으니 연봉을 직접 입력해주세요.</div>`
+    ${!t.manual&&t.salaryCnt>0
+      ? `<div class="alert" style="margin-bottom:12px">⚠️ 통장에 들어온 <b>실수령액</b> 기준이라, 세금·4대보험을 떼기 전 금액인 세법상 총급여보다 낮게 잡혀요. 그만큼 25% 문턱이 낮아져 공제액이 실제보다 크게 나옵니다 — 원천징수영수증·급여명세서의 연간 총급여를 직접 입력해주세요.${t.missingMonths>0?`<br>지난 ${t.m-1}개월 중 ${t.missingMonths}개월은 소득 입금 기록이 없어, 기록된 달의 평균으로 어림했어요.`:``}</div>`
       : ``}
     <div class="m-add">
       <input id="ty_sal" aria-label="총급여 직접 입력" inputmode="numeric" placeholder="총급여 직접 입력 (비우면 추정값)"
@@ -2985,7 +3031,7 @@ function viewTaxYear(){
       <span class="tyu-x"><span class="tyu-v">${won(t.ytd[k])}</span>
         <div class="tyu-s">연환산 ${won(R(t.projK[k]))}</div></span></div>`;
   h+=`<div class="panel">
-    <div class="p-t">올해 사용액<span class="p-sub">${t.m}월까지 → 연환산</span></div>
+    <div class="p-t">올해 사용액<span class="p-sub">${t.asOf}까지 → 연환산</span></div>
     <div class="tybar-o">
       <div class="tybar-w">
         <div class="tybar-s" style="width:${wpc(t.projK.credit)}%;background:${tyColor("credit")}"></div>
@@ -3001,7 +3047,7 @@ function viewTaxYear(){
           <div class="tyu-s">연환산 ${won(R(t.Sp))}</div></span></div>
     </div>
     <div style="font-size:.75rem;color:var(--ink-3);margin-top:9px;line-height:1.65">
-      큰 숫자는 ${t.m}월까지 실제 사용액, 아래는 이 추세의 연말 예상치 · 막대는 연환산 기준${t.ytd.none>0?` · 공제 제외 ${won(t.ytd.none)}`:``}
+      큰 숫자는 ${t.asOf}까지 실제 사용액, 아래는 이 추세의 연말 예상치 · 막대는 연환산 기준${t.ytd.none>0?` · 공제 제외 ${won(t.ytd.none)}`:``}
     </div>`;
   if(unmapArr.length){
     h+=`<div class="alert" style="margin-top:12px">⚠️ 미분류 결제수단 <b>${won(t.ytd.unmapped)}</b> (${unmapArr.length}종) — 아래에서 매핑해야 집계에 반영됩니다.</div>`;
@@ -3055,15 +3101,15 @@ function viewTaxYear(){
   h+=`</div>`;
 
   // 4) 남은 기간 시나리오 비교 — 이 탭의 '비교 분석' 본체
-  if(t.salary>0 && t.remain>0 && t.future>0){
+  if(t.salary>0 && t.remainDays>0 && t.future>0){
     const mx=Math.max(t.scCredit,t.scCheck,1);
     const gap=R(t.scCheck-t.scCredit);
     const bar=(nm,v,col)=>`<div class="tysc-r">
       <div class="tysc-t"><span class="tysc-n">${nm}</span><span class="tysc-v" style="color:${col}">${won(R(v))}</span></div>
       <div class="tysc-bw"><div class="tysc-b" style="width:${Math.max(2,v/mx*100)}%;background:${col}"></div></div></div>`;
-    h+=`<div class="panel"><div class="p-t">남은 ${t.remain}개월 비교<span class="p-sub">연말 공제액</span></div>
+    h+=`<div class="panel"><div class="p-t">남은 ${t.remainLabel} 비교<span class="p-sub">연말 공제액</span></div>
       <div style="font-size:.75rem;color:var(--ink-3);line-height:1.7;margin:10px 0 13px">
-        지금 페이스(월 ${wonShort(R(t.pace))})로 남은 ${t.remain}개월에 ${won(R(t.future))}를 더 쓴다고 볼 때
+        지금 페이스(월 ${wonShort(R(t.pace))})로 남은 ${t.remainLabel} 동안 ${won(R(t.future))}를 더 쓴다고 볼 때
       </div>
       <div class="tysc">
         ${bar("전부 체크·현금으로", t.scCheck, tyColor("check"))}
