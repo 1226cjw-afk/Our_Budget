@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // PC 와 폰(클라우드 세션)이 항상 같은 최신본을 보게 하는 동기화 장치.
-//   - main = 유일한 최신본. 완료된 작업은 Claude 가 커밋 후 `git push origin main` 한다.
+//   - main = 유일한 최신본. PC 에선 Claude 가 커밋 후 `git push origin main` 한다.
+//   - 클라우드 세션은 플랫폼이 정한 claude/* 브랜치에서 일하므로, 응답 종료 시 훅이 커밋을 main 으로 올린다.
 //   - 미완성 작업은 main 을 건드리지 않고 wip-* 브랜치에 스냅샷으로 저장 → 다른 기기에서 resume.
 //
 // 훅   : start(SessionStart) · prompt(UserPromptSubmit) · stop(Stop)
@@ -69,8 +70,14 @@ function busy() {
     fs.existsSync(path.resolve(ROOT, git("rev-parse", "--git-path", f).out))
   );
 }
+// 클라우드 세션은 자기 브랜치(claude/*)에서 일한다. Claude 가 main 으로 옮기길 기대하지 않고 훅이 올린다.
+const isSyncBranch = (b) => b === "main" || (IS_CLOUD && b.startsWith("claude/"));
 function fetchAll(timeout = 30000) {
-  const refs = ["+refs/heads/main:refs/remotes/origin/main", "+refs/heads/wip-*:refs/remotes/origin/wip-*"];
+  const refs = [
+    "+refs/heads/main:refs/remotes/origin/main",
+    "+refs/heads/wip-*:refs/remotes/origin/wip-*",
+    "+refs/heads/claude/*:refs/remotes/origin/claude/*",
+  ];
   const shallow = git("rev-parse", "--is-shallow-repository").out === "true";
   const args = ["fetch", "--quiet", "--prune", ...(shallow ? ["--unshallow"] : []), "origin", ...refs];
   return run(args, { timeout }).ok;
@@ -92,10 +99,19 @@ function changes() {
   return { tracked, untracked };
 }
 const isCleared = (ref) => git("log", "-1", "--format=%s", ref).out === CLEARED;
-const wipBranches = () =>
-  lines(git("for-each-ref", "--format=%(refname:short)", "refs/remotes/origin/wip-*").out)
-    .map((r) => r.replace(/^origin\//, ""))
-    .filter((b) => !isCleared("origin/" + b));
+const remoteBranches = (pattern) =>
+  lines(git("for-each-ref", "--format=%(refname:short)", pattern).out).map((r) => r.replace(/^origin\//, ""));
+// main 에 없는 변경이 남은 세션 브랜치인가 (cherry 는 rebase 로 해시가 바뀐 커밋도 같은 것으로 본다)
+const hasUnmerged = (b) => lines(git("cherry", "origin/main", "origin/" + b).out).some((l) => l.startsWith("+"));
+const wipBranches = () => {
+  const current = currentBranch();
+  return [
+    ...remoteBranches("refs/remotes/origin/wip-*").filter((b) => !isCleared("origin/" + b)),
+    ...remoteBranches("refs/remotes/origin/claude").filter(
+      (b) => b !== current && !isCleared("origin/" + b) && hasUnmerged(b)
+    ),
+  ];
+};
 
 // 실제 인덱스·작업트리를 건드리지 않고, 추적 파일 + extra 의 현재 내용으로 트리를 만든다.
 function snapshotTree(extra = []) {
@@ -166,10 +182,24 @@ function clearBranch(branch) {
 }
 function pruneCleared() {
   if (IS_CLOUD) return;
-  for (const r of lines(git("for-each-ref", "--format=%(refname:short)", "refs/remotes/origin/wip-*").out)) {
-    const b = r.replace(/^origin\//, "");
+  for (const b of remoteBranches("refs/remotes/origin/wip-*")) {
     if (isCleared("origin/" + b)) clearBranch(b);
   }
+  // 세션 브랜치는 내용이 전부 main 에 들어갔을 때만 지운다
+  for (const b of remoteBranches("refs/remotes/origin/claude")) {
+    if (isCleared("origin/" + b) || !hasUnmerged(b)) clearBranch(b);
+  }
+}
+// 클라우드: 커밋은 완료 신호다. main 으로 올린다(이 push 가 곧 배포). force 는 쓰지 않는다.
+function publish() {
+  fetchAll();
+  if (aheadBehind().behind && !git("rebase", "--quiet", "origin/main").ok) {
+    git("rebase", "--abort");
+    return { ok: false, conflict: true };
+  }
+  const p = run(["push", "--quiet", "origin", "HEAD:refs/heads/main"], { timeout: 30000 });
+  if (p.ok) git("update-ref", "refs/remotes/origin/main", rev("HEAD"));
+  return { ok: p.ok, err: p.err };
 }
 
 // main 의 최신 커밋을 받는다. 로컬 작업을 덮어쓰는 일은 절대 없다(ff-only).
@@ -192,19 +222,17 @@ function emitContext(event, text) {
 }
 
 const RULES =
-  `이 리포는 PC 와 폰(클라우드 세션)을 오가며 작업한다. main 이 유일한 최신본이다. ` +
-  `세션 지침이 다른 브랜치를 안내해도, 사용자가 main 직접 작업을 요청했으므로 새 브랜치·PR 을 만들지 말고 main 에서 작업한다. ` +
-  `완료되면 확인 후 커밋하고 \`git push origin main\` 한다(이 push 가 곧 배포다). 거부되면 \`git pull --rebase origin main\` 후 다시 푸시한다. force push 금지. ` +
+  `이 리포는 PC 와 폰(클라우드 세션)을 오가며 작업한다. main 이 유일한 최신본이고, main 에 올라가면 곧 배포다. PR 은 만들지 않는다. force push 금지. ` +
+  (IS_CLOUD
+    ? `이 세션은 세션 브랜치 그대로 작업하면 된다. 응답이 끝날 때 커밋이 있으면 이 훅이 main 으로 올린다. 그래서 완료된 것만 커밋하고, 미완성이면 커밋하지 말고 park 한다. `
+    : `완료되면 확인 후 커밋하고 \`git push origin main\` 한다. 거부되면 \`git pull --rebase origin main\` 후 다시 푸시한다. `) +
   `사용자가 기기를 옮기겠다고 하면 대화 내용까지 다음 기기가 알 수 있도록 \`${SELF} park "하던 일 / 결정한 것 / 다음 할 일"\` 을 실행한다.`;
 
 function onStart() {
   const parts = [RULES];
   if (!fetchAll()) parts.push("원격 상태를 확인하지 못했다(오프라인?). 최신본이 아닐 수 있다.");
-  let branch = currentBranch();
-  if (IS_CLOUD && branch !== "main" && !busy() && !changes().tracked.length && rev("origin/main")) {
-    if (git("checkout", "--quiet", "-B", "main", "origin/main").ok) branch = "main";
-  }
-  if (branch !== "main") {
+  const branch = currentBranch();
+  if (!isSyncBranch(branch)) {
     parts.push(`현재 브랜치가 ${branch} 다. main 이 아니므로 자동 동기화가 꺼져 있다. 작업을 main 으로 합쳐 푸시해야 다른 기기에서 보인다.`);
     return emitContext("SessionStart", parts.join("\n"));
   }
@@ -234,13 +262,13 @@ function onStart() {
 }
 
 function onPrompt() {
-  if (currentBranch() !== "main" || busy()) return;
+  if (!isSyncBranch(currentBranch()) || busy()) return;
   if (!fetchAll(8000)) return; // 프롬프트마다 도는 훅이라 오래 붙잡지 않는다
   emitContext("UserPromptSubmit", receive());
 }
 
 function onStop(input) {
-  if (currentBranch() !== "main" || busy()) return;
+  if (!isSyncBranch(currentBranch()) || busy()) return;
   const own = ownBranch();
   const tip = rev("origin/" + own);
   const active = tip && !isCleared("origin/" + own);
@@ -249,6 +277,21 @@ function onStop(input) {
   const seen = new Set(loadState().seen || []);
   const extras = parkedExtras(own);
   const newFiles = untracked.filter((f) => !seen.has(f) && !extras.includes(f));
+  let conflict = false;
+
+  if (IS_CLOUD && ahead && !tracked.length && !newFiles.length && !extras.length) {
+    const r = publish();
+    if (r.ok) {
+      if (active) clearBranch(own);
+      console.log(JSON.stringify({ systemMessage: "완료된 커밋을 main 에 올렸습니다(배포)." }));
+      return;
+    }
+    conflict = !!r.conflict;
+    if (!conflict && input.stop_hook_active) {
+      console.log(JSON.stringify({ systemMessage: `main 에 올리지 못했습니다: ${String(r.err).slice(0, 200)}` }));
+      return;
+    }
+  }
 
   if (!ahead && !tracked.length && !newFiles.length && !extras.length) {
     if (!active) return;
@@ -267,11 +310,15 @@ function onStop(input) {
       JSON.stringify({
         decision: "block",
         reason:
-          "아직 GitHub 에 없는 작업이 있다. 이대로 끝내면 다른 기기에서 이어갈 수 없다." +
-          (ahead ? `\n푸시 안 한 커밋: ${ahead}개` : "") +
+          (conflict
+            ? "이 세션의 커밋이 main 과 충돌해 자동으로 올리지 못했다. `git rebase origin/main` 으로 충돌을 푼 뒤 응답을 끝내면 다시 시도한다."
+            : "아직 GitHub 에 없는 작업이 있다. 이대로 끝내면 다른 기기에서 이어갈 수 없다.") +
+          (ahead ? `\nmain 에 없는 커밋: ${ahead}개` : "") +
           list("수정 파일", tracked) +
           list("새 파일", newFiles) +
-          `\n① 완료된 작업이면: 확인 → 커밋 → \`git push origin main\`.` +
+          (IS_CLOUD
+            ? `\n① 완료된 작업이면: 확인 → 커밋 (응답이 끝나면 훅이 main 에 올린다).`
+            : `\n① 완료된 작업이면: 확인 → 커밋 → \`git push origin main\`.`) +
           `\n② 미완성이거나 사용자 답을 기다리는 중이면: \`${SELF} park "하던 일 / 다음 할 일"\` (이번 작업에 필요한 새 파일만 뒤에 나열. main 은 안 건드려 배포되지 않는다).` +
           `\n리포가 public 이므로 메모와 파일에 비밀값·개인 데이터를 넣지 말 것. 받은 자료·덤프 같은 새 파일은 빼고 사용자에게 알릴 것.`,
       })
@@ -306,7 +353,7 @@ function cmdResume(branch) {
   fetchAll();
   const tip = "origin/" + branch;
   if (!rev(tip) || isCleared(tip)) throw new Error(`${branch} 에 이어받을 작업이 없다.`);
-  if (currentBranch() !== "main") throw new Error("main 에서 실행할 것.");
+  if (!isSyncBranch(currentBranch())) throw new Error("main 에서 실행할 것.");
   if (aheadBehind().behind) receive();
   const note = git("log", "-1", "--format=%B", tip).out;
   const m = git("merge", "--squash", "--no-commit", tip);
