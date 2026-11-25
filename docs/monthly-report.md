@@ -49,6 +49,10 @@
 - 비교 기준은 `avgPrevExpense`(기록이 있던 지난 주기 평균)와 `previousCycles[0]`. 기록 전 빈 주기는 이미 빠져 있다.
 - **"덜 썼다"고 말하기 전에 기록 상태부터 본다.** `recording.daysWithRows`가 지난 주기들(`previousCycles[].daysWithRows`)보다 크게 적거나
   `recording.lastRowDate`가 주기 끝보다 한참 이르면, 지출 감소가 아니라 **입력 누락 가능성**을 먼저 쓰고 판정을 보류한다.
+- **상쇄가 지출을 삼킨 카테고리를 지적한다.** 금액은 순액이라, 정산이 아닌 큰 입금(예금 해지·적금 만기 등)이
+  지출 카테고리로 들어오면 그 카테고리 지출이 통째로 사라지고 수입으로 뒤집힌다(2026-10-04 지현 생활비에
+  '예금 해지' 1,057만원 → 생활비 지출 57만원이 0, 수입 1,373만원). `categories[].offsetIncome`이 `grossSpend`보다 크거나
+  평소 지출 카테고리가 `incomeCategories`에 있으면, 숫자를 그대로 해석하지 말고 "입금 분류 확인 필요"로 쓴다.
 - `possibleDuplicates`(같은 날·같은 금액)는 '중복 입력 의심'으로 날짜·메모를 들어 알려준다. 단정하지 않는다.
 - 적금·보험처럼 저축·보장 성격의 고정 지출은 소비와 구분해 말한다(앱은 카테고리만 안다).
 - `limits`의 `over`/`warn`, `bigSpends`(평소 대비 배수), `categories[].newThisCycle`, `recurring`(금액 변화)를 우선 소재로 쓴다.

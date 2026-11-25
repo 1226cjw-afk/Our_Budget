@@ -155,6 +155,7 @@ async function facts(m, startArg){
     return { category:c, amount, share:n.expTot ? Math.round(amount / n.expTot * 1000) / 10 : 0,
       prev:pn[0] ? (pn[0].exp[c] || 0) : null, avgPrev:avgOf(i => pn[i].exp[c] || 0),
       count:rs.filter(r => r.type !== "입금").length,
+      grossSpend:rs.filter(r => r.type !== "입금").reduce((s, r) => s + r.amount, 0),   // 상쇄 전 지출 — 순액이 0이어도 실제로 쓴 돈
       offsetIncome:rs.filter(r => r.type === "입금").reduce((s, r) => s + r.amount, 0),   // 같은 카테고리 정산·환불 입금
       newThisCycle:!pn.some(x => x.exp[c]) };
   }).filter(x => x.amount || x.prev || x.avgPrev).sort((a, b) => b.amount - a.amount);
