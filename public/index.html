@@ -2328,22 +2328,53 @@ function viewCategory(){
   return h+`</div>`;
 }
 
-/* 한도 사용액 = 카테고리별 (지출 − 입금). 환불·캐시백·더치페이 정산 입금이 같은 카테고리의 지출을 상쇄한다.
-   계좌간 이동은 제외. 한도 탭과 분석 탭 '한도 초과/임박' 진단이 같은 기준을 쓰도록 여기 하나로 둔다 */
+/* 카테고리별 돈 흐름 — 같은 카테고리의 입금 중 '정산·환불 크기'만 지출에서 뺀다.
+   생활비·데이트는 지출의 40% 안팎이 정산 입금으로 돌아와서(2026-09 실데이터) 총액으로 그리면 부담이 부풀고
+   그 입금이 '수입'으로 잡혔다 → 2026-09-28부터 카테고리 순액(지출 − 입금)을 썼다.
+   ⚠️ 그런데 순액은 **진짜 수입이 지출 카테고리에 섞이면 지출을 통째로 지운다**(2026-11-25 실측 3건):
+      지현 생활비 '예금 해지' 1,057만원이 생활비 지출 57만원을 0으로 · 정우 이자 '월세' 308만원이 이자 지출 87.6만원을 0으로
+      · '전체' 필터에선 멤버를 넘어 상쇄돼 지현의 예금 해지가 정우 생활비 49만원까지 지웠다.
+   → 규칙: ① 상쇄는 **멤버별**로 한다(남의 입금이 내 지출을 지우지 않게)
+           ② 입금을 **작은 것부터** 그 카테고리 지출 합에 닿을 때까지만 상쇄한다. 지출보다 큰 입금은 정산이 아니라 수입이다.
+           ③ 단 남은 지출보다 **조금(SETTLE_SLACK, 20%) 큰** 입금은 정산으로 보고 남은 지출만큼 상쇄, 넘친 만큼만 수입 —
+              여행비를 반올림해 돌려받는 일이 흔하다(실례: 정우 데이트 지출 648,746 ↔ '여행비 정산' 700,000).
+              월세 154만 ↔ 이자 지출 87.6만(1.76배)·예금 해지(18배)는 이 폭을 한참 넘는다
+   ⚠️ 수입 − 지출(순수익)은 총액 방식(expOf/incOf)과 여전히 같다 — 상쇄분이 양쪽에서 같은 만큼 빠질 뿐이다(test_net.js).
+   반환: {카테고리: {spend 지출 총액, offset 상쇄된 입금, extra 상쇄 안 된 입금(=수입)}} — 멤버 합산 */
+const SETTLE_SLACK = 1.2;
+function catFlows(rows){
+  const g={};   // 멤버|카테고리 → {spend, ins[]}
+  rows.forEach(r=>{ if(isTransfer(r)) return;
+    const k=r.member+"\u0000"+r.category, x=g[k]||(g[k]={c:r.category,spend:0,ins:[]});
+    if(r.type==="입금") x.ins.push(r.amount); else x.spend+=r.amount; });
+  const out={};
+  Object.values(g).forEach(({c,spend,ins})=>{
+    let rest=spend, offset=0, extra=0;
+    ins.sort((a,b)=>a-b).forEach(a=>{
+      if(a<=rest){ offset+=a; rest-=a; }
+      else if(rest>0 && a<=rest*SETTLE_SLACK){ offset+=rest; extra+=a-rest; rest=0; }
+      else extra+=a;
+    });
+    const o=out[c]||(out[c]={spend:0,offset:0,extra:0});
+    o.spend+=spend; o.offset+=offset; o.extra+=extra;
+  });
+  return out;
+}
+/* 한도 사용액 = 지출 − 상쇄된 입금(정산·환불). 한도 탭과 분석 탭 '한도 초과/임박' 진단이 같이 쓴다.
+   상쇄가 지출을 넘지 않으므로 이제 음수가 되지 않는다 */
 function limitUsage(rows){
   const m={};
-  rows.forEach(r=>{ if(isTransfer(r)) return;
-    m[r.category]=(m[r.category]||0)+(r.type==="입금"?-r.amount:r.amount); });
+  Object.entries(catFlows(rows)).forEach(([c,f])=>{ m[c]=f.spend-f.offset; });
   return m;
 }
-/* 분석 탭용 순액 분리 — 카테고리별 (지출 − 입금)이 양수면 지출, 음수면 수입으로 보낸다.
-   생활비·데이트는 지출의 40% 안팎이 정산 입금으로 돌아오는데(2026-09 실데이터), 총액으로 그리면
-   실제 부담보다 크게 보이고 그 입금이 '수입'으로 부풀었다. 경조사처럼 받은 게 더 많은 달은 수입 쪽에 남는다.
-   ⚠️ expTot − incTot 은 총액 방식(expOf/incOf)과 같다 — 상쇄분만 양쪽에서 빠지므로 순수익은 변하지 않는다 */
+/* 분석 탭용 — 카테고리별 (지출 − 상쇄)는 지출로, 상쇄 안 된 입금은 수입으로. 한 카테고리가 양쪽에 다 있을 수 있다
+   (경조사: 낸 축의금은 지출, 받은 축의금은 수입). 계좌간 이동 제외 */
 function netSplit(rows){
   const exp={}, inc={}; let expTot=0, incTot=0;
-  Object.entries(limitUsage(rows)).forEach(([c,v])=>{
-    if(v>0){ exp[c]=v; expTot+=v; } else if(v<0){ inc[c]=-v; incTot+=-v; }
+  Object.entries(catFlows(rows)).forEach(([c,f])=>{
+    const e=f.spend-f.offset;
+    if(e>0){ exp[c]=e; expTot+=e; }
+    if(f.extra>0){ inc[c]=f.extra; incTot+=f.extra; }
   });
   return {exp, inc, expTot, incTot};
 }
@@ -2558,7 +2589,7 @@ function viewAnalysis(){
     <div class="am"><div class="am-l">평균 대비</div><div class="am-v ${tone(avgPct)==='f'?'':tone(avgPct)}">${avgPct>=0?'+':''}${avgPct}%</div><div class="am-sub" style="color:var(--ink-3)">같은 날 평균 ${wonShort(avg)}</div></div>
   </div>
   <div style="font-size:.75rem;color:var(--ink-3);margin:10px 0 12px;line-height:1.6">이번 주기 ${prog.day}/${prog.len}일째 — 지난 주기도 같은 날까지만 잘라 비교해요.${early
-      ? `<br>아직 주기 초반이라 몇 건만으로도 비율이 크게 흔들려요 — 증감 색과 진단은 ${minDay}일째부터예요.` : ``}<br>같은 카테고리의 환불·정산 입금은 지출에서 차감해 계산해요</div>`;
+      ? `<br>아직 주기 초반이라 몇 건만으로도 비율이 크게 흔들려요 — 증감 색과 진단은 ${minDay}일째부터예요.` : ``}<br>같은 카테고리의 환불·정산 입금(그 카테고리 지출을 넘지 않는 만큼)은 지출에서 차감해 계산해요</div>`;
 
   // 2) 주기별 지출 구성 — 카테고리 스택 막대 + 수입 막대 (한눈에 주기별 카테고리 지출/수입)
   if(catTotals.length || incomeByPeriod.some(v=>v>0)){
@@ -3048,7 +3079,7 @@ function toggleReport(ps){
   renderKeepScroll();
 }
 function viewReports(){
-  let h=`<div class="sec"><div class="ty-cap">결제 주기가 끝나고 이틀 뒤, Claude가 그 주기의 내역을 읽고 쓴 분석이에요. 금액은 지출분석과 같은 기준(카테고리별 지출 − 같은 카테고리 입금, 계좌간 이동 제외)입니다.</div>`;
+  let h=`<div class="sec"><div class="ty-cap">결제 주기가 끝나고 이틀 뒤, Claude가 그 주기의 내역을 읽고 쓴 분석이에요. 금액은 지출분석과 같은 기준(같은 카테고리의 정산·환불 입금은 지출에서 차감, 계좌간 이동 제외)입니다.</div>`;
   if(!rpMember) return h+empty("👥","설정에서 멤버를 추가해주세요.")+`</div>`;
   if(REPORTS_STATE==="idle"||REPORTS_STATE==="loading")
     return h+`<div style="text-align:center;padding:30px 0"><div class="spin"></div></div></div>`;

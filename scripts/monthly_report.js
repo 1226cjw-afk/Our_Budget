@@ -147,7 +147,8 @@ async function facts(m, startArg){
   const avgOf = f => recorded.length ? Math.round(recorded.reduce((s, i) => s + f(i), 0) / recorded.length) : null;
   const exp = cur.filter(r => r.type !== "입금" && !isT(r));
 
-  // 카테고리 — 금액은 순액(지출−같은 카테고리 입금), 앱 분석 탭과 같은 기준
+  // 카테고리 — 금액은 앱 분석 탭과 같은 기준(catFlows: 정산·환불 크기의 입금만 지출에서 상쇄)
+  const flows = A("catFlows")(cur);
   const cats = new Set([...Object.keys(n.exp), ...pn.flatMap(x => Object.keys(x.exp))]);
   const categories = [...cats].map(c => {
     const amount = n.exp[c] || 0;
@@ -155,8 +156,9 @@ async function facts(m, startArg){
     return { category:c, amount, share:n.expTot ? Math.round(amount / n.expTot * 1000) / 10 : 0,
       prev:pn[0] ? (pn[0].exp[c] || 0) : null, avgPrev:avgOf(i => pn[i].exp[c] || 0),
       count:rs.filter(r => r.type !== "입금").length,
-      grossSpend:rs.filter(r => r.type !== "입금").reduce((s, r) => s + r.amount, 0),   // 상쇄 전 지출 — 순액이 0이어도 실제로 쓴 돈
-      offsetIncome:rs.filter(r => r.type === "입금").reduce((s, r) => s + r.amount, 0),   // 같은 카테고리 정산·환불 입금
+      grossSpend:flows[c] ? flows[c].spend : 0,    // 상쇄 전 지출
+      offset:flows[c] ? flows[c].offset : 0,       // 정산·환불로 보고 지출에서 뺀 입금
+      inflowAsIncome:flows[c] ? flows[c].extra : 0, // 지출보다 커서 수입으로 센 같은 카테고리 입금
       newThisCycle:!pn.some(x => x.exp[c]) };
   }).filter(x => x.amount || x.prev || x.avgPrev).sort((a, b) => b.amount - a.amount);
 
@@ -207,7 +209,7 @@ async function facts(m, startArg){
 
   const out = {
     member:m, period:periodInfo(P), generatedFor:ymdOf(todayDate()),
-    note:"금액 단위 원. expense/income 은 카테고리 순액(지출−같은 카테고리 입금) — 앱 분석 탭과 같은 기준. 계좌간 이동 제외.",
+    note:"금액 단위 원. expense/income 은 앱 분석 탭과 같은 기준 — 같은 카테고리 입금 중 정산·환불 크기(그 카테고리 지출 이하, 20% 여유)만 지출에서 빼고 나머지 입금은 수입. 계좌간 이동 제외.",
     totals:{ expense:n.expTot, income:n.incTot, net:n.incTot - n.expTot,
              grossExpense:A("expOf")(cur), grossIncome:A("incOf")(cur), txCount:cur.length - transfers.length },
     previousCycles:prevs.map((p, i) => ({ ...periodInfo(p), expense:pn[i].expTot, income:pn[i].incTot, txCount:prevRows[i].length,

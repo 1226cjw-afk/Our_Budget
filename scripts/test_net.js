@@ -18,6 +18,8 @@ const code = [
   grab(/const isTransfer\s*=.*;/),
   grab(/const expOf\s*=.*;/),
   grab(/const incOf\s*=.*;/),
+  grab(/const SETTLE_SLACK\s*=.*;/),
+  grab(/function catFlows\(rows\)\{[\s\S]*?\n\}/),
   grab(/function limitUsage\(rows\)\{[\s\S]*?\n\}/),
   grab(/function netSplit\(rows\)\{[\s\S]*?\n\}/),
 ].join("\n");
@@ -29,39 +31,55 @@ const ok = (name, cond, note) => {
   if (!cond) fails++;
   console.log(`${cond ? "ok  " : "FAIL"} ${name}${!cond && note ? "  — " + note : ""}`);
 };
-const R = (type, category, amount) => ({ type, category, amount });
+const R = (type, category, amount, member = "A") => ({ type, category, amount, member });
+const same = (a, b) => JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
 
 const rows = [
   R("지출", "생활비", 50000), R("입금", "생활비", 12000),       // 부분 정산 → 38,000 지출
-  R("지출", "쇼핑", 30000),   R("입금", "쇼핑", 30000),         // 전액 환불 → 사라짐
-  R("지출", "경조사", 100000), R("입금", "경조사", 300000),     // 받은 게 더 많음 → 200,000 수입
+  R("지출", "쇼핑", 30000),   R("입금", "쇼핑", 30000),         // 전액 환불 → 0
+  R("지출", "경조사", 100000), R("입금", "경조사", 300000),     // 받은 축의금이 낸 것보다 큼 → 정산 아님: 지출 10만 + 수입 30만
   R("입금", "월급", 3000000),                                   // 순수 수입
   R("지출", "교통", 20000),                                     // 순수 지출
   R("지출", "계좌간 이동", 500000), R("입금", "계좌간 이동", 500000),  // 이동은 어디에도 안 잡힌다
 ];
 
-// ── 한도: 부호 있는 순액 ──
+// ── 한도: 지출 − 상쇄분 (이제 음수가 없다) ──
 const u = limitUsage(rows);
 ok("한도 — 부분 정산은 지출에서 차감", u["생활비"] === 38000, `생활비 ${u["생활비"]}`);
 ok("한도 — 전액 환불은 0", u["쇼핑"] === 0, `쇼핑 ${u["쇼핑"]}`);
-ok("한도 — 받은 게 더 많으면 음수(바는 0%로 바닥)", u["경조사"] === -200000, `경조사 ${u["경조사"]}`);
+ok("한도 — 지출보다 큰 입금은 상쇄하지 않는다", u["경조사"] === 100000, `경조사 ${u["경조사"]}`);
 ok("한도 — 계좌간 이동 제외", !("계좌간 이동" in u));
+ok("한도 — 음수가 없다", Object.values(u).every(v => v >= 0), JSON.stringify(u));
 
-// ── 분석: 양수는 지출, 음수는 수입 ──
+// ── 분석: 상쇄 후 지출 / 상쇄 안 된 입금은 수입 ──
 const n = netSplit(rows);
-ok("분석 — 지출 쪽 = 순액이 양수인 카테고리만",
-   JSON.stringify(n.exp) === JSON.stringify({ 생활비: 38000, 교통: 20000 }), JSON.stringify(n.exp));
-ok("분석 — 수입 쪽 = 순액이 음수인 카테고리(경조사·월급)",
-   JSON.stringify(n.inc) === JSON.stringify({ 경조사: 200000, 월급: 3000000 }), JSON.stringify(n.inc));
-ok("분석 — 0이 된 카테고리는 어느 쪽에도 없다", !("쇼핑" in n.exp) && !("쇼핑" in n.inc));
-ok("분석 — 합계가 카테고리 합과 같다",
-   n.expTot === 58000 && n.incTot === 3200000, `exp ${n.expTot} inc ${n.incTot}`);
+ok("분석 — 지출", same(n.exp, { 생활비: 38000, 경조사: 100000, 교통: 20000 }), JSON.stringify(n.exp));
+ok("분석 — 수입", same(n.inc, { 경조사: 300000, 월급: 3000000 }), JSON.stringify(n.inc));
+ok("분석 — 전액 환불 카테고리는 어느 쪽에도 없다", !("쇼핑" in n.exp) && !("쇼핑" in n.inc));
+ok("분석 — 합계가 카테고리 합과 같다", n.expTot === 158000 && n.incTot === 3300000, `exp ${n.expTot} inc ${n.incTot}`);
 
-// ── 핵심 불변식: 순수익은 옛 총액 방식과 같다 (상쇄분만 양쪽에서 빠진다) ──
-ok("분석 — 순수익(수입−지출)은 총액 방식과 동일",
-   n.incTot - n.expTot === incOf(rows) - expOf(rows),
-   `순액 ${n.incTot - n.expTot} vs 총액 ${incOf(rows) - expOf(rows)}`);
-ok("분석 — 순액 지출 ≤ 총액 지출 (부풀지 않고 줄기만 한다)", n.expTot <= expOf(rows));
+// ── 2026-11-25 실데이터에서 지출을 지우던 세 모양 ──
+const big = netSplit([R("지출", "생활비", 569625), R("입금", "생활비", 400000), R("입금", "생활비", 10576725)]);
+ok("실례 — 예금 해지(지출보다 큼)는 수입, 정산 40만만 상쇄", big.exp["생활비"] === 169625 && big.inc["생활비"] === 10576725,
+   JSON.stringify(big));
+const rent = netSplit([R("지출", "이자", 876000), R("입금", "이자", 3080000)]);
+ok("실례 — 이자 지출 87.6만이 월세 입금에 지워지지 않는다", rent.exp["이자"] === 876000 && rent.inc["이자"] === 3080000, JSON.stringify(rent));
+const ins = netSplit([R("지출", "생활비", 10000), R("입금", "생활비", 3000), R("입금", "생활비", 4000), R("입금", "생활비", 5000)]);
+ok("작은 입금부터 지출 한도까지만 상쇄 (3천+4천 상쇄, 5천은 수입)", ins.exp["생활비"] === 3000 && ins.inc["생활비"] === 5000, JSON.stringify(ins));
+const slack = netSplit([R("지출", "데이트", 648746), R("입금", "데이트", 700000)]);
+ok("정산 반올림(20% 이내) — 지출만큼 상쇄, 넘친 만큼만 수입", !("데이트" in slack.exp) && slack.inc["데이트"] === 51254, JSON.stringify(slack));
+const over = netSplit([R("지출", "이자", 876000), R("입금", "이자", 1540000)]);
+ok("20% 를 넘으면(1.76배) 상쇄하지 않는다", over.exp["이자"] === 876000 && over.inc["이자"] === 1540000, JSON.stringify(over));
+const cross = netSplit([R("지출", "생활비", 490000, "정우"), R("입금", "생활비", 10576725, "지현"), R("지출", "생활비", 569625, "지현")]);
+ok("멤버를 넘어 상쇄하지 않는다 ('전체' 필터)", cross.exp["생활비"] === 490000 + 569625, JSON.stringify(cross));
+
+// ── 핵심 불변식: 순수익(수입−지출)은 총액 방식과 같다 (상쇄분만 양쪽에서 빠진다) ──
+for (const [nm, rs] of [["기본", rows], ["예금 해지", [R("지출","생활비",569625), R("입금","생활비",400000), R("입금","생활비",10576725)]],
+                         ["멤버 혼합", [R("지출","생활비",490000,"정우"), R("입금","생활비",10576725,"지현"), R("지출","생활비",569625,"지현")]]]) {
+  const x = netSplit(rs);
+  ok(`불변식(${nm}) — 순수익 = 총액 방식`, x.incTot - x.expTot === incOf(rs) - expOf(rs), `${x.incTot - x.expTot} vs ${incOf(rs) - expOf(rs)}`);
+  ok(`불변식(${nm}) — 지출 ≤ 총액 지출`, x.expTot <= expOf(rs));
+}
 
 console.log(fails ? `\n${fails} FAILED` : "\nALL PASS");
 process.exit(fails ? 1 : 0);
