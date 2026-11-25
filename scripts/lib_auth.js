@@ -61,4 +61,22 @@ async function login(){
 const authedGet = (tok, path, extra) =>
   req("GET", path, Object.assign({apikey:KEY, Authorization:"Bearer "+tok}, extra||{}));
 
-module.exports = {HOST, KEY, EMAIL, req, login, authedGet};
+/* 사람 없이 도는 작업(월간 리포트 예약 작업)용 인증.
+   ⚠️ 클라우드 예약 작업엔 비밀번호를 줄 수 없다(로그인은 본문에 비밀번호를 실어야 한다).
+   대신 그 클라우드 환경('Our_Budget 월간 리포트')의 네트워크 비밀값에 Supabase **secret key**가 저장돼 있고,
+   프록시가 이 호스트로 가는 요청의 `apikey` 헤더를 그 값으로 **덮어쓴다**(2026-11-25 설정).
+   그래서 코드는 자리표시자만 보내고, 진짜 키는 코드·리포·대화 어디에도 나타나지 않는다.
+   ⚠️ 이 모드에서 Authorization 헤더를 붙이지 말 것 — 새 형식 secret key는 JWT가 아니라서
+      Bearer로 보내면 오히려 거부된다. apikey 하나면 게이트웨이가 service_role로 통과시킨다.
+   ⚠️ secret key는 RLS를 우회한다(같은 프로젝트의 휴양림 테이블까지). 이 모드를 쓰는 스크립트는
+      가계부 표만, 그리고 monthly_reports 외엔 **읽기만** 할 것.
+
+   BUDGET_PW 가 있으면 그쪽(공용 계정 로그인)이 우선이다 — PC에서 같은 스크립트를 돌릴 때. */
+async function dbHeaders(){
+  if(process.env.BUDGET_PW) return {apikey:KEY, Authorization:"Bearer "+await login()};
+  if(process.env.BUDGET_AUTH === "proxy") return {apikey:"sb_secret_proxy-injected"};
+  console.error("인증 수단이 없습니다: PC에선 BUDGET_PW(lib_auth.js 머리주석), 클라우드 예약 작업에선 BUDGET_AUTH=proxy");
+  process.exit(2);
+}
+
+module.exports = {HOST, KEY, EMAIL, req, login, authedGet, dbHeaders};

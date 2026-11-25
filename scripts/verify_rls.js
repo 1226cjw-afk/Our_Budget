@@ -3,7 +3,8 @@
 const https = require("https");
 const HOST = "hqyvkyflakhuvethrstw.supabase.co";
 const KEY  = "sb_publishable_phZGH7odPTBoB4z8FQF_4A_mO2ltQ6J";
-const BUDGET = ["members","transactions","category_limits","master_data","tax_map","app_settings"];
+// monthly_reports(2026-11-25 추가)는 지출 내역을 요약한 글이라 내역과 같은 경계다. 설치 전엔 404가 정상
+const BUDGET = ["members","transactions","category_limits","master_data","tax_map","app_settings","monthly_reports"];
 // 이 뷰 3개는 2026-08-14에 삭제됐다(이제 404가 정상). 검사를 남겨두는 이유:
 // 원래 security_invoker=off + owner=postgres라 하위 테이블 RLS를 우회했고, 테이블만 잠갔을 때
 // anon이 잔액·카테고리 지출을 그대로 읽는 것을 실측으로 확인했다(200).

@@ -25,13 +25,15 @@ const argv = process.argv.slice(2);
 const VERBOSE = argv.includes("--verbose");
 const SRC = argv.find(a => !a.startsWith("--")) || path.join(__dirname, "..", "public", "index.html");
 const PORT = 9415;
-const EDGE = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
+// BROWSER 로 다른 크로뮴을 줄 수 있다(클라우드 리눅스: /opt/pw-browsers/chromium/chrome-linux/chrome 등)
+const EDGE = process.env.BROWSER || "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
+const XARGS = process.platform === "linux" ? ["--no-sandbox"] : [];   // root 로 도는 컨테이너에선 샌드박스가 못 뜬다
 const PROFILE = path.join(os.tmpdir(), "ourbudget-audit-ux");
 const { MOCK } = require(path.join(__dirname, "lib_mock.js"));
 
 const SHOTS = [
   ["list", "내역"], ["cat", "분류"], ["limit", "한도"],
-  ["analysis", "지출분석"], ["analysis:tax", "연말정산"],
+  ["analysis", "지출분석"], ["analysis:tax", "연말정산"], ["analysis:report", "월간 리포트"],
   ["acct", "계좌"], ["master", "설정"],
   ["list:sheet", "입력 시트"], ["list:picker", "피커"],
 ];
@@ -155,7 +157,7 @@ const PROBE = function () {
   fs.writeFileSync(tmp, html, "utf8");
   const TARGET = "file:///" + tmp.replace(/\\/g, "/");
 
-  const edge = spawn(EDGE, ["--headless=new", `--remote-debugging-port=${PORT}`, `--user-data-dir=${PROFILE}`,
+  const edge = spawn(EDGE, [...XARGS, "--headless=new", `--remote-debugging-port=${PORT}`, `--user-data-dir=${PROFILE}`,
     "--no-first-run", "--no-default-browser-check", "--disable-gpu", "about:blank"], { stdio: "ignore" });
   let up = false;
   for (let i = 0; i < 60; i++) { try { await get("/json/version"); up = true; break; } catch { await sleep(500); } }

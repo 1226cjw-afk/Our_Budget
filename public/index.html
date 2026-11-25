@@ -791,6 +791,18 @@ body.sheet-open{overflow:hidden}
 
 /* ── 연말정산 (분석 탭 세그먼트) ── */
 .ty-cap{font-size:.75rem;color:var(--ink-3);line-height:1.6;margin:10px 0 14px}
+/* 월간 리포트 — 카드 대신 룰선(디자인 계약). 제목 버튼 전체가 펼치기 영역이라 터치 영역이 넉넉하다 */
+.rp{border-bottom:1px solid var(--line)}
+.rp-hd{display:flex;flex-direction:column;align-items:flex-start;gap:3px;width:100%;text-align:left;padding:14px 0}
+.rp-per{font-size:.75rem;color:var(--ink-3);font-weight:600;display:flex;align-items:center;gap:6px}
+.rp-hl{font-size:.9375rem;font-weight:650;color:var(--ink);line-height:1.45;letter-spacing:-.01em;word-break:keep-all}
+.rp-bd{font-size:.875rem;line-height:1.75;color:var(--ink-2);word-break:keep-all}
+.rp-bd p{margin:0 0 10px}
+.rp-bd ul{margin:0 0 10px;padding-left:18px}
+.rp-bd li{margin-bottom:4px}
+.rp-bd b{color:var(--ink);font-weight:650}
+.rp-h{font-size:.8125rem;font-weight:650;color:var(--ink);padding:14px 0 6px}
+.rp-ft{font-size:.75rem;color:var(--ink-3);padding:4px 0 16px}
 .ty-sal{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;margin:12px 0 10px}
 .ty-sal-v{font-size:1.3125rem;font-weight:700;letter-spacing:-.03em;color:var(--ink)}
 .ty-bdg{font-size:.6875rem;font-weight:600;padding:1px 7px;border-radius:6px;letter-spacing:.01em;border:1px solid var(--line-2)}
@@ -1090,6 +1102,24 @@ create policy family_only on public.tax_map
   for all to authenticated using (true) with check (true);
 -- 정책만 바꾸고 이 줄을 빠뜨리면 anon에게 200 []가 간다 (차단처럼 보이지만 열려 있음)
 revoke all on public.tax_map from anon;`;
+/* 월간 리포트 — 주기가 끝나면 Claude(클라우드 예약 작업)가 그 주기를 분석해 여기에 써 넣는다.
+   절차·인증은 docs/monthly-report.md, 쓰는 쪽은 scripts/monthly_report.js.
+   ⚠️ 경계는 다른 표와 같다(to authenticated + anon revoke) — 지출 내역을 요약한 글이라 내역만큼 민감하다.
+   ⚠️ unique(member, period_start)는 예약 작업의 upsert(on_conflict=member,period_start)가 기댄다. 지우면 저장이 실패한다 */
+const REPORTS_DDL = `create table if not exists public.monthly_reports (
+  id           uuid primary key default gen_random_uuid(),
+  member       text not null references members(name) on delete cascade,
+  period_start date not null,
+  period_end   date not null,
+  headline     text not null,
+  md           text not null,
+  created_at   timestamptz not null default now(),
+  constraint monthly_reports_member_period_key unique (member, period_start)
+);
+alter table public.monthly_reports enable row level security;
+create policy family_only on public.monthly_reports
+  for all to authenticated using (true) with check (true);
+revoke all on public.monthly_reports from anon;`;
 // 탭 아이콘 — Lucide 스타일 인라인 SVG (이모지는 OS별 렌더가 제각각이라 구조 아이콘엔 미사용)
 const NI = p => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
 const TABS = [
@@ -1130,6 +1160,10 @@ let limitMember  = null;    // 한도 탭 전용
 let masterMember = null;    // 설정 탭 전용
 let anView       = "spend"; // 분석 탭 세그먼트: spend(지출분석) | tax(연말정산)
 let tyMember     = null;    // 연말정산 전용 멤버 ('전체' 없음 — 연말정산은 개인 단위)
+let rpMember     = null;    // 월간 리포트 전용 멤버 ('전체' 없음 — 리포트가 멤버별로 쓰인다)
+let rpOpen       = null;    // 펼친 리포트의 period_start (null = 가장 최근 것, "none" = 전부 접음)
+// 월간 리포트는 첫 화면과 무관해 loadAll·스냅샷에 넣지 않는다 — 그 세그먼트를 처음 열 때 한 번 받는다
+let REPORTS = [], REPORTS_STATE = "idle", REPORTS_ERR = "";   // idle | loading | ready | missing(테이블 없음) | error
 let typeVal      = "지출";
 let memberVal    = null;    // 입력 시트
 let editId       = null;
@@ -1561,6 +1595,7 @@ function applyLoad({mem, tx, lim, mst, cfg, mtm}){
   if(!MEMBERS.includes(masterMember)) masterMember = defMember();
   if(!MEMBERS.includes(memberVal))    memberVal    = defMember();
   if(!MEMBERS.includes(tyMember))     tyMember     = defMember();
+  if(!MEMBERS.includes(rpMember))     rpMember     = defMember();
 
   if(tx.error) throw new Error(tx.error.message||"거래내역 로드 오류");
   // 날짜를 숫자로 한 번에 심어둔다 — 이후 모든 주기 판정이 파싱 없이 숫자 비교로 끝난다
@@ -1916,7 +1951,7 @@ function exportCSV(){
 /* ── 수동 새로고침 (헤더 ↻) — 다른 기기에서 입력한 내역 동기화 ── */
 async function refreshData(){
   const b=$("hdRefresh"); if(b)b.classList.add("rot");
-  try{ await loadAll(); loadError=null; render(); toast("최신 데이터로 갱신했어요"); }
+  try{ await loadAll(); loadError=null; if(REPORTS_STATE!=="loading") REPORTS_STATE="idle"; render(); toast("최신 데이터로 갱신했어요"); }
   catch(e){
     if(isAuthErr(e)){ authLost(); return; }   // 세션이 그새 끊겼으면 에러 카드가 아니라 로그인 화면
     loadError=e.message; render();
@@ -1993,6 +2028,7 @@ function setLimitMember(m){ limitMember=m; limEdit=null; render(); }
 function setMasterMember(m){ masterMember=m; render(); }
 function setAnView(v){ anView=v; render(); }
 function setTyMember(m){ tyMember=m; render(); }
+function setRpMember(m){ rpMember=m; rpOpen=null; render(); }
 
 /* ── 기기 기본 사용자 (localStorage) ── */
 function openDeviceUser(){
@@ -2083,10 +2119,11 @@ function render(){
   else if(tab==="cat")      body = filterBar() + viewCategory();
   else if(tab==="limit")    body = viewLimit();
   else if(tab==="analysis"){
-    const seg = pills([["spend","지출분석"],["tax","연말정산"]], anView, "setAnView");
+    const seg = pills([["spend","지출분석"],["tax","연말정산"],["report","월간 리포트"]], anView, "setAnView");
     // 연말정산은 개인 단위라 '전체' 없는 멤버 바를 쓴다 (합산하면 각자의 25% 문턱이 뒤섞임)
     // chart.js는 지연 로드라 아직 없을 수 있다 — drawWhenChartReady가 도착을 기다렸다 그린다
     if(anView==="tax"){ body = seg + memberBar(tyMember,"setTyMember") + viewTaxYear(); after = ()=>drawWhenChartReady(drawTaxChart); }
+    else if(anView==="report"){ body = seg + memberBar(rpMember,"setRpMember") + viewReports(); after = ()=>ensureReports(); }
     else { body = seg + memberFilterPills() + viewAnalysis(); after = ()=>drawWhenChartReady(drawAnalysisCharts); }
   }
   else if(tab==="acct")     body = viewAccount();
@@ -2961,6 +2998,91 @@ function tyNotes(t){
       b:`세법상 총급여는 세금·4대보험을 떼기 전 금액이라 입금액보다 보통 10~20% 많아요. 예를 들어 15% 많다면 25% 문턱이 ${won(R(t.th))} → ${won(R(g*.25))}로 올라가 연말 공제액이 ${won(R(t.ded))} → ${won(R(dg))}가 됩니다.${tier?' 7천만원 기준도 넘어가 공제 한도가 300만 → 250만원으로 줄어요.':''} 정확한 판단을 위해 총급여를 직접 입력해주세요.`});
   }
   return out;
+}
+
+/* ── 월간 리포트 (분석 탭 세 번째 세그먼트) ──
+   쓰는 건 앱이 아니라 클라우드 예약 작업이다(scripts/monthly_report.js · docs/monthly-report.md).
+   앱은 읽어서 보여주기만 한다. */
+async function ensureReports(force){
+  // ⚠️ error 도 건너뛴다 — 안 그러면 실패 → render → after → 재요청 → 실패가 무한히 돈다. 재시도는 버튼(force)으로만
+  if(!force && REPORTS_STATE !== "idle") return;
+  REPORTS_STATE = "loading";
+  const res = await sb.from("monthly_reports").select("member,period_start,period_end,headline,md,created_at")
+    .order("period_start",{ascending:false}).limit(240);
+  if(res.error){
+    if(isAuthErr(res.error)){ authLost(); return; }
+    // PGRST205 = 테이블이 아직 없다. 조용히 '리포트 없음'으로 보이면 영영 안 오는 걸 기다리게 된다 → 설치 안내
+    REPORTS_STATE = res.error.code==="PGRST205" ? "missing" : "error";
+    REPORTS_ERR = res.error.message || "";
+  } else { REPORTS = res.data || []; REPORTS_STATE = "ready"; }
+  if(tab==="analysis" && anView==="report") renderKeepScroll();
+}
+function copyReportsDDL(){
+  const done=()=>toast("SQL을 복사했어요 — Supabase SQL Editor에 붙여넣기");
+  if(navigator.clipboard?.writeText) navigator.clipboard.writeText(REPORTS_DDL).then(done,()=>toast("복사 실패 — 화면의 SQL을 직접 선택해 복사해주세요"));
+  else toast("복사 실패 — 화면의 SQL을 직접 선택해 복사해주세요");
+}
+/* 리포트 본문(마크다운 일부)을 HTML로. 쓰는 쪽이 Claude라도 DB에서 온 글이므로 **먼저 전부 esc** 하고
+   허용한 형태(## 소제목 · - 목록 · **굵게**)만 되살린다. 링크·표·이미지는 일부러 지원하지 않는다 */
+function mdHtml(md){
+  const inline = t => esc(t).replace(/\*\*(.+?)\*\*/g,"<b>$1</b>");
+  const out=[]; let para=[], list=null;
+  const flushP=()=>{ if(para.length){ out.push(`<p>${para.map(inline).join("<br>")}</p>`); para=[]; } };
+  const flushL=()=>{ if(list){ out.push(`<ul>${list.map(x=>`<li>${inline(x)}</li>`).join("")}</ul>`); list=null; } };
+  String(md||"").replace(/\r\n/g,"\n").split("\n").forEach(line=>{
+    const t=line.trim(); let mt;
+    if(!t){ flushP(); flushL(); return; }
+    if((mt=t.match(/^#{1,4}\s+(.+)$/))){ flushP(); flushL(); out.push(`<div class="rp-h">${inline(mt[1])}</div>`); return; }
+    if((mt=t.match(/^[-*•]\s+(.+)$/))){ flushP(); (list=list||[]).push(mt[1]); return; }
+    flushL(); para.push(t);
+  });
+  flushP(); flushL();
+  return out.join("");
+}
+const rpPeriod = r => { const a=parseDate(r.period_start), b=parseDate(r.period_end);
+  return `${a.getFullYear()}.${a.getMonth()+1}.${a.getDate()} ~ ${b.getMonth()+1}.${b.getDate()}`; };
+function toggleReport(ps){
+  const list=REPORTS.filter(r=>r.member===rpMember);
+  const cur = rpOpen===null ? (list[0]&&list[0].period_start) : rpOpen;
+  rpOpen = cur===ps ? "none" : ps;
+  renderKeepScroll();
+}
+function viewReports(){
+  let h=`<div class="sec"><div class="ty-cap">결제 주기가 끝나고 이틀 뒤, Claude가 그 주기의 내역을 읽고 쓴 분석이에요. 금액은 지출분석과 같은 기준(카테고리별 지출 − 같은 카테고리 입금, 계좌간 이동 제외)입니다.</div>`;
+  if(!rpMember) return h+empty("👥","설정에서 멤버를 추가해주세요.")+`</div>`;
+  if(REPORTS_STATE==="idle"||REPORTS_STATE==="loading")
+    return h+`<div style="text-align:center;padding:30px 0"><div class="spin"></div></div></div>`;
+  if(REPORTS_STATE==="missing"){
+    return h+`<div class="m-section">
+      <div class="m-title">설치 안내 <span class="m-tag">한 번만</span></div>
+      <div style="font-size:.8125rem;color:var(--ink-2);line-height:1.75;margin:12px 0">
+        리포트를 저장할 <b>monthly_reports</b> 테이블이 아직 없어요. Supabase 대시보드 → SQL Editor에서 아래를 한 번 실행해주세요.
+      </div>
+      <pre style="background:var(--fill);border:1px solid var(--line);border-radius:8px;padding:12px;overflow-x:auto;font-size:.75rem;line-height:1.6;color:var(--ink-2)">${esc(REPORTS_DDL)}</pre>
+      <button class="m-save" style="width:100%;margin-top:10px;padding:11px" onclick="copyReportsDDL()">SQL 복사</button>
+    </div></div>`;
+  }
+  if(REPORTS_STATE==="error"){
+    return h+`<div class="m-empty">리포트를 불러오지 못했어요 (${esc(REPORTS_ERR)})</div>
+      <button class="m-save" style="width:100%;padding:11px" onclick="ensureReports(true)">다시 시도</button></div>`;
+  }
+  const list=REPORTS.filter(r=>r.member===rpMember);
+  if(!list.length) return h+empty("📝",`${esc(rpMember)}님의 리포트가 아직 없어요.\n주기가 끝나고 이틀 뒤에 첫 리포트가 올라옵니다.`)+`</div>`;
+  const openKey = rpOpen===null ? list[0].period_start : rpOpen;
+  const fresh = Date.now() - 7*DAY_MS;
+  list.forEach(r=>{
+    const open = r.period_start===openKey;
+    const isNew = new Date(r.created_at).getTime() > fresh;
+    h+=`<div class="rp">
+      <button type="button" class="rp-hd" aria-expanded="${open}" onclick="toggleReport('${jsq(r.period_start)}')">
+        <span class="rp-per">${esc(rpPeriod(r))}${isNew?' <span class="m-tag">새 리포트</span>':''}</span>
+        <span class="rp-hl">${esc(r.headline)}</span>
+      </button>${open?`
+      <div class="rp-bd">${mdHtml(r.md)}</div>
+      <div class="rp-ft">${esc(ymd(new Date(r.created_at)))} 작성 · 기록된 내역만으로 본 참고용 분석이에요</div>`:''}
+    </div>`;
+  });
+  return h+`</div>`;
 }
 
 let _tyStash=null;   // 차트용 데이터 보관 (viewTaxYear → drawTaxChart)

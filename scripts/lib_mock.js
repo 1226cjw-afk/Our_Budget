@@ -67,6 +67,14 @@ const MOCK = `
       {key:"cat_icon_의료",value:"🏥"},{key:"cat_icon_문화",value:"🎬"},
       {key:"cat_icon_구독",value:"📺"}
     ],
+    // 월간 리포트 — 렌더 검증용 합성 글(실제 리포트 아님). 첫 것은 펼쳐지고 둘째는 접힌 상태로 찍힌다
+    monthly_reports:[
+      {member:"정우",period_start:d(32),period_end:d(2),headline:"고정비는 그대로, 식비가 평소보다 18% 늘었어요",
+       md:"## 숫자로 보면\\n지출 **182만원** · 수입 280만원 · 순수익 +98만원\\n\\n## 눈에 띈 것\\n- 식비 54만원 — 지난 3주기 평균보다 8만원 많아요\\n- 카페가 한도 7.5만원 중 **96%**\\n\\n## 다음 주기 제안\\n- 주말 외식을 한 번 줄이면 식비가 평균으로 돌아와요",
+       created_at:new Date(ANCHOR.getTime()-864e5).toISOString()},
+      {member:"정우",period_start:d(62),period_end:d(33),headline:"지출이 평균 수준으로 안정적이었어요",
+       md:"## 숫자로 보면\\n지출 155만원",created_at:new Date(ANCHOR.getTime()-31*864e5).toISOString()}
+    ],
     tax_map:[
       {member:"정우",type:"method",value:"현대카드",kind:"credit"},
       {member:"정우",type:"method",value:"현금",kind:"cash"},
