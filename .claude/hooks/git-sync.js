@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // PC 와 폰(클라우드 세션)이 항상 같은 최신본을 보게 하는 동기화 장치.
 //   - main = 유일한 최신본. PC 에선 Claude 가 커밋 후 `git push origin main` 한다.
-//   - 클라우드 세션은 플랫폼이 정한 claude/* 브랜치에서 일하므로, 응답 종료 시 훅이 커밋을 main 으로 올린다.
+//   - 클라우드 세션은 플랫폼이 정한 claude/*·ccr-* 브랜치에서 일하므로, 응답 종료 시 훅이 커밋을 main 으로 올린다.
 //   - 미완성 작업은 main 을 건드리지 않고 wip-* 브랜치에 스냅샷으로 저장 → 다른 기기에서 resume.
 //
 // 훅   : start(SessionStart) · prompt(UserPromptSubmit) · stop(Stop)
@@ -70,13 +70,17 @@ function busy() {
     fs.existsSync(path.resolve(ROOT, git("rev-parse", "--git-path", f).out))
   );
 }
-// 클라우드 세션은 자기 브랜치(claude/*)에서 일한다. Claude 가 main 으로 옮기길 기대하지 않고 훅이 올린다.
-const isSyncBranch = (b) => b === "main" || (IS_CLOUD && b.startsWith("claude/"));
+// 클라우드 세션은 자기 브랜치(claude/* 또는 ccr-*)에서 일한다. Claude 가 main 으로 옮기길 기대하지 않고 훅이 올린다.
+// ⚠️ 접두사는 플랫폼이 정한다 — 2026-11-25 세션이 ccr-824e07dd-… 로 떠서 claude/ 만 보던 훅이 동기화를 통째로 껐고,
+//    커밋이 main 에 안 올라가 배포도 안 됐다(경고 한 줄만 나와 놓치기 쉽다). 새 접두사가 보이면 여기에 추가할 것
+const SESSION_PREFIXES = ["claude/", "ccr-"];
+const isSyncBranch = (b) => b === "main" || (IS_CLOUD && SESSION_PREFIXES.some((p) => b.startsWith(p)));
 function fetchAll(timeout = 30000) {
   const refs = [
     "+refs/heads/main:refs/remotes/origin/main",
     "+refs/heads/wip-*:refs/remotes/origin/wip-*",
     "+refs/heads/claude/*:refs/remotes/origin/claude/*",
+    "+refs/heads/ccr-*:refs/remotes/origin/ccr-*",
   ];
   const shallow = git("rev-parse", "--is-shallow-repository").out === "true";
   const args = ["fetch", "--quiet", "--prune", ...(shallow ? ["--unshallow"] : []), "origin", ...refs];
@@ -102,12 +106,16 @@ const isCleared = (ref) => git("log", "-1", "--format=%s", ref).out === CLEARED;
 const remoteBranches = (pattern) =>
   lines(git("for-each-ref", "--format=%(refname:short)", pattern).out).map((r) => r.replace(/^origin\//, ""));
 // main 에 없는 변경이 남은 세션 브랜치인가 (cherry 는 rebase 로 해시가 바뀐 커밋도 같은 것으로 본다)
+const sessionBranches = () => [
+  ...remoteBranches("refs/remotes/origin/claude"),
+  ...remoteBranches("refs/remotes/origin/ccr-*"),
+];
 const hasUnmerged = (b) => lines(git("cherry", "origin/main", "origin/" + b).out).some((l) => l.startsWith("+"));
 const wipBranches = () => {
   const current = currentBranch();
   return [
     ...remoteBranches("refs/remotes/origin/wip-*").filter((b) => !isCleared("origin/" + b)),
-    ...remoteBranches("refs/remotes/origin/claude").filter(
+    ...sessionBranches().filter(
       (b) => b !== current && !isCleared("origin/" + b) && hasUnmerged(b)
     ),
   ];
@@ -186,7 +194,7 @@ function pruneCleared() {
     if (isCleared("origin/" + b)) clearBranch(b);
   }
   // 세션 브랜치는 내용이 전부 main 에 들어갔을 때만 지운다
-  for (const b of remoteBranches("refs/remotes/origin/claude")) {
+  for (const b of sessionBranches()) {
     if (isCleared("origin/" + b) || !hasUnmerged(b)) clearBranch(b);
   }
 }
