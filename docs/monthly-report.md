@@ -66,4 +66,7 @@
 - 멤버 주기 시작일을 바꾸면(설정 탭) **예약 작업 일정도 같이 바꿀 것** — `due`는 '직전 주기'만 보므로, 일정이 어긋나면 그 달 리포트가
   늦어질 뿐 빠지진 않는다(다음 실행 때 같은 주기가 여전히 직전이면 쓴다. 한 주기 넘게 어긋나면 빠진다).
 - 같은 주기를 다시 쓰고 싶으면 `save`를 다시 하면 된다(`unique(member, period_start)` upsert로 덮어쓴다).
+- ⚠️ **이 클라우드 환경에선 anon 차단 검사가 거짓 실패(200)한다.** 프록시가 이 호스트로 가는 **모든** 요청의 `apikey`를
+  secret key로 덮어쓰기 때문이다(curl·`NODE_USE_ENV_PROXY=1` Node 전부). 2026-11-26 실측: 프록시 경유 `verify_rls.js` 8 FAIL ↔
+  직접 연결(그냥 `node scripts/verify_rls.js`) ALL PASS. anon 검사는 프록시를 타지 않는 기본 실행으로 하거나 PC에서 할 것.
 - secret key는 RLS를 우회한다. 이 환경에서 돌리는 스크립트는 가계부 표를 **읽기만** 하고, 쓰기는 `monthly_reports`에만 한다.
