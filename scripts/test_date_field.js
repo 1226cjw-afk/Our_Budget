@@ -23,7 +23,8 @@ const SRC = path.join(ROOT, "public", "index.html");
 const { MOCK } = require(path.join(__dirname, "lib_mock.js"));
 
 const PORT = 9416;
-const EDGE = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
+const EDGE = process.env.BROWSER || "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
+const XARGS = process.platform === "linux" ? ["--no-sandbox"] : [];   // root 로 도는 클라우드 컨테이너용
 const PROFILE = path.join(os.tmpdir(), "ourbudget-datetest");
 
 const get = p => new Promise((res, rej) => {
@@ -40,7 +41,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   const tmp = path.join(os.tmpdir(), "ourbudget-datetest.html");
   fs.writeFileSync(tmp, html, "utf8");
 
-  const edge = spawn(EDGE, ["--headless=new", `--remote-debugging-port=${PORT}`,
+  const edge = spawn(EDGE, [...XARGS, "--headless=new", `--remote-debugging-port=${PORT}`,
     `--user-data-dir=${PROFILE}`, "--no-first-run", "--no-default-browser-check",
     "--disable-gpu", "--lang=ko-KR", "about:blank"], { stdio: "ignore" });
   let up = false;

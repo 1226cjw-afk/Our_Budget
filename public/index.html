@@ -630,8 +630,10 @@ body.sheet-open{overflow:hidden}
 .m-del:hover{color:var(--exp);border-color:color-mix(in srgb,var(--exp) 40%,transparent)}
 .m-empty{font-size:.8rem;color:var(--ink-3);padding:12px 0;text-align:center}
 .m-add{display:flex;gap:8px;padding-bottom:4px}
+/* ⚠️ min-width:0 을 지우지 말 것 — flex 안의 input 은 글꼴의 평균 글자폭으로 정한 최소폭 밑으로 안 줄어들어,
+   글꼴에 따라 옆 버튼('추가'·'저장')이 화면 밖으로 25px 밀려났다(2026-11-26 리눅스 크로뮴 실측 scrollWidth 415 > 390) */
 .m-add input{
-  flex:1;padding:10px 12px;border:1px solid var(--line-2);border-radius:8px;
+  flex:1;min-width:0;padding:10px 12px;border:1px solid var(--line-2);border-radius:8px;
   background:var(--bg);color:var(--ink);font-family:inherit;font-size:1rem;
   outline:none;transition:border-color .15s;
 }
@@ -2020,7 +2022,39 @@ function buildNav(){
     `<button class="tab${k===tab?' on':''}"${k===tab?' aria-current="page"':''} onclick="goTab('${k}')"><span class="tab-ic" aria-hidden="true">${ic}</span>${lb}</button>`
   ).join("");
 }
-function goTab(k){ tab=k; buildNav(); render(); }
+/* ── 뒤로가기 = 이전 탭 (2026-11-26) ──
+   예전엔 탭 이동이 history 에 안 남아, 폰에서 뒤로가기를 누르면 앱이 통째로 닫혔다.
+   · 탭을 바꿀 때마다 기록을 하나 쌓는다(같은 탭을 다시 누르면 안 쌓는다)
+   · 뒤로가기 때 입력 시트·피커·모달이 열려 있으면 탭 대신 **그 레이어를 닫는다** — 그리고 방금 소비된 기록을 되돌려 쌓는다
+   · 맨 앞에 '바닥' 기록(base)을 하나 깔아 둔다. 거기까지 오면 안내만 띄우고, 한 번 더 누르면 그때 나간다
+     (안 깔면 시트를 연 채 첫 화면에서 뒤로가기를 누를 때 시트가 아니라 앱이 닫힌다 — popstate 가 오지 않는다)
+   · 로그인 화면이 떠 있을 땐 아무것도 하지 않는다(게이트를 뒤로가기로 지나가면 안 된다)
+   ⚠️ 레이어를 닫을 때 history.back() 을 부르는 방식으로 바꾸지 말 것 — back 은 비동기라 직후의 pushState 와 순서가 뒤집혀
+      방금 쌓은 탭 기록을 지운다. 레이어는 기록을 쌓지 않고, 뒤로가기가 왔을 때만 닫는다 */
+const navOpen = id => { const e=$(id); return !!e && e.classList.contains("open"); };
+function closeTopLayer(){
+  // 위에 뜨는 순서대로 — ESC 처리와 같은 순서(피커가 시트 위에 뜬다)
+  if(navOpen("pickerOv")){ closePicker(); return true; }
+  if(navOpen("pwOv")){ closePwChange(); return true; }
+  if(navOpen("duOv")){ closeDeviceUser(); return true; }
+  if(navOpen("overlay")){ closeSheet(); return true; }
+  return false;
+}
+function goTab(k, fromHistory){
+  if(!fromHistory && k!==tab){ try{ history.pushState({ob:1, tab:k}, ""); }catch(e){} }
+  tab=k; buildNav(); render();
+}
+function onNavBack(e){
+  if(navOpen("authOv")) return;
+  if(closeTopLayer()){ try{ history.pushState({ob:1, tab}, ""); }catch(err){} return; }
+  const s=e.state;
+  if(!s || !s.ob) return;                                   // 이 앱이 쌓은 기록이 아니다
+  if(s.tab && s.tab!==tab && TABS.some(t=>t[0]===s.tab)) goTab(s.tab, true);
+  if(s.base) toast("뒤로 버튼을 한 번 더 누르면 나가요");
+}
+// 바닥 기록 + 현재 탭 기록. 새로고침해도 다시 깔린다(기록이 하나씩 늘지만 동작엔 지장 없다)
+try{ history.replaceState({ob:1, tab, base:true}, ""); history.pushState({ob:1, tab}, ""); }catch(e){}
+window.addEventListener("popstate", onNavBack);
 function setScope(s){ scope=s; render(); }
 function setMemberFilter(m){ memberFilter=m; render(); }
 function setCatBy(v){ catBy=v; render(); }
@@ -2044,7 +2078,7 @@ function closeDeviceUser(){
 function setDeviceUser(name){
   DEVICE_USER = name || null;
   try{ name ? localStorage.setItem(DEVICE_USER_KEY,name) : localStorage.removeItem(DEVICE_USER_KEY); }catch(e){}
-  memberVal=defMember(); limitMember=defMember(); masterMember=defMember();
+  memberVal=defMember(); limitMember=defMember(); masterMember=defMember(); tyMember=defMember(); rpMember=defMember(); rpOpen=null;
   memberFilter=DEVICE_USER||"전체";
   closeDeviceUser(); renderMemberSeg(); render();
   toast(DEVICE_USER?`이 기기 사용자: ${DEVICE_USER}`:"공용 모드로 변경");
@@ -2068,7 +2102,8 @@ let _animView = null; // 마지막으로 진입 모션을 돌린 화면 — 같�
 //   · 내역 '전체' 범위 / 지난 주기 탐색(periodOffset<0)
 function needsFullRows(){
   if(periodOffset < 0) return true;
-  if(tab === "analysis" || tab === "acct") return true;
+  if(tab === "analysis" && anView !== "report") return true;   // 월간 리포트는 DB 글을 읽을 뿐이라 거래 전량이 필요 없다
+  if(tab === "acct") return true;
   if(tab === "list" && scope === "all") return true;
   return false;
 }
@@ -2303,7 +2338,7 @@ function catCard(cat,v,pct,drill){
   return `<div${clk}><div class="c-h"><div class="c-l"><div class="c-ic">${icon(cat)}</div><div class="c-nm">${esc(cat)}</div></div><span class="c-bd ${net>=0?'bg':'br'}">${net>=0?'+':''}${won(net)}</span></div>${sub}${meter}</div>`;
 }
 // 분류 카드 → 내역 탭 드릴다운 (검색어로 해당 항목만 필터, 주기·멤버 필터 유지)
-function drillTo(q){ tab="list"; searchQ=q; buildNav(); render(); }
+function drillTo(q){ searchQ=q; goTab("list"); }   // 뒤로가기로 분류 탭에 돌아올 수 있게 goTab 경유
 function viewCategory(){
   const field = catBy==="method" ? "method" : "category";
   const byBar=pills([["category","카테고리별"],["method","결제수단별"]], catBy, "setCatBy");
@@ -2425,7 +2460,7 @@ function viewLimit(){
 
   let h=memberBar(limitMember,"setLimitMember")+`<div class="sec">`;
   h+=`<div class="sec-t" style="padding-top:4px">${esc(limitMember)}의 이번 주기 한도 · ${cur.label}<span>${prog.day}/${prog.len}일째</span></div>`;
-  h+=`<div class="l-cap">막대 위 세로선이 오늘이에요 — 선보다 막대가 길면 주기 속도보다 빨리 쓰는 중. 금액은 지출−입금 기준</div>`;
+  h+=`<div class="l-cap">막대 위 세로선이 오늘이에요 — 선보다 막대가 길면 주기 속도보다 빨리 쓰는 중. 같은 카테고리의 정산·환불 입금은 빼고 계산해요</div>`;
   if(over.length) h+=`<div class="alert">⚠️ <b>${over.map(o=>esc(o.cat)).join(", ")}</b> 한도 초과!</div>`;
 
   // 종합 요약 — 한도가 설정된 카테고리 전체의 사용률
@@ -2666,7 +2701,7 @@ function buildInsights(mem, periods, rowsByPeriod, curCatArr, totExp, same, earl
   // 2) 한도 초과 / 임박 (멤버 한도 기준) — '전체' 필터에선 가족 합산 지출을 한 멤버 한도와
   //    비교하게 돼 거짓 경고가 뜨므로, 특정 멤버를 선택했을 때만 표시
   const lim=(memberFilter!=="전체"&&mem&&LIMITS[mem])||{};
-  const limUsed=limitUsage(rowsByPeriod[rowsByPeriod.length-1]||[]);   // 한도 탭과 같은 기준(지출−입금)
+  const limUsed=limitUsage(rowsByPeriod[rowsByPeriod.length-1]||[]);   // 한도 탭과 같은 기준(지출 − 정산·환불, catFlows)
   const overs=[], nears=[];
   Object.entries(lim).forEach(([c,l])=>{
     if(!l) return; const used=limUsed[c]||0, pct=limPct(used,l), st=limState(used,l);

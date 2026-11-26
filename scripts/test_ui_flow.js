@@ -14,13 +14,14 @@ const { spawn } = require("child_process");
 const ROOT = path.join(__dirname, "..");
 const SRC = process.argv[2] || path.join(ROOT, "public", "index.html");
 const { MOCK } = require(path.join(__dirname, "lib_mock.js"));
-const PORT = 9416, EDGE = "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
+const PORT = 9416, EDGE = process.env.BROWSER || "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe";
+const XARGS = process.platform === "linux" ? ["--no-sandbox"] : [];   // root 로 도는 클라우드 컨테이너용
 const get = p => new Promise((res, rej) => { http.get({ host: "127.0.0.1", port: PORT, path: p }, r => { const b = []; r.on("data", d => b.push(d)); r.on("end", () => res(Buffer.concat(b).toString())); }).on("error", rej); });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 (async () => {
   let html = fs.readFileSync(SRC, "utf8").replace("</head>", "<script>" + MOCK + "</script>\n</head>");
   const tmp = path.join(os.tmpdir(), "ourbudget-verify-ui.html"); fs.writeFileSync(tmp, html);
-  const edge = spawn(EDGE, ["--headless=new", `--remote-debugging-port=${PORT}`, `--user-data-dir=${path.join(os.tmpdir(), "ob-verify-ui")}`, "--no-first-run", "--disable-gpu", "about:blank"], { stdio: "ignore" });
+  const edge = spawn(EDGE, [...XARGS, "--headless=new", `--remote-debugging-port=${PORT}`, `--user-data-dir=${path.join(os.tmpdir(), "ob-verify-ui")}`, "--no-first-run", "--disable-gpu", "about:blank"], { stdio: "ignore" });
   for (let i = 0; i < 60; i++) { try { await get("/json/version"); break; } catch { await sleep(500); } }
   const page = JSON.parse(await get("/json/list")).find(t => t.type === "page");
   const ws = new WebSocket(page.webSocketDebuggerUrl); let id = 0; const pend = new Map();
