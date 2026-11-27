@@ -150,7 +150,7 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
   background:var(--bg);border:1px solid var(--line-2);color:var(--ink-2);
   display:flex;align-items:center;justify-content:center;transition:color .15s,border-color .15s;
 }
-.hd-btn:active{border-color:var(--ink);color:var(--ink)}
+.hd-btn:active{border-color:var(--ink);color:var(--ink);transform:scale(.95)}
 .hd-btn svg{width:15px;height:15px}
 .hd-btn.rot svg{animation:sp .75s linear infinite;color:var(--ink)}
 
@@ -200,11 +200,12 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
   flex-shrink:0;padding:6px 13px;border-radius:8px;
   font-size:.8125rem;font-weight:550;
   border:1px solid var(--line-2);color:var(--ink-2);background:transparent;
-  white-space:nowrap;transition:all .15s;
+  white-space:nowrap;transition:background .15s,border-color .15s,color .15s,transform .12s;
   /* <button>이다(옛 <span onclick>은 키보드로 못 가고 스크린리더가 버튼으로 안 읽었다).
      button 의 UA 기본값이 줄높이를 'normal'로 바꿔 높이가 34→30px로 줄어든다 — 상속으로 되돌린다 */
   line-height:inherit;letter-spacing:inherit;
 }
+.pill:active{transform:scale(.97)}
 .pill.on{background:var(--ink);border-color:var(--ink);color:var(--on-ink);font-weight:600}
 .sec{padding:0 20px}
 .g{color:var(--inc)}.r{color:var(--exp)}
@@ -239,7 +240,7 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
 }
 
 /* ── 요약 — 카드 박스 대신 세로 룰선 2칸 ── */
-.cards{display:flex;margin:0 20px;border-bottom:1px solid var(--line)}
+.cards{display:flex;margin:0;border-bottom:1px solid var(--line)}   /* .sec 안에 있다 — 여기서 20px을 또 주면 룰선이 위아래 줄과 어긋난다 */
 .card{flex:1;padding:16px 0 15px;background:none;border:none;border-radius:0}
 .card+.card{border-left:1px solid var(--line);padding-left:16px}
 .card.inc .c-v{color:var(--inc)}
@@ -254,6 +255,8 @@ button{font-family:inherit;cursor:pointer;border:none;background:none;color:inhe
   padding:20px 0 7px;
   border-bottom:1px solid var(--line-2);
   font-size:.8125rem;font-weight:650;color:var(--ink);letter-spacing:-.01em;
+  /* 스크롤해도 날짜가 헤더 밑에 붙어 있다(헤더 높이 61px). 배경이 없으면 아래 행이 비친다 */
+  position:sticky;top:61px;z-index:5;background:var(--bg);
 }
 .dtot{font-size:.75rem;color:var(--ink-3);font-weight:550}
 .item{
@@ -1168,6 +1171,7 @@ let rpOpen       = null;    // 펼친 리포트의 period_start (null = 가장 �
 let REPORTS = [], REPORTS_STATE = "idle", REPORTS_ERR = "";   // idle | loading | ready | missing(테이블 없음) | error
 let typeVal      = "지출";
 let memberVal    = null;    // 입력 시트
+let memberNew    = null;    // 새 입력에서 마지막으로 고른 멤버 — 수정 시트(editEntry)의 멤버가 다음 새 입력으로 새지 않게 따로 둔다
 let editId       = null;
 let loadError    = null;
 // 부분 로드 실패한 테이블 이름들 — 앱은 폴백으로 계속 돌지만 화면 상단 배너로 반드시 표면화한다.
@@ -1189,7 +1193,7 @@ const _nf      = new Intl.NumberFormat("ko-KR");
 const comma    = n => _nf.format(Number(n||0));
 const won      = n => comma(n)+"원";
 const wonShort = n => n>=10000 ? (n/10000).toFixed(n%10000?1:0)+"만" : comma(n);
-const icon     = c => USER_ICONS[c] || CAT_ICON[c] || "💳";
+const icon     = c => esc(USER_ICONS[c] || CAT_ICON[c] || "💳");   // ⚠️esc 필수 — 직접 입력 아이콘은 사용자 문자열이다(`<!--` 한 개로 목록이 통째로 깨졌다)
 // HTML 이스케이프 — 사용자 입력(메모·항목명·멤버명 등)을 innerHTML에 넣을 때 필수
 const esc = s => String(s==null?"":s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#39;");
 // onclick="fn('…')" 속 JS 문자열 리터럴용 — JS 이스케이프 후 HTML 이스케이프 (따옴표 든 항목명에도 안전)
@@ -1424,7 +1428,7 @@ const isAuthErr = e => !!e && (e.status===401 || /JWT|jwt expired|PGRST301|Inval
    ⚠️ showAuth()를 직접 부르지 말 것. 캐시를 남기면 다음 접속에 '로그인은 못 하는데 금액은 보이는'
    상태가 된다(bootFromSnapshot은 세션 '존재'만 보고 그린다). 예전엔 이 두 줄이 자리마다 흩어져 있었고,
    refreshData·retryLoad 두 곳은 showAuth()만 불러 캐시가 남았다 — check_authgate.js가 직접 호출을 금지한다. */
-function authLost(){ clearSnapshot(); showAuth(); }
+function authLost(){ _loadSeq++; clearSnapshot(); showAuth(); }   // _loadSeq++: 이미 출발한 loadAll 이 돌아와 로그인 화면 뒤에 금액을 그리고 스냅샷을 되살리지 않게
 
 function showAuth(){
   // 뒤 화면을 비운다 — 초기 스피너가 영원히 돌지 않게, 그리고 세션이 끊겼을 때
@@ -1783,7 +1787,7 @@ async function saveEntry(){
   if(!row.amount||!row.category||!row.account){ toast("금액·카테고리·계좌는 필수예요"); return; }
   const btn=$("saveBtn");
   btn.textContent="저장 중..."; btn.disabled=true;
-  const wasEdit=!!editId;
+  const wasEdit=!!editId, sheet=_sheetSeq;
   try {
     // 저장된 행 전체를 돌려받는다 — 그걸 그대로 ROWS에 넣어 재로드 없이 즉시 그린다(patchRows)
     const res = wasEdit
@@ -1793,11 +1797,12 @@ async function saveEntry(){
     const saved=res.data;
     backupToSheet("upsert",{id:saved.id,...row});  // 구글 시트 백업
     patchRows([saved]);
-    closeSheet(); renderKeepScroll();
+    if(sheet===_sheetSeq) closeSheet();   // 그새 닫고 새 시트를 열었으면 그 시트는 건드리지 않는다
+    renderKeepScroll();
     toast(wasEdit?"수정 완료":"저장 완료");
     syncInBackground();
   } catch(e){ toast("오류: "+e.message); }
-  finally{ btn.textContent=wasEdit?"수정하기":"저장하기"; btn.disabled=false; }
+  finally{ if(sheet===_sheetSeq) btn.textContent=wasEdit?"수정하기":"저장하기"; btn.disabled=false; }
 }
 
 // 계좌간 이동: 출금계좌 지출 + 입금계좌 입금 2건을 한 번에 생성 (category='계좌간 이동')
@@ -1815,17 +1820,19 @@ async function saveTransfer(amount){
   const inn  = { ...base, type:"입금", account:to };    // 입금계좌로 들어옴
   const btn=$("saveBtn");
   btn.textContent="저장 중..."; btn.disabled=true;
+  const sheet=_sheetSeq;
   try {
     // 삽입된 행 전체를 받아 각 행 데이터 그대로 백업(반환 순서에 의존하지 않아 id-행 매칭 안전)
     const res=await sb.from("transactions").insert([out,inn]).select();
     if(dbErr(res,"저장 오류")) return;
     (res.data||[]).forEach(row=>backupToSheet("upsert",row));  // 구글 시트 백업(출금·입금 2건)
     patchRows(res.data||[]);
-    closeSheet(); renderKeepScroll();
+    if(sheet===_sheetSeq) closeSheet();
+    renderKeepScroll();
     toast("이동 완료");
     syncInBackground();
   } catch(e){ toast("오류: "+e.message); }
-  finally{ btn.textContent="저장하기"; btn.disabled=false; }
+  finally{ if(sheet===_sheetSeq) btn.textContent="저장하기"; btn.disabled=false; }
 }
 
 async function delEntry(id){
@@ -1937,6 +1944,7 @@ async function saveIcon(emo){
 
 /* ── CSV 내보내기 (전체 거래내역, 엑셀용 UTF-8 BOM) ── */
 function exportCSV(){
+  if(ROWS_PARTIAL){ toast("전체 내역을 받는 중이에요 — 잠시 후 다시 눌러주세요"); return; }   // 최근 45일뿐인 백업이 조용히 나가면 안 된다
   if(!ROWS.length){ toast("내보낼 내역이 없어요"); return; }
   const q=v=>{ v=String(v==null?"":v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
   const lines=[["날짜","구분","멤버","카테고리","금액","결제수단","계좌","메모"].join(",")];
@@ -2078,7 +2086,7 @@ function closeDeviceUser(){
 function setDeviceUser(name){
   DEVICE_USER = name || null;
   try{ name ? localStorage.setItem(DEVICE_USER_KEY,name) : localStorage.removeItem(DEVICE_USER_KEY); }catch(e){}
-  memberVal=defMember(); limitMember=defMember(); masterMember=defMember(); tyMember=defMember(); rpMember=defMember(); rpOpen=null;
+  memberVal=defMember(); memberNew=null; limitMember=defMember(); masterMember=defMember(); tyMember=defMember(); rpMember=defMember(); rpOpen=null;
   memberFilter=DEVICE_USER||"전체";
   closeDeviceUser(); renderMemberSeg(); render();
   toast(DEVICE_USER?`이 기기 사용자: ${DEVICE_USER}`:"공용 모드로 변경");
@@ -2118,6 +2126,7 @@ function renderKeepScroll(){
 
 function render(){
   _renderSeq++;
+  if(_listObs){ _listObs.disconnect(); _listObs=null; }   // 다른 탭으로 가도 옛 #listMore(=옛 목록 전체)를 붙잡고 있었다. 내역 탭이면 after 의 armListMore 가 다시 건다
   destroyCharts();  // 분석 탭을 떠날 때 detached 캔버스를 잡고 있는 Chart 인스턴스 해제
   const hu=$("hdUserName");
   if(hu) hu.textContent = DEVICE_USER || "공용";
@@ -2459,7 +2468,7 @@ function viewLimit(){
   const proj = it => (pace>=PACE_MIN && it.used>0 && it.used/pace > it.limit) ? Math.round(it.used/pace/1000)*1000 : 0;
 
   let h=memberBar(limitMember,"setLimitMember")+`<div class="sec">`;
-  h+=`<div class="sec-t" style="padding-top:4px">${esc(limitMember)}의 이번 주기 한도 · ${cur.label}<span>${prog.day}/${prog.len}일째</span></div>`;
+  h+=`<div class="sec-t" style="padding-top:16px">${esc(limitMember)}의 이번 주기 한도 · ${cur.label}<span>${prog.day}/${prog.len}일째</span></div>`;
   h+=`<div class="l-cap">막대 위 세로선이 오늘이에요 — 선보다 막대가 길면 주기 속도보다 빨리 쓰는 중. 같은 카테고리의 정산·환불 입금은 빼고 계산해요</div>`;
   if(over.length) h+=`<div class="alert">⚠️ <b>${over.map(o=>esc(o.cat)).join(", ")}</b> 한도 초과!</div>`;
 
@@ -3076,7 +3085,7 @@ async function ensureReports(force){
   const res = await sb.from("monthly_reports").select("member,period_start,period_end,headline,md,created_at")
     .order("period_start",{ascending:false}).limit(240);
   if(res.error){
-    if(isAuthErr(res.error)){ authLost(); return; }
+    if(isAuthErr(res.error)){ REPORTS_STATE="idle"; authLost(); return; }   // idle 로 돌려야 재로그인 뒤 다시 받는다
     // PGRST205 = 테이블이 아직 없다. 조용히 '리포트 없음'으로 보이면 영영 안 오는 걸 기다리게 된다 → 설치 안내
     REPORTS_STATE = res.error.code==="PGRST205" ? "missing" : "error";
     REPORTS_ERR = res.error.message || "";
@@ -3588,7 +3597,7 @@ function viewMaster(){
   h+=`<div class="m-section">
     <div class="m-title">데이터 내보내기</div>
     <div style="font-size:.8rem;color:var(--ink-2);margin-bottom:12px;line-height:1.7">
-      전체 거래내역 <b style="color:var(--ink)">${ROWS.length}건</b>을 CSV 파일로 저장합니다. 엑셀·구글시트에서 바로 열 수 있어요.
+      전체 거래내역 <b style="color:var(--ink)">${ROWS_PARTIAL?"(불러오는 중)":ROWS.length+"건"}</b>을 CSV 파일로 저장합니다. 엑셀·구글시트에서 바로 열 수 있어요.
     </div>
     <button class="m-save" style="width:100%;padding:12px" onclick="exportCSV()">📥 CSV 다운로드</button>
   </div>`;
@@ -3731,7 +3740,7 @@ function refreshCatList(){
 function renderMemberSeg(){
   $("memberSeg").innerHTML=segBtns(MEMBERS, memberVal, "setMember");
 }
-function setMember(m){ memberVal=m; renderMemberSeg(); refreshCatList(); autoAccount(); }
+function setMember(m){ memberVal=m; if(editId==null) memberNew=m; renderMemberSeg(); refreshCatList(); autoAccount(); }
 function setType(t){
   typeVal=t;
   $("tgExp").className="tg"+(t==="지출"?" tg-e":"");
@@ -3754,7 +3763,7 @@ function openSheet(){
   $("fAmount").value="";
   $("tgTrf").style.display="";  // 신규 입력에서만 이동 허용
   setType("지출");
-  memberVal=memberVal||defMember();
+  memberVal=(memberNew&&MEMBERS.includes(memberNew))?memberNew:defMember();
   renderMemberSeg();
   refreshCatList();
   autoAccount();
@@ -3793,7 +3802,8 @@ function ensureOpt(selId,val){
   sel.value=val||"";
 }
 function showSheet(){ $("overlay").classList.add("open"); document.body.classList.add("sheet-open"); }
-function closeSheet(){ $("overlay").classList.remove("open"); document.body.classList.remove("sheet-open"); editId=null; }
+let _sheetSeq = 0;   // 시트를 닫을 때마다 오른다 — 저장 응답이 돌아왔을 때 그 시트가 아직 열려 있는지 판정
+function closeSheet(){ _sheetSeq++; $("overlay").classList.remove("open"); document.body.classList.remove("sheet-open"); editId=null; }
 $("fAmount").addEventListener("input",e=>fmtNum(e.target));
 
 /* ESC 키로 열린 레이어 닫기 (피커 → 기기사용자 모달 → 입력 시트 순) */

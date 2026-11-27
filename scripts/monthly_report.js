@@ -49,7 +49,10 @@ function loadApp(){
                 Number, String, RegExp, Error };
   Object.assign(ctx, { window:ctx, document:any(), navigator:{}, location:{},
     localStorage:{ getItem:() => null, setItem(){}, removeItem(){} },
-    supabase:{ createClient:() => any() }, getComputedStyle:() => ({ getPropertyValue:() => "" }) });
+    supabase:{ createClient:() => any() }, getComputedStyle:() => ({ getPropertyValue:() => "" }),
+    // 앱이 시작 시점에 '부르는' 브라우저 API — 뒤로가기(2026-11-26)가 최상위에서 history·addEventListener 를 쓴다.
+    // ctx 가 window 라 Proxy(any) 로는 안 덮인다. 빠지면 due 부터 "window.addEventListener is not a function"으로 죽는다
+    addEventListener(){}, removeEventListener(){}, history:{ pushState(){}, replaceState(){}, back(){} } });
   vm.createContext(ctx);
   vm.runInContext(code + "\n;globalThis.__x = e => eval(e);", ctx);
   return ctx.__x;
